@@ -1,0 +1,75 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Tema escuro (padrão) */
+  --bg: #0b0b14;
+  --glass-bg: rgba(255, 255, 255, 0.045);
+  --glass-border: rgba(255, 255, 255, 0.09);
+  --glass-hover: rgba(255, 255, 255, 0.07);
+  --text: #eef0f7;
+  --dim: #9aa0b5;
+  --faint: #5a607a;
+  --accent: #6366f1;
+  --accent2: #14b8a6;
+  --ok: #22d3a5;
+  --warn: #fbbf24;
+  --danger: #f87171;
+  --shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+}
+
+.light {
+  --bg: #e9edf5;
+  --glass-bg: rgba(255, 255, 255, 0.7);
+  --glass-border: rgba(15, 23, 42, 0.08);
+  --glass-hover: rgba(255, 255, 255, 0.92);
+  --text: #1e293b;
+  --dim: #64748b;
+  --faint: #94a3b8;
+  --shadow: 0 8px 30px rgba(15, 23, 42, 0.08);
+}
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+
+body {
+  color: var(--text);
+  font-family: Inter, system-ui, sans-serif;
+  background: var(--bg);
+  position: relative;
+  overflow: hidden;
+  transition: background 0.3s ease, color 0.3s ease;
+}
+
+/* Blobs de cor para o vidro refratar */
+body::before, body::after {
+  content: '';
+  position: fixed;
+  border-radius: 50%;
+  filter: blur(90px);
+  opacity: 0.55;
+  z-index: 0;
+  pointer-events: none;
+}
+body::before { width: 480px; height: 480px; background: radial-gradient(circle, #6366f1, transparent 70%); top: -120px; left: -60px; }
+body::after  { width: 520px; height: 520px; background: radial-gradient(circle, #14b8a6, transparent 70%); bottom: -160px; right: -80px; }
+
+.glass {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: var(--shadow);
+}
+
+.num { font-variant-numeric: tabular-nums; }
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--glass-border); border-radius: 8px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; }
+}
