@@ -60,6 +60,7 @@ export const api = {
   salvarNfeConfig: (b) => req('/api/nfe/config', { method: 'PUT', body: b }),
   nfePendentes: () => req('/api/nfe/pendentes'),
   nfeObter: (id) => req(`/api/nfe/${id}`),
+  nfeCompleta: (id) => req(`/api/nfe/${id}/completa`),
   nfeSimular: (b) => req('/api/nfe/simular', { method: 'POST', body: b }),
   nfeAplicar: (id, b) => req(`/api/nfe/${id}/aplicar`, { method: 'POST', body: b }),
   nfeAutoProcessar: () => req('/api/nfe/auto/processar', { method: 'POST' }),

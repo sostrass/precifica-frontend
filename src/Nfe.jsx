@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import {
   FileText, Settings2, Plug, RefreshCw, Plus, Trash2, Send, Percent, DollarSign,
-  Truck, Lock, ChevronRight, Zap, Info,
+  Truck, Lock, ChevronRight, Zap, Info, X, Download, ExternalLink, User, Receipt, MapPin,
 } from 'lucide-react'
 import { api } from './api.js'
 import { useToast } from './toast.jsx'
@@ -15,6 +15,8 @@ export default function Nfe() {
   const [blingErro, setBlingErro] = useState(false)
   const [nota, setNota] = useState(null)
   const [showCfg, setShowCfg] = useState(false)
+  const [completa, setCompleta] = useState(null)
+  const [consultaId, setConsultaId] = useState('')
 
   useEffect(() => {
     api.nfeConfig().then(setCfg).catch(() => {})
@@ -43,6 +45,13 @@ export default function Nfe() {
     }
   }
 
+  const verCompleta = async (id) => {
+    if (!String(id || '').trim()) return
+    try {
+      setCompleta(await api.nfeCompleta(String(id).trim()))
+    } catch (e) { notify(e.message, 'danger') }
+  }
+
   const simularManual = () => {
     setNota({
       _manual: true, id: null, numero: 'Simulação', serie: '—',
@@ -58,18 +67,27 @@ export default function Nfe() {
         <div className="flex items-center gap-2 text-sm font-semibold">
           <FileText size={18} className="text-accent" /> Notas fiscais (NF-e)
         </div>
-        <button
-          onClick={() => setShowCfg((v) => !v)}
-          className="ml-auto glass rounded-xl px-3 py-2 text-sm text-dim hover:text-fg flex items-center gap-2"
-        >
-          <Settings2 size={15} /> Regras
-        </button>
-        <button
-          onClick={carregarPendentes}
-          className="glass rounded-xl px-3 py-2 text-sm text-dim hover:text-fg flex items-center gap-2"
-        >
-          <RefreshCw size={15} /> Atualizar
-        </button>
+        <div className="ml-auto flex items-center gap-2">
+          <div className="glass rounded-xl flex items-center gap-2 px-2 py-1.5">
+            <input value={consultaId} onChange={(e) => setConsultaId(e.target.value)}
+                   onKeyDown={(e) => e.key === 'Enter' && verCompleta(consultaId)}
+                   placeholder="ID da nota…"
+                   className="bg-transparent outline-none text-sm w-28 text-fg num" />
+            <button onClick={() => verCompleta(consultaId)} className="text-xs text-accent hover:underline shrink-0">Ver nota</button>
+          </div>
+          <button
+            onClick={() => setShowCfg((v) => !v)}
+            className="glass rounded-xl px-3 py-2 text-sm text-dim hover:text-fg flex items-center gap-2"
+          >
+            <Settings2 size={15} /> Regras
+          </button>
+          <button
+            onClick={carregarPendentes}
+            className="glass rounded-xl px-3 py-2 text-sm text-dim hover:text-fg flex items-center gap-2"
+          >
+            <RefreshCw size={15} /> Atualizar
+          </button>
+        </div>
       </div>
 
       {showCfg && cfg && <ConfigCard cfg={cfg} setCfg={setCfg} />}
@@ -94,6 +112,8 @@ export default function Nfe() {
           ? <Editor key={nota.id || 'manual'} nota={nota} cfg={cfg} onAplicado={carregarPendentes} />
           : <VazioEditor />}
       </div>
+
+      {completa && <NfeDetalhe nota={completa} onClose={() => setCompleta(null)} />}
     </div>
   )
 }
@@ -370,5 +390,114 @@ function Toggle({ label, desc, on, onChange }) {
       </button>
       {desc && <div className="text-[10px] text-faint mt-1">{desc}</div>}
     </div>
+  )
+}
+
+/* ------------------------- Nota completa (modal) ------------------------- */
+function NfeDetalhe({ nota, onClose }) {
+  const n = nota
+  const dest = n.destinatario || {}
+  const corSit = n.editavel ? 'var(--warn)' : (n.situacao === 2 ? 'var(--danger)' : 'var(--ok)')
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center p-4 sm:p-8 overflow-y-auto"
+         style={{ background: 'rgba(0,0,0,.6)', backdropFilter: 'blur(3px)' }} onClick={onClose}>
+      <div className="glass rounded-2xl w-full max-w-2xl my-auto" onClick={(e) => e.stopPropagation()} style={{ background: 'var(--bg)' }}>
+        {/* Cabeçalho */}
+        <div className="flex items-start gap-3 p-5 border-b" style={{ borderColor: 'var(--glass-border)' }}>
+          <div className="h-10 w-10 rounded-xl grid place-items-center shrink-0" style={{ background: 'linear-gradient(135deg, var(--accent), var(--accent2))' }}>
+            <FileText size={18} className="text-white" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="font-display font-semibold">NF-e nº {n.numero} <span className="text-faint font-normal">· série {n.serie}</span></div>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-[11px] px-2 py-0.5 rounded-full" style={{ background: corSit + '26', color: corSit }}>{n.situacao_label}</span>
+              {n.data_emissao && <span className="text-[11px] text-faint num">{n.data_emissao}</span>}
+              {n.simples_nacional && <span className="text-[11px] text-faint">Simples Nacional</span>}
+            </div>
+          </div>
+          <button onClick={onClose} className="text-dim hover:text-fg p-1"><X size={20} /></button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          {/* Trava fiscal */}
+          {!n.editavel && (
+            <div className="rounded-xl px-3 py-2 text-xs flex items-start gap-2 border" style={{ borderColor: 'var(--ok)', background: 'var(--glass-hover)' }}>
+              <Lock size={13} className="mt-0.5 shrink-0" style={{ color: 'var(--ok)' }} />
+              <span className="text-dim">Nota <b className="text-fg">{n.situacao_label.toLowerCase()}</b> — é um documento fiscal imutável. Para corrigir, use carta de correção ou cancelamento + reemissão (no Bling).</span>
+            </div>
+          )}
+
+          {/* Destinatário */}
+          <Bloco titulo="Destinatário" icon={<User size={14} />}>
+            <div className="text-sm font-medium">{dest.nome || '—'}</div>
+            <div className="text-xs text-dim num">{dest.documento || ''}</div>
+            {dest.endereco && <div className="text-xs text-dim flex items-start gap-1 mt-1"><MapPin size={12} className="mt-0.5 shrink-0" /> {dest.endereco}</div>}
+          </Bloco>
+
+          {/* Totais */}
+          <div className="grid grid-cols-3 gap-2">
+            <Mini label="Valor da nota" valor={brl(n.valor_nota)} forte />
+            <Mini label="Frete" valor={brl(n.valor_frete)} />
+            <Mini label="Itens" valor={(n.itens || []).length} />
+          </div>
+
+          {/* Itens */}
+          <Bloco titulo="Itens" icon={<Receipt size={14} />}>
+            <div className="space-y-1.5">
+              {(n.itens || []).map((it, i) => (
+                <div key={i} className="flex items-center gap-2 text-sm border-b last:border-0 pb-1.5" style={{ borderColor: 'var(--glass-border)' }}>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate">{it.descricao}</div>
+                    <div className="text-[10px] text-faint num">{it.codigo} · NCM {it.ncm} · CFOP {it.cfop}</div>
+                  </div>
+                  <div className="text-xs text-dim num shrink-0">{it.quantidade}×</div>
+                  <div className="num font-medium shrink-0 w-20 text-right">{brl(it.valor_total)}</div>
+                </div>
+              ))}
+            </div>
+          </Bloco>
+
+          {/* Transporte */}
+          <Bloco titulo="Transporte" icon={<Truck size={14} />}>
+            <div className="text-xs text-dim">Transportadora: <span className="text-fg">{n.transporte?.transportador || '—'}</span></div>
+          </Bloco>
+
+          {/* Chave + documentos */}
+          {n.chave_acesso && (
+            <div className="text-[10px] text-faint num break-all">Chave: {n.chave_acesso}</div>
+          )}
+          <div className="flex flex-wrap gap-2">
+            {n.link_danfe && <Doc href={n.link_danfe} label="DANFE" />}
+            {n.link_pdf && <Doc href={n.link_pdf} label="PDF" />}
+            {n.link_xml && <Doc href={n.link_xml} label="XML" />}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function Bloco({ titulo, icon, children }) {
+  return (
+    <div className="rounded-xl border border-glassb p-3">
+      <div className="text-[11px] uppercase tracking-wide text-faint flex items-center gap-1.5 mb-2">{icon} {titulo}</div>
+      {children}
+    </div>
+  )
+}
+function Mini({ label, valor, forte }) {
+  return (
+    <div className="rounded-xl border border-glassb px-3 py-2">
+      <div className="text-[10px] text-faint uppercase tracking-wide">{label}</div>
+      <div className={'num ' + (forte ? 'font-bold text-accent' : 'font-medium')}>{valor}</div>
+    </div>
+  )
+}
+function Doc({ href, label }) {
+  return (
+    <a href={href} target="_blank" rel="noreferrer"
+       className="text-xs rounded-lg px-3 py-1.5 flex items-center gap-1.5 border border-glassb text-dim hover:text-accent hover:border-accent transition">
+      <Download size={13} /> {label} <ExternalLink size={11} />
+    </a>
   )
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { X, Save, Tag, Check, Sparkles, Loader2, Gauge, ShieldCheck, AlertCircle } from 'lucide-react'
+import { X, Save, Tag, Check, Sparkles, Loader2, Gauge, ShieldCheck, AlertCircle, Image as ImageIcon, Boxes } from 'lucide-react'
 import { api } from './api.js'
 import { useToast } from './toast.jsx'
 
@@ -55,6 +55,7 @@ export default function ProdutoModal({ produtoId, onClose, onSaved }) {
 
   const ABAS = [
     { id: 'dados', label: 'Dados', icon: Tag },
+    { id: 'midia', label: 'Mídia', icon: ImageIcon },
     { id: 'saude', label: 'Saúde & SEO', icon: Gauge },
     { id: 'preco', label: 'Preço', icon: Sparkles },
   ]
@@ -97,6 +98,16 @@ export default function ProdutoModal({ produtoId, onClose, onSaved }) {
             <div className="p-5">
               {tab === 'dados' && (
                 <div className="grid grid-cols-2 gap-3">
+                  <div className="col-span-2 flex flex-wrap gap-2 text-[11px]">
+                    <span className="px-2 py-1 rounded-lg border border-glassb flex items-center gap-1 text-dim">
+                      <Boxes size={12} /> Estoque: <b className="num text-fg">{d.estoque ?? '—'}</b>
+                    </span>
+                    {d.marca && <span className="px-2 py-1 rounded-lg border border-glassb text-dim">Marca: <b className="text-fg">{d.marca}</b></span>}
+                    {d.unidade && <span className="px-2 py-1 rounded-lg border border-glassb text-dim">Unid.: <b className="text-fg">{d.unidade}</b></span>}
+                    {d.dimensoes && (d.dimensoes.largura || d.dimensoes.altura) && (
+                      <span className="px-2 py-1 rounded-lg border border-glassb text-dim num">{d.dimensoes.largura}×{d.dimensoes.altura}×{d.dimensoes.profundidade} cm</span>
+                    )}
+                  </div>
                   <Campo className="col-span-2" label="Nome" value={form.nome} onChange={(v) => set('nome', v)} />
                   <Campo label="Preço (R$)" type="number" value={form.preco} onChange={(v) => set('preco', v)} />
                   <Campo label="Custo (R$)" type="number" value={form.custo} onChange={(v) => set('custo', v)} />
@@ -119,6 +130,30 @@ export default function ProdutoModal({ produtoId, onClose, onSaved }) {
               )}
 
               {tab === 'saude' && <SaudePanel q={d.qualidade} />}
+
+              {tab === 'midia' && (
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-xs text-dim">Imagens cadastradas no Bling para este produto.</p>
+                    <span className="text-xs text-faint num">{(d.fotos || []).length} foto(s)</span>
+                  </div>
+                  {(d.fotos || []).length === 0 ? (
+                    <div className="text-sm text-dim text-center py-8 border border-dashed rounded-xl" style={{ borderColor: 'var(--glass-border)' }}>
+                      Nenhuma imagem cadastrada neste produto.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-3 gap-2">
+                      {d.fotos.map((src, i) => (
+                        <a key={i} href={src} target="_blank" rel="noreferrer"
+                           className="aspect-square rounded-xl overflow-hidden border border-glassb bg-glass block group relative">
+                          <img src={src} alt={`Foto ${i + 1}`} loading="lazy" className="w-full h-full object-cover group-hover:scale-105 transition" />
+                          {i === 0 && <span className="absolute top-1 left-1 text-[9px] px-1.5 py-0.5 rounded-md text-white" style={{ background: 'var(--accent)' }}>capa</span>}
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {tab === 'preco' && (
                 <div>
