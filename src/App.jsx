@@ -1,17 +1,20 @@
-import { useEffect, useState } from 'react'
-import { LayoutDashboard, Boxes, Calculator, Settings, Sun, Moon, LogOut, Plug } from 'lucide-react'
+import { useEffect, useState, lazy, Suspense } from 'react'
+import { LayoutDashboard, Boxes, Calculator, SatelliteDish, Settings, Sun, Moon, LogOut, Plug } from 'lucide-react'
 import { api, getToken, setToken } from './api.js'
 import { useToast } from './toast.jsx'
 import Login from './Login.jsx'
-import Dashboard from './Dashboard.jsx'
-import Catalogo from './Catalogo.jsx'
-import Precificacao from './Precificacao.jsx'
-import Configuracoes from './Configuracoes.jsx'
+
+const Dashboard = lazy(() => import('./Dashboard.jsx'))
+const Catalogo = lazy(() => import('./Catalogo.jsx'))
+const Precificacao = lazy(() => import('./Precificacao.jsx'))
+const Radar = lazy(() => import('./Radar.jsx'))
+const Configuracoes = lazy(() => import('./Configuracoes.jsx'))
 
 const TITULOS = {
   dashboard: 'Inteligência Comercial',
   catalogo: 'Catálogo',
   precificacao: 'Precificação por canal',
+  radar: 'Radar de mercado',
   configuracoes: 'Configurações',
 }
 
@@ -67,6 +70,7 @@ export default function App() {
           <NavItem icon={<LayoutDashboard size={18} />} label="Dashboard" active={view === 'dashboard'} onClick={() => setView('dashboard')} />
           <NavItem icon={<Boxes size={18} />} label="Catálogo" active={view === 'catalogo'} onClick={() => setView('catalogo')} />
           <NavItem icon={<Calculator size={18} />} label="Precificação" active={view === 'precificacao'} onClick={() => setView('precificacao')} />
+          <NavItem icon={<SatelliteDish size={18} />} label="Radar" active={view === 'radar'} onClick={() => setView('radar')} />
           <NavItem icon={<Settings size={18} />} label="Configurações" active={view === 'configuracoes'} onClick={() => setView('configuracoes')} />
         </nav>
 
@@ -106,10 +110,13 @@ export default function App() {
         </header>
 
         <main className="flex-1 overflow-auto">
-          {view === 'dashboard' && <Dashboard />}
-          {view === 'catalogo' && <Catalogo />}
-          {view === 'precificacao' && <Precificacao />}
-          {view === 'configuracoes' && <Configuracoes />}
+          <Suspense fallback={<div className="text-dim text-sm p-4">Carregando…</div>}>
+            {view === 'dashboard' && <Dashboard />}
+            {view === 'catalogo' && <Catalogo />}
+            {view === 'precificacao' && <Precificacao />}
+            {view === 'radar' && <Radar />}
+            {view === 'configuracoes' && <Configuracoes />}
+          </Suspense>
         </main>
       </div>
     </div>
