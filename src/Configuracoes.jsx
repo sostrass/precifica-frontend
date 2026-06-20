@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import {
-  Plug, SlidersHorizontal, Store, Plus, Trash2, Save, RotateCcw, Power, Info,
+  Plug, SlidersHorizontal, Store, Plus, Trash2, Save, RotateCcw, Power, Info, Stethoscope,
 } from 'lucide-react'
 import { api } from './api.js'
 import { useToast } from './toast.jsx'
@@ -191,6 +191,62 @@ export default function Configuracoes() {
           <RotateCcw size={15} /> Restaurar padrões
         </button>
       </div>
+
+      <Diagnostico />
+    </div>
+  )
+}
+
+function Diagnostico() {
+  const [tipo, setTipo] = useState('produto')
+  const [id, setId] = useState('')
+  const [out, setOut] = useState('')
+  const [carregando, setCarregando] = useState(false)
+  const [copiado, setCopiado] = useState(false)
+
+  const buscar = async () => {
+    if (!id.trim()) return
+    setCarregando(true); setOut('')
+    try {
+      const j = tipo === 'produto' ? await api.diagProduto(id.trim()) : await api.diagNfe(id.trim())
+      setOut(JSON.stringify(j, null, 2))
+    } catch (e) { setOut('ERRO: ' + e.message) }
+    setCarregando(false)
+  }
+  const copiar = () => { navigator.clipboard.writeText(out); setCopiado(true); setTimeout(() => setCopiado(false), 1500) }
+
+  return (
+    <div className="glass rounded-2xl p-5">
+      <div className="flex items-center gap-2 text-sm font-semibold mb-1">
+        <span className="text-accent"><Stethoscope size={16} /></span> Diagnóstico do Bling
+      </div>
+      <p className="text-xs text-dim mb-4">Mostra o JSON cru de um produto ou nota — use pra me mandar o dado real e eu construir as telas (fotos, canais, NF-e) sem chute.</p>
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="text-sm">
+          <span className="text-xs text-dim block mb-1">Tipo</span>
+          <select value={tipo} onChange={(e) => setTipo(e.target.value)}
+                  className="rounded-xl px-3 py-2 text-sm bg-glass border border-glassb text-fg outline-none focus:border-accent">
+            <option value="produto">Produto</option>
+            <option value="nfe">NF-e</option>
+          </select>
+        </label>
+        <label className="text-sm flex-1 min-w-[160px]">
+          <span className="text-xs text-dim block mb-1">ID no Bling</span>
+          <input value={id} onChange={(e) => setId(e.target.value)} placeholder="ex.: 26129483405"
+                 className="w-full rounded-xl px-3 py-2 text-sm bg-glass border border-glassb text-fg outline-none focus:border-accent num" />
+        </label>
+        <button onClick={buscar} disabled={carregando}
+                className="rounded-xl px-4 py-2 text-sm font-medium text-white disabled:opacity-60" style={{ background: 'var(--accent)' }}>
+          {carregando ? 'Buscando…' : 'Buscar JSON'}
+        </button>
+      </div>
+      {out && (
+        <div className="mt-3">
+          <button onClick={copiar} className="text-xs text-accent hover:underline mb-1">{copiado ? 'copiado!' : 'copiar tudo'}</button>
+          <textarea readOnly value={out} rows={12}
+                    className="w-full rounded-xl px-3 py-2 text-[11px] num bg-glass border border-glassb text-dim outline-none resize-y" />
+        </div>
+      )}
     </div>
   )
 }
