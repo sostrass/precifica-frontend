@@ -43,4 +43,12 @@ export const api = {
   radarVarrer: (b) => req('/api/radar/varrer', { method: 'POST', body: b }),
   radarHistorico: (sku, dias = 7) => req(`/api/radar/historico?sku=${encodeURIComponent(sku)}&dias=${dias}`),
   radarRecomendacao: (b) => req('/api/radar/recomendacao', { method: 'POST', body: b }),
+  // NF-e
+  nfeConfig: () => req('/api/nfe/config'),
+  salvarNfeConfig: (b) => req('/api/nfe/config', { method: 'PUT', body: b }),
+  nfePendentes: () => req('/api/nfe/pendentes'),
+  nfeObter: (id) => req(`/api/nfe/${id}`),
+  nfeSimular: (b) => req('/api/nfe/simular', { method: 'POST', body: b }),
+  nfeAplicar: (id, b) => req(`/api/nfe/${id}/aplicar`, { method: 'POST', body: b }),
+  nfeAutoProcessar: () => req('/api/nfe/auto/processar', { method: 'POST' }),
 }
