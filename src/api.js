@@ -48,6 +48,8 @@ export const api = {
   radarSnapshot: (b) => req('/api/radar/snapshot', { method: 'POST', body: b }),
   radarVarrer: (b) => req('/api/radar/varrer', { method: 'POST', body: b }),
   radarHistorico: (sku, dias = 7) => req(`/api/radar/historico?sku=${encodeURIComponent(sku)}&dias=${dias}`),
+  radarAlertas: (dias = 7) => req(`/api/radar/alertas?dias=${dias}`),
+  radarVarrerTudo: () => req('/api/radar/varrer-tudo', { method: 'POST' }),
   radarRecomendacao: (b) => req('/api/radar/recomendacao', { method: 'POST', body: b }),
   // NF-e
   nfeConfig: () => req('/api/nfe/config'),

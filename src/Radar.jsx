@@ -4,7 +4,7 @@ import {
 } from 'recharts'
 import {
   SatelliteDish, RefreshCw, Plus, Trash2, Target, TrendingDown, TrendingUp,
-  Minus, Lock, Gauge, Radar as RadarIcon,
+  Minus, Lock, Gauge, Bell, Radar as RadarIcon,
 } from 'lucide-react'
 import { api } from './api.js'
 import { useToast } from './toast.jsx'
@@ -23,6 +23,7 @@ export default function Radar() {
   const [dias, setDias] = useState(7)
   const [hist, setHist] = useState(null)
   const [scanning, setScanning] = useState(false)
+  const [nonce, setNonce] = useState(0)
 
   const carregarAlvos = async () => {
     const r = await api.radarAlvos()
@@ -54,6 +55,7 @@ export default function Radar() {
       notify(`Varredura concluída — ${achou}/${r.varridos} preços capturados`, achou ? 'ok' : 'warn')
       const h = await api.radarHistorico(sku, dias)
       setHist(h)
+      setNonce((n) => n + 1)
     } catch (e) {
       notify(e.message, 'danger')
     }
@@ -101,6 +103,7 @@ export default function Radar() {
         <EmptyStart sku={sku} onAdded={async (novoSku) => { await carregarAlvos(); setSku(novoSku) }} />
       ) : (
         <>
+          <AlertasPanel dias={dias} nonce={nonce} />
           <StatsRow stats={hist?.estatisticas} />
           <HistoryChart series={hist?.series || []} />
           <div className="grid gap-4" style={{ gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.3fr)' }}>
@@ -111,6 +114,54 @@ export default function Radar() {
             <RecomendacaoPanel sku={sku} />
           </div>
         </>
+      )}
+    </div>
+  )
+}
+
+/* ------------------------------- Alertas -------------------------------- */
+function AlertasPanel({ dias, nonce }) {
+  const [data, setData] = useState(null)
+  useEffect(() => {
+    api.radarAlertas(dias).then(setData).catch(() => setData({ alertas: [], resumo: { total: 0 } }))
+  }, [dias, nonce])
+
+  if (!data) return null
+  const { alertas, resumo } = data
+  const SEV = {
+    alta: 'var(--danger)',
+    media: 'var(--warn)',
+    baixa: 'var(--accent2)',
+  }
+  return (
+    <div className="glass rounded-2xl p-5">
+      <div className="flex items-center gap-2 mb-3">
+        <Bell size={17} className="text-accent" />
+        <span className="font-semibold text-sm">Alertas do radar</span>
+        {resumo.total > 0 && (
+          <span className="num text-[11px] px-2 py-0.5 rounded-full text-white" style={{ background: 'var(--accent)' }}>
+            {resumo.total}
+          </span>
+        )}
+        <span className="text-[11px] text-faint ml-auto">últimos {dias} dias</span>
+      </div>
+      {resumo.total === 0 ? (
+        <div className="text-sm text-dim py-3 text-center">Sem mudanças relevantes — mercado calmo por enquanto.</div>
+      ) : (
+        <div className="space-y-1.5">
+          {alertas.map((a, i) => (
+            <div key={i} className="flex items-center gap-3 rounded-xl border border-glassb px-3 py-2">
+              <span className="h-2 w-2 rounded-full shrink-0" style={{ background: SEV[a.severidade] || SEV.baixa }} />
+              <div className="text-sm flex-1 min-w-0 truncate">{a.mensagem}</div>
+              {a.marketplace && (
+                <span className="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-md shrink-0"
+                      style={{ background: 'var(--glass-hover)', color: 'var(--dim)' }}>
+                  {a.marketplace}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
       )}
     </div>
   )
