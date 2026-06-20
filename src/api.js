@@ -30,6 +30,12 @@ export const api = {
   precificarLote: (b) => req('/api/precificar/lote', { method: 'POST', body: b }),
   concorrenciaPrecos: (b) => req('/api/concorrencia/precos', { method: 'POST', body: b }),
   iaDescricao: (b) => req('/api/ia/descricao', { method: 'POST', body: b }),
+  iaSac: (b) => req('/api/ia/sac', { method: 'POST', body: b }),
+  qualidadeCadastro: (b) => req('/api/qualidade/cadastro', { method: 'POST', body: b }),
+  estudioImagem: (b) => req('/api/estudio/imagem', { method: 'POST', body: b }),
+  // Agentes
+  listarAgentes: () => req('/api/agentes'),
+  agenteMensagem: (agente, b) => req(`/api/agentes/${agente}/mensagem`, { method: 'POST', body: b }),
   // Precificação por canal (faixas)
   precificacaoConfig: () => req('/api/precificacao/config'),
   salvarPrecificacaoConfig: (b) => req('/api/precificacao/config', { method: 'PUT', body: b }),
