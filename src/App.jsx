@@ -1,10 +1,19 @@
 import { useEffect, useState } from 'react'
-import { LayoutDashboard, Boxes, Sun, Moon, LogOut, Plug } from 'lucide-react'
+import { LayoutDashboard, Boxes, Calculator, Settings, Sun, Moon, LogOut, Plug } from 'lucide-react'
 import { api, getToken, setToken } from './api.js'
 import { useToast } from './toast.jsx'
 import Login from './Login.jsx'
 import Dashboard from './Dashboard.jsx'
 import Catalogo from './Catalogo.jsx'
+import Precificacao from './Precificacao.jsx'
+import Configuracoes from './Configuracoes.jsx'
+
+const TITULOS = {
+  dashboard: 'Inteligência Comercial',
+  catalogo: 'Catálogo',
+  precificacao: 'Precificação por canal',
+  configuracoes: 'Configurações',
+}
 
 export default function App() {
   const notify = useToast()
@@ -50,13 +59,15 @@ export default function App() {
             ◆
           </div>
           <div className="font-display font-bold text-lg leading-none">
-            Sóstrass<span className="text-accent"> AI</span>
+            Precifica<span className="text-accent"> AI</span>
           </div>
         </div>
 
         <nav className="mt-4 space-y-1">
           <NavItem icon={<LayoutDashboard size={18} />} label="Dashboard" active={view === 'dashboard'} onClick={() => setView('dashboard')} />
           <NavItem icon={<Boxes size={18} />} label="Catálogo" active={view === 'catalogo'} onClick={() => setView('catalogo')} />
+          <NavItem icon={<Calculator size={18} />} label="Precificação" active={view === 'precificacao'} onClick={() => setView('precificacao')} />
+          <NavItem icon={<Settings size={18} />} label="Configurações" active={view === 'configuracoes'} onClick={() => setView('configuracoes')} />
         </nav>
 
         <div className="mt-auto space-y-2">
@@ -86,7 +97,7 @@ export default function App() {
       <div className="flex-1 flex flex-col min-w-0 p-3 gap-3">
         <header className="glass rounded-2xl px-5 py-3 flex items-center justify-between">
           <div className="font-display font-semibold">
-            {view === 'dashboard' ? 'Inteligência Comercial' : 'Catálogo'}
+            {TITULOS[view] || 'Precifica AI'}
           </div>
           <span className="text-xs font-medium px-3 py-1 rounded-full glass flex items-center gap-2">
             <span className="h-2 w-2 rounded-full" style={{ background: blingOk ? 'var(--ok)' : 'var(--faint)' }} />
@@ -95,7 +106,10 @@ export default function App() {
         </header>
 
         <main className="flex-1 overflow-auto">
-          {view === 'dashboard' ? <Dashboard /> : <Catalogo />}
+          {view === 'dashboard' && <Dashboard />}
+          {view === 'catalogo' && <Catalogo />}
+          {view === 'precificacao' && <Precificacao />}
+          {view === 'configuracoes' && <Configuracoes />}
         </main>
       </div>
     </div>

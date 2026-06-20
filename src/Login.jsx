@@ -29,10 +29,11 @@ export default function Login({ onAuth }) {
     <div className="h-full w-full grid place-items-center relative z-10 p-4">
       <div className="glass rounded-3xl p-8 w-full max-w-sm">
         <div className="text-center mb-6">
-          <div className="font-display text-2xl font-bold text-fg">
-            Sóstrass<span className="text-accent"> AI</span>
+          <div className="font-display text-3xl font-bold brand-precifica">
+            Precifica AI
           </div>
-          <p className="text-dim text-sm mt-1">Precificação e inteligência de mercado</p>
+          <p className="brand-by mt-1.5">by <b>Sóstrass</b></p>
+          <p className="text-dim text-sm mt-2">Precificação e inteligência de mercado</p>
         </div>
 
         <div className="space-y-3">
