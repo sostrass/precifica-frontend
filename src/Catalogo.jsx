@@ -3,6 +3,7 @@ import { Search, RefreshCw, Plug, X, Check, Zap, Radar } from 'lucide-react'
 import { api, DEFAULT_CUSTOS } from './api.js'
 import { useToast } from './toast.jsx'
 import RadarDrawer from './RadarDrawer.jsx'
+import ProdutoModal from './ProdutoModal.jsx'
 
 const STATUS = {
   lucro_ideal: { txt: 'Saudável', cor: 'var(--ok)' },
@@ -19,6 +20,7 @@ export default function Catalogo() {
   const [filtro, setFiltro] = useState('todos')
   const [sel, setSel] = useState(() => new Set())
   const [drawer, setDrawer] = useState(null)
+  const [abrir, setAbrir] = useState(null)
   const [aplicando, setAplicando] = useState(false)
 
   const carregar = () => {
@@ -149,7 +151,9 @@ export default function Catalogo() {
                 <tr key={i.id} className="border-b transition hover:bg-[var(--glass-hover)]" style={{ borderColor: 'var(--glass-border)' }}>
                   <td className="px-4 py-3"><input type="checkbox" checked={sel.has(i.id)} onChange={() => toggle(i.id)} /></td>
                   <td className="px-4 py-3">
-                    <div className="font-medium truncate max-w-[260px]">{i.nome}</div>
+                    <button onClick={() => setAbrir(i.id)} className="font-medium truncate max-w-[260px] text-left hover:text-accent transition block">
+                      {i.nome}
+                    </button>
                     <div className="text-[11px] text-faint num">{i.sku}</div>
                   </td>
                   <td className="px-4 py-3 num text-dim text-right">{brl(i.custo)}</td>
@@ -182,6 +186,7 @@ export default function Catalogo() {
       </div>
 
       {drawer && <RadarDrawer produto={drawer} onClose={() => setDrawer(null)} />}
+      {abrir && <ProdutoModal produtoId={abrir} onClose={() => setAbrir(null)} onSaved={carregar} />}
     </div>
   )
 }
