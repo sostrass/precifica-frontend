@@ -35,6 +35,7 @@ export const api = {
   produtoPosicionamento: (id, canal) => req(`/api/produtos/${id}/posicionamento` + (canal ? `?canal=${canal}` : '')),
   produtoSincronizacao: (id) => req(`/api/produtos/${id}/sincronizacao`),
   diagnosticoPrecos: (id) => req(`/api/diagnostico/precos/${id}`),
+  diagnosticoMultiloja: (id) => req(`/api/diagnostico/multiloja/${id}`),
   diagProduto: (id) => req(`/api/diagnostico/produto/${id}`),
   diagNfe: (id) => req(`/api/diagnostico/nfe/${id}`),
   diagSistema: () => req('/api/diagnostico/sistema'),

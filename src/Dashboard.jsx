@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Boxes, TrendingUp, ShieldCheck, AlertTriangle, Plug, DollarSign, Receipt, Flame, PackageSearch } from 'lucide-react'
+import { Boxes, TrendingUp, ShieldCheck, AlertTriangle, Plug, DollarSign, Receipt, Flame, PackageSearch, Hourglass } from 'lucide-react'
 import { api, DEFAULT_CUSTOS } from './api.js'
 
 const brl = (v) => 'R$ ' + Number(v || 0).toFixed(2).replace('.', ',')
@@ -48,9 +48,10 @@ export default function Dashboard() {
       {kpi && (
         <>
           <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
-            <Kpi icon={<DollarSign size={18} />} label={`GMV · ${kpi.dias} dias`} valor={brl(kpi.gmv)} cor="var(--accent)" />
+            <Kpi icon={<DollarSign size={18} />} label={`GMV · ${kpi.dias} dias`} valor={brl(kpi.gmv)} cor="var(--accent)" spark={kpi.tendencia} />
             <Kpi icon={<Receipt size={18} />} label="Pedidos" valor={kpi.pedidos} cor="var(--accent2)" />
             <Kpi icon={<TrendingUp size={18} />} label="Ticket médio" valor={brl(kpi.ticket_medio)} cor="var(--ok)" />
+            <Kpi icon={<PackageSearch size={18} />} label="Capital parado" valor={brl(kpi.capital_parado)} cor="var(--warn)" />
           </div>
           <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))' }}>
             <div className="glass rounded-2xl p-5">
@@ -80,6 +81,24 @@ export default function Dashboard() {
                 ))}
                 {(kpi.risco_ruptura || []).length === 0 && (
                   <div className="text-xs text-faint">Nenhum produto abaixo do estoque mínimo.</div>
+                )}
+              </div>
+            </div>
+            <div className="glass rounded-2xl p-5">
+              <div className="font-semibold text-sm flex items-center gap-2"><Hourglass size={15} style={{ color: 'var(--warn)' }} /> Parados (sem venda no período)</div>
+              <div className="mt-3 space-y-1.5">
+                {(kpi.parados || []).slice(0, 6).map((p, i) => (
+                  <div key={i} className="flex items-center gap-2 text-sm">
+                    <span className="flex-1 truncate">{p.nome}</span>
+                    <span className="num text-faint">{p.saldo} un</span>
+                    <span className="num" style={{ color: 'var(--warn)' }}>{brl(p.capital)}</span>
+                  </div>
+                ))}
+                {(kpi.parados || []).length === 0 && (
+                  <div className="text-xs text-faint">Sem dados de parados (requer estoque + vendas do período).</div>
+                )}
+                {kpi.qtd_parados > 6 && (
+                  <div className="text-[11px] text-faint pt-1">+{kpi.qtd_parados - 6} outros · total {brl(kpi.capital_parado)}</div>
                 )}
               </div>
             </div>
@@ -177,14 +196,28 @@ function Donut({ data, total, size = 180, stroke = 26 }) {
   )
 }
 
-function Kpi({ icon, label, valor, cor }) {
+function Sparkline({ data, cor }) {
+  const vals = (data || []).map((d) => (typeof d === 'number' ? d : d.valor)).filter((v) => v != null)
+  if (vals.length < 2) return null
+  const w = 64, h = 24, max = Math.max(...vals), min = Math.min(...vals), rng = max - min || 1
+  const pts = vals.map((v, i) => `${(i / (vals.length - 1)) * w},${h - ((v - min) / rng) * h}`).join(' ')
+  return (
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className="shrink-0 overflow-visible">
+      <polyline points={pts} fill="none" stroke={cor} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" opacity="0.85" />
+      <circle cx={w} cy={h - ((vals[vals.length - 1] - min) / rng) * h} r="2" fill={cor} />
+    </svg>
+  )
+}
+
+function Kpi({ icon, label, valor, cor, spark }) {
   return (
     <div className="glass rounded-2xl p-4 flex items-center gap-3">
       <div className="h-10 w-10 rounded-xl grid place-items-center shrink-0" style={{ background: cor + '22', color: cor }}>{icon}</div>
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1">
         <div className="text-[11px] text-dim uppercase tracking-wide truncate">{label}</div>
         <div className="text-xl font-display font-bold num" style={{ color: cor }}>{valor}</div>
       </div>
+      {spark && <Sparkline data={spark} cor={cor} />}
     </div>
   )
 }

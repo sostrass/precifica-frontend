@@ -25,6 +25,21 @@ export default function ProdutoModal({ produtoId, onClose, onSaved }) {
   const [sincLoading, setSincLoading] = useState(false)
   const [diag, setDiag] = useState(null)
   const [diagLoading, setDiagLoading] = useState(false)
+  const [iaTitulo, setIaTitulo] = useState(false)
+  const [precoManual, setPrecoManual] = useState({})
+  const [probeML, setProbeML] = useState(null)
+  const [probeLoading, setProbeLoading] = useState(false)
+
+  const rodarProbe = async () => {
+    setProbeLoading(true)
+    try {
+      const r = await api.diagnosticoMultiloja(produtoId)
+      setProbeML(r)
+      if (r?.expoe_preco_por_canal) { notify('A API expõe preço por canal! Recarregando…', 'ok'); carregarSinc() }
+      else notify('A API pública não retornou preço por canal — vamos pro coletor de sessão', 'danger')
+    } catch (e) { notify(e.message, 'danger') }
+    setProbeLoading(false)
+  }
 
   const carregar = () => {
     setErro('')
@@ -112,6 +127,27 @@ export default function ProdutoModal({ produtoId, onClose, onSaved }) {
     setDiagLoading(false)
   }
 
+  const recriarTitulo = async () => {
+    setIaTitulo(true)
+    try {
+      const r = await api.iaCampo({ campo: 'título do anúncio (curto, com material e medida, para busca)', texto: form.nome, nome: form.nome })
+      if (r?.texto) { set('nome', r.texto.replace(/\n/g, ' ').trim()); notify('Título recriado pela IA — revise e salve', 'ok') }
+    } catch (e) { notify(e.message, 'danger') }
+    setIaTitulo(false)
+  }
+
+  const aplicarPrecoCanal = async (canal) => {
+    const valor = precoManual[canal.canal] != null ? Number(precoManual[canal.canal]) : canal.preco_sugerido
+    if (!valor || valor <= 0) { notify('Informe um preço válido', 'danger'); return }
+    setAplicando(canal.canal)
+    try {
+      await api.produtoAtualizar(produtoId, { preco: valor })
+      notify(`Preço aplicado: ${brl(valor)}`, 'ok')
+      carregar(); onSaved && onSaved()
+    } catch (e) { notify(e.message, 'danger') }
+    setAplicando(null)
+  }
+
   const ABAS = [
     { id: 'dados', label: 'Dados', icon: Tag },
     { id: 'cad', label: 'Cadastro & SEO', icon: Gauge },
@@ -140,7 +176,16 @@ export default function ProdutoModal({ produtoId, onClose, onSaved }) {
         {erro ? (
           <div className="p-8 text-center text-dim text-sm">{erro}</div>
         ) : !form ? (
-          <div className="p-10 grid place-items-center text-dim"><Loader2 className="animate-spin" /></div>
+          <div className="p-5 animate-pulse">
+            <div className="flex gap-2 mb-5">
+              {[...Array(5)].map((_, i) => <div key={i} className="h-7 w-20 rounded-lg bg-glass" />)}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="col-span-2 h-16 rounded-xl bg-glass" />
+              {[...Array(6)].map((_, i) => <div key={i} className="h-14 rounded-xl bg-glass" />)}
+              <div className="col-span-2 h-24 rounded-xl bg-glass" />
+            </div>
+          </div>
         ) : (
           <>
             <div className="flex gap-1 px-5 pt-3 border-b overflow-x-auto" style={{ borderColor: 'var(--glass-border)' }}>
@@ -167,8 +212,19 @@ export default function ProdutoModal({ produtoId, onClose, onSaved }) {
                       <span className="px-2 py-1 rounded-lg border border-glassb text-dim num">{d.dimensoes.largura}×{d.dimensoes.altura}×{d.dimensoes.profundidade} cm</span>
                     )}
                   </div>
-                  <Campo className="col-span-2" label="Nome" value={form.nome} onChange={(v) => set('nome', v)} />
-                  <Campo label="Preço (R$)" type="number" value={form.preco} onChange={(v) => set('preco', v)} />
+                  <div className="col-span-2">
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs text-dim">Nome / título</label>
+                      <button onClick={recriarTitulo} disabled={iaTitulo}
+                              className="text-[11px] font-medium flex items-center gap-1 px-2 py-1 rounded-lg disabled:opacity-60"
+                              style={{ background: 'rgba(79,227,201,.12)', color: 'var(--accent2)', border: '1px solid var(--accent2)' }}>
+                        {iaTitulo ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />} Recriar com IA
+                      </button>
+                    </div>
+                    <input value={form.nome} onChange={(e) => set('nome', e.target.value)}
+                           className="w-full bg-glass border border-glassb rounded-xl px-3 py-2 text-sm text-fg outline-none focus:border-accent" />
+                  </div>
+                  <Campo label="Preço base (R$)" type="number" value={form.preco} onChange={(v) => set('preco', v)} />
                   <Campo label="Custo (R$)" type="number" value={form.custo} onChange={(v) => set('custo', v)} />
                   <Campo label="NCM" value={form.ncm} onChange={(v) => set('ncm', v)} />
                   <Campo label="GTIN / EAN" value={form.gtin} onChange={(v) => set('gtin', v)} />
@@ -239,25 +295,30 @@ export default function ProdutoModal({ produtoId, onClose, onSaved }) {
 
               {tab === 'preco' && (
                 <div>
-                  <p className="text-xs text-dim mb-3">Base é o preço de venda (líquido seu). O sistema embute comissão, imposto, cartão, taxa fixa e embalagem por canal — o cliente paga.</p>
+                  <p className="text-xs text-dim mb-3">Base é o preço de venda (líquido seu). O sistema sugere o preço de lista por canal — você pode <b>editar manualmente</b> antes de aplicar.</p>
                   <div className="space-y-2">
-                    {(d.precificacao || []).map((c) => (
-                      <div key={c.canal} className="flex items-center gap-3 rounded-xl border border-glassb px-3 py-2.5">
-                        <div className="min-w-0 flex-1">
-                          <div className="text-sm font-medium">{c.nome}</div>
-                          <div className="text-[11px] text-faint">líquido <span className="num text-fg">{brl(c.liquido)}</span> · margem {c.margem_sugerida == null ? '—' : c.margem_sugerida + '%'}</div>
+                    {(d.precificacao || []).map((c) => {
+                      const val = precoManual[c.canal] != null ? precoManual[c.canal] : (c.preco_sugerido ?? '')
+                      return (
+                        <div key={c.canal} className="flex items-center gap-3 rounded-xl border border-glassb px-3 py-2.5">
+                          <div className="min-w-0 flex-1">
+                            <div className="text-sm font-medium">{c.nome}</div>
+                            <div className="text-[11px] text-faint">líquido <span className="num text-fg">{brl(c.liquido)}</span> · sugerido <span className="num">{brl(c.preco_sugerido)}</span></div>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <span className="text-xs text-faint">R$</span>
+                            <input type="number" step="any" value={val}
+                                   onChange={(e) => setPrecoManual((p) => ({ ...p, [c.canal]: e.target.value }))}
+                                   className="w-20 bg-glass border border-glassb rounded-lg px-2 py-1.5 text-sm num text-fg outline-none focus:border-accent text-right" />
+                          </div>
+                          <button onClick={() => aplicarPrecoCanal(c)} disabled={aplicando === c.canal}
+                                  className="rounded-lg px-3 py-1.5 text-xs font-medium flex items-center gap-1 shrink-0 disabled:opacity-50"
+                                  style={{ background: 'var(--glass-hover)', color: 'var(--accent)', border: '1px solid var(--accent)' }}>
+                            {aplicando === c.canal ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Aplicar
+                          </button>
                         </div>
-                        <div className="text-right">
-                          <div className="text-[10px] text-faint uppercase tracking-wide">preço de lista</div>
-                          <div className="num font-semibold text-accent">{brl(c.preco_sugerido)}</div>
-                        </div>
-                        <button onClick={() => aplicarPreco(c)} disabled={aplicando === c.canal || c.preco_sugerido == null}
-                                className="rounded-lg px-3 py-1.5 text-xs font-medium flex items-center gap-1 shrink-0 disabled:opacity-50"
-                                style={{ background: 'var(--glass-hover)', color: 'var(--accent)', border: '1px solid var(--accent)' }}>
-                          {aplicando === c.canal ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Aplicar
-                        </button>
-                      </div>
-                    ))}
+                      )
+                    })}
                     {(d.precificacao || []).length === 0 && (
                       <div className="text-sm text-dim text-center py-2">Nenhum canal ativo. Ative canais em Configurações.</div>
                     )}
@@ -338,34 +399,76 @@ export default function ProdutoModal({ produtoId, onClose, onSaved }) {
                   ) : (
                     <div className="space-y-4">
                       <div className="text-xs text-dim">Base de venda (líquido): <b className="num text-fg">{brl(sinc.base_venda)}</b></div>
-                      <div className="space-y-2">
-                        {(sinc.canais || []).map((c, i) => {
-                          const st = SINC_STATUS[c.status] || { t: c.status, c: 'var(--dim)' }
-                          return (
-                            <div key={i} className="flex items-center gap-3 border border-glassb rounded-xl px-3 py-2.5">
-                              <div className="min-w-0 flex-1">
-                                <div className="text-sm font-medium">{c.nome}</div>
-                                <div className="text-[11px] text-faint">
-                                  {c.preco_registrado != null && <>registrado <span className="num">{brl(c.preco_registrado)}</span> · </>}
-                                  líquido <span className="num text-fg">{brl(c.liquido)}</span>
+                      {(() => {
+                        const divByCanal = Object.fromEntries((sinc.canais || []).map((c) => [c.canal, c]))
+                        const linhas = sinc.fonte_lida && (sinc.vinculos || []).length
+                          ? sinc.vinculos.map((v) => ({ ...v, div: v.canal ? divByCanal[v.canal] : null }))
+                          : (sinc.canais || []).map((c) => ({ nome: c.nome, canal: c.canal, preco_registrado: c.preco_registrado, prejuizo: false, div: c }))
+                        return (
+                          <div className="space-y-2">
+                            {linhas.map((l, i) => {
+                              const d = l.div
+                              const baseStatus = d ? d.status : (l.preco_registrado > 0 ? 'registrado' : 'sem_registro')
+                              const st = l.prejuizo ? { t: 'Prejuízo', c: 'var(--danger)' } : (SINC_STATUS[baseStatus] || { t: baseStatus, c: 'var(--dim)' })
+                              return (
+                                <div key={i} className="flex items-center gap-3 border rounded-xl px-3 py-2.5" style={{ borderColor: l.prejuizo ? 'var(--danger)' : 'var(--glass-border)' }}>
+                                  <div className="min-w-0 flex-1">
+                                    <div className="text-sm font-medium flex items-center gap-1.5">
+                                      {sinc.fonte_lida && (
+                                        <span className="h-2 w-2 rounded-full shrink-0" title={l.ativo ? 'ativo' : l.publicado ? 'publicado sem preço' : 'inativo'}
+                                              style={{ background: l.ativo ? 'var(--accent2)' : l.publicado ? 'var(--warn)' : 'var(--faint)' }} />
+                                      )}
+                                      {l.nome}
+                                    </div>
+                                    <div className="text-[11px] text-faint">
+                                      {sinc.fonte_lida && <span style={{ color: l.ativo ? 'var(--accent2)' : 'var(--faint)' }}>{l.ativo ? 'ativo' : 'inativo'} · </span>}
+                                      {l.preco_registrado > 0 ? <>registrado <span className="num">{brl(l.preco_registrado)}</span></> : 'sem anúncio'}
+                                      {l.id_anuncio && <> · <span className="num">{String(l.id_anuncio).slice(0, 16)}</span></>}
+                                    </div>
+                                  </div>
+                                  {d && (
+                                    <div className="text-right">
+                                      <div className="text-[10px] text-faint uppercase tracking-wide">alvo</div>
+                                      <div className="num font-semibold text-accent">{brl(d.preco_alvo)}</div>
+                                    </div>
+                                  )}
+                                  <span className="text-[10px] px-2 py-1 rounded-md font-medium shrink-0" style={{ background: 'var(--glass-hover)', color: st.c, border: `1px solid ${st.c}` }}>{st.t}</span>
                                 </div>
-                              </div>
-                              <div className="text-right">
-                                <div className="text-[10px] text-faint uppercase tracking-wide">alvo</div>
-                                <div className="num font-semibold text-accent">{brl(c.preco_alvo)}</div>
-                              </div>
-                              <span className="text-[10px] px-2 py-1 rounded-md font-medium shrink-0" style={{ background: 'var(--glass-hover)', color: st.c, border: `1px solid ${st.c}` }}>{st.t}</span>
-                            </div>
-                          )
-                        })}
-                      </div>
+                              )
+                            })}
+                          </div>
+                        )
+                      })()}
                       <div className="rounded-xl border border-glassb p-3 text-[11px] text-dim">
-                        Os preços <b>registrados por canal</b> são lidos quando confirmarmos onde o Bling os guarda nesta conta.
-                        <button onClick={rodarDiag} disabled={diagLoading} className="ml-1 inline-flex items-center gap-1" style={{ color: 'var(--accent)' }}>
-                          {diagLoading ? <Loader2 size={11} className="animate-spin" /> : <AlertCircle size={11} />} Diagnosticar fonte
-                        </button>
-                        {diag && (
-                          <pre className="mt-2 max-h-40 overflow-auto text-[10px] bg-glass rounded-lg p-2" style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(diag.tabelas_precos, null, 1)}</pre>
+                        {sinc.fonte_lida ? (
+                          <>Preços por canal lidos do Bling (vínculos multiloja). Canais com <span style={{ color: 'var(--danger)' }}>prejuízo</span> estão abaixo do seu líquido.</>
+                        ) : (
+                          <>
+                            <div className="mb-2">Não li o preço por canal aqui (vem dos vínculos multiloja). Vamos testar se a <b>API pública</b> expõe via <span className="num">idLoja</span>:</div>
+                            <button onClick={rodarProbe} disabled={probeLoading}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium disabled:opacity-60"
+                                    style={{ background: 'rgba(230,180,80,.12)', color: 'var(--accent)', border: '1px solid var(--accent)' }}>
+                              {probeLoading ? <Loader2 size={13} className="animate-spin" /> : <Target size={13} />} Testar leitura por canal (API)
+                            </button>
+                            {probeML && (
+                              <div className="mt-3 rounded-lg bg-glass p-2.5 space-y-1">
+                                <div className="text-[11px]">Base: <span className="num text-fg">{brl(probeML.base_preco)}</span> · {probeML.expoe_preco_por_canal
+                                  ? <span style={{ color: 'var(--accent2)' }}>expõe preço por canal ✓</span>
+                                  : <span style={{ color: 'var(--danger)' }}>não expõe preço por canal</span>}</div>
+                                {(probeML.lojas || []).map((l, i) => (
+                                  <div key={i} className="flex items-center gap-2 text-[11px]">
+                                    <span className="num text-faint w-20 truncate">{l.id_loja}</span>
+                                    {l.ok ? <>
+                                      <span className="num">{brl(l.preco)}</span>
+                                      {l.difere_da_base
+                                        ? <span style={{ color: 'var(--accent2)' }}>≠ base (canal!)</span>
+                                        : <span className="text-faint">= base</span>}
+                                    </> : <span style={{ color: 'var(--danger)' }}>{l.erro || 'falhou'}</span>}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </>
                         )}
                       </div>
                     </div>
@@ -569,4 +672,5 @@ const SINC_STATUS = {
   sincronizado: { t: 'Sincronizado', c: 'var(--accent2)' },
   divergente: { t: 'Divergente', c: 'var(--danger)' },
   sem_registro: { t: 'Alvo calculado', c: 'var(--accent)' },
+  registrado: { t: 'Registrado', c: 'var(--dim)' },
 }

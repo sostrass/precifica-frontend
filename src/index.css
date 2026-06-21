@@ -45,6 +45,9 @@ body {
   transition: background 0.3s ease, color 0.3s ease;
 }
 
+/* Campos e botões NÃO herdam font-family por padrão — força Onest */
+input, textarea, select, button { font-family: inherit; }
+
 /* Blobs de cor para o vidro refratar */
 body::before, body::after {
   content: '';
