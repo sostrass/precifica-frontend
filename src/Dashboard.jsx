@@ -1,15 +1,19 @@
 import { useEffect, useState } from 'react'
-import { Boxes, TrendingUp, ShieldCheck, AlertTriangle, Plug } from 'lucide-react'
+import { Boxes, TrendingUp, ShieldCheck, AlertTriangle, Plug, DollarSign, Receipt, Flame, PackageSearch } from 'lucide-react'
 import { api, DEFAULT_CUSTOS } from './api.js'
+
+const brl = (v) => 'R$ ' + Number(v || 0).toFixed(2).replace('.', ',')
 
 export default function Dashboard() {
   const [itens, setItens] = useState(null)
   const [erro, setErro] = useState('')
+  const [kpi, setKpi] = useState(null)
 
   useEffect(() => {
     api.monitoramento({ custos_globais: DEFAULT_CUSTOS, canal: 'mercadolivre' })
       .then((d) => setItens(d.itens || []))
       .catch((e) => setErro(e.message))
+    api.kpis(30).then(setKpi).catch(() => {})
   }, [])
 
   if (!itens && !erro) return <Skeleton />
@@ -40,6 +44,48 @@ export default function Dashboard() {
         <Kpi icon={<ShieldCheck size={18} />} label="Saudáveis" valor={ideal} cor="var(--ok)" />
         <Kpi icon={<AlertTriangle size={18} />} label="Críticos" valor={critico} cor="var(--danger)" />
       </div>
+
+      {kpi && (
+        <>
+          <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
+            <Kpi icon={<DollarSign size={18} />} label={`GMV · ${kpi.dias} dias`} valor={brl(kpi.gmv)} cor="var(--accent)" />
+            <Kpi icon={<Receipt size={18} />} label="Pedidos" valor={kpi.pedidos} cor="var(--accent2)" />
+            <Kpi icon={<TrendingUp size={18} />} label="Ticket médio" valor={brl(kpi.ticket_medio)} cor="var(--ok)" />
+          </div>
+          <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))' }}>
+            <div className="glass rounded-2xl p-5">
+              <div className="font-semibold text-sm flex items-center gap-2"><Flame size={15} style={{ color: 'var(--accent)' }} /> Mais vendidos</div>
+              <div className="mt-3 space-y-1.5">
+                {(kpi.mais_vendidos || []).slice(0, 6).map((m, i) => (
+                  <div key={i} className="flex items-center gap-2 text-sm">
+                    <span className="num text-faint w-4">{i + 1}</span>
+                    <span className="flex-1 truncate">{m.descricao}</span>
+                    <span className="num text-dim">{m.unidades} un</span>
+                  </div>
+                ))}
+                {(kpi.mais_vendidos || []).length === 0 && (
+                  <div className="text-xs text-faint">A listagem do Bling não trouxe itens — o detalhe do pedido é necessário para os mais vendidos.</div>
+                )}
+              </div>
+            </div>
+            <div className="glass rounded-2xl p-5">
+              <div className="font-semibold text-sm flex items-center gap-2"><PackageSearch size={15} style={{ color: 'var(--danger)' }} /> Risco de ruptura</div>
+              <div className="mt-3 space-y-1.5">
+                {(kpi.risco_ruptura || []).slice(0, 6).map((r, i) => (
+                  <div key={i} className="flex items-center gap-2 text-sm">
+                    <span className="flex-1 truncate">{r.nome}</span>
+                    <span className="num" style={{ color: 'var(--danger)' }}>{r.saldo}</span>
+                    <span className="num text-faint">/ {r.minimo}</span>
+                  </div>
+                ))}
+                {(kpi.risco_ruptura || []).length === 0 && (
+                  <div className="text-xs text-faint">Nenhum produto abaixo do estoque mínimo.</div>
+                )}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
 
       <div className="grid gap-4" style={{ gridTemplateColumns: 'minmax(0, 0.85fr) minmax(0, 1fr)' }}>
         {/* Saúde da margem */}
