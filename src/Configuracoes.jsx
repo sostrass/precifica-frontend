@@ -215,6 +215,13 @@ function Diagnostico() {
   }
   const copiar = () => { navigator.clipboard.writeText(out); setCopiado(true); setTimeout(() => setCopiado(false), 1500) }
 
+  const verSistema = async () => {
+    setCarregando(true); setOut('')
+    try { setOut(JSON.stringify(await api.diagSistema(), null, 2)) }
+    catch (e) { setOut('ERRO: ' + e.message) }
+    setCarregando(false)
+  }
+
   return (
     <div className="glass rounded-2xl p-5">
       <div className="flex items-center gap-2 text-sm font-semibold mb-1">
@@ -238,6 +245,10 @@ function Diagnostico() {
         <button onClick={buscar} disabled={carregando}
                 className="rounded-xl px-4 py-2 text-sm font-medium text-white disabled:opacity-60" style={{ background: 'var(--accent)' }}>
           {carregando ? 'Buscando…' : 'Buscar JSON'}
+        </button>
+        <button onClick={verSistema} disabled={carregando}
+                className="rounded-xl px-3 py-2 text-sm text-dim hover:text-fg border border-glassb disabled:opacity-60">
+          Sistema (banco)
         </button>
       </div>
       {out && (

@@ -31,6 +31,7 @@ export const api = {
   produtoAtualizar: (id, b) => req(`/api/produtos/${id}`, { method: 'PUT', body: b }),
   diagProduto: (id) => req(`/api/diagnostico/produto/${id}`),
   diagNfe: (id) => req(`/api/diagnostico/nfe/${id}`),
+  diagSistema: () => req('/api/diagnostico/sistema'),
   precificarLote: (b) => req('/api/precificar/lote', { method: 'POST', body: b }),
   concorrenciaPrecos: (b) => req('/api/concorrencia/precos', { method: 'POST', body: b }),
   iaDescricao: (b) => req('/api/ia/descricao', { method: 'POST', body: b }),
