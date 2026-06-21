@@ -10,7 +10,7 @@ import { api } from './api.js'
 import { useToast } from './toast.jsx'
 
 const CORES = ['#6366f1', '#14b8a6', '#f59e0b', '#f43f5e', '#a855f7', '#38bdf8']
-const brl = (v) => (v == null ? '—' : 'R$ ' + Number(v).toFixed(2).replace('.', ','))
+const brl = (v) => (v == null ? '—' : 'R$ ' + Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
 const pct = (v) => Number(v ?? 0).toFixed(1).replace('.', ',') + '%'
 const dCurto = (s) => new Date(s).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
 const dLongo = (s) =>

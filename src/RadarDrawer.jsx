@@ -62,7 +62,7 @@ export default function RadarDrawer({ produto, onClose }) {
 
         <div className="mb-1 font-medium">{produto.nome}</div>
         <div className="text-xs text-faint num mb-5">
-          Custo base: R$ {Number(produto.custo || 0).toFixed(2)}
+          Custo base: R$ {Number(produto.custo || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
         </div>
 
         <div className="glass rounded-xl p-4 mb-5">
@@ -89,7 +89,7 @@ export default function RadarDrawer({ produto, onClose }) {
                 <div key={i} className="glass rounded-lg p-3 flex items-center justify-between">
                   <div className="min-w-0">
                     <div className="text-[10px] text-faint truncate max-w-[180px]">{dominio(r.url)}</div>
-                    <div className="text-lg font-bold num">R$ {Number(r.preco_concorrente).toFixed(2)}</div>
+                    <div className="text-lg font-bold num">R$ {Number(r.preco_concorrente).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
                   </div>
                   <div className="text-right">
                     <div className="text-[10px] text-faint">se igualar</div>

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Boxes, TrendingUp, ShieldCheck, AlertTriangle, Plug, DollarSign, Receipt, Flame, PackageSearch, Hourglass } from 'lucide-react'
 import { api, DEFAULT_CUSTOS } from './api.js'
 
-const brl = (v) => 'R$ ' + Number(v || 0).toFixed(2).replace('.', ',')
+const brl = (v) => 'R$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 export default function Dashboard() {
   const [itens, setItens] = useState(null)

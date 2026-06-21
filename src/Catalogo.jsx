@@ -10,7 +10,7 @@ const STATUS = {
   atencao: { txt: 'Atenção', cor: 'var(--warn)' },
   critico: { txt: 'Crítico', cor: 'var(--danger)' },
 }
-const brl = (n) => 'R$ ' + Number(n || 0).toFixed(2).replace('.', ',')
+const brl = (n) => 'R$ ' + Number(n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 export default function Catalogo() {
   const notify = useToast()

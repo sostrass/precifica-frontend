@@ -3,7 +3,7 @@ import { Calculator, AlertTriangle, Layers, ArrowRight } from 'lucide-react'
 import { api } from './api.js'
 import { useToast } from './toast.jsx'
 
-const brl = (v) => 'R$ ' + Number(v ?? 0).toFixed(2).replace('.', ',')
+const brl = (v) => 'R$ ' + Number(v ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const pct = (v) => Number(v ?? 0).toFixed(1).replace('.', ',') + '%'
 
 export default function Precificacao() {

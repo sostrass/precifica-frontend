@@ -2,11 +2,12 @@ import { useEffect, useState } from 'react'
 import {
   X, Save, Tag, Check, Sparkles, Loader2, Gauge, ShieldCheck, AlertCircle,
   Image as ImageIcon, Boxes, Wand2, FileText, Users, Target, ExternalLink, RefreshCw,
+  DollarSign, Crown,
 } from 'lucide-react'
 import { api } from './api.js'
 import { useToast } from './toast.jsx'
 
-const brl = (v) => (v == null || v === '' ? '—' : 'R$ ' + Number(v).toFixed(2).replace('.', ','))
+const brl = (v) => (v == null || v === '' ? '—' : 'R$ ' + Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
 
 export default function ProdutoModal({ produtoId, onClose, onSaved }) {
   const notify = useToast()
@@ -483,7 +484,7 @@ export default function ProdutoModal({ produtoId, onClose, onSaved }) {
                       <div className="h-12 w-12 rounded-2xl grid place-items-center mx-auto mb-3" style={{ background: 'linear-gradient(135deg, var(--accent), var(--accent2))' }}>
                         <Users size={22} className="text-white" />
                       </div>
-                      <p className="text-sm text-dim mb-4 max-w-md mx-auto">Comercial, Catálogo, Mídia e Conteúdo deliberam sobre este produto com base nos dados reais — e entregam um plano. Cada melhoria você aplica com um clique.</p>
+                      <p className="text-sm text-dim mb-4 max-w-md mx-auto">Seis diretores — Comercial, Catálogo, Mídia, Conteúdo, Marketplace e Operações — cada um com seus subagentes, deliberam sobre este produto com dados reais e entregam um plano. Cada melhoria você aplica com um clique.</p>
                       <button onClick={convocar} disabled={convocando}
                               className="rounded-xl px-5 py-2.5 text-sm font-medium text-white inline-flex items-center gap-2 disabled:opacity-60"
                               style={{ background: 'linear-gradient(180deg, var(--accent2), var(--accent))' }}>
@@ -492,16 +493,25 @@ export default function ProdutoModal({ produtoId, onClose, onSaved }) {
                     </div>
                   ) : (
                     <div className="space-y-4">
-                      <div className="space-y-2">
-                        {conselho.falas.map((f, i) => (
-                          <div key={i} className="flex gap-2.5">
-                            <div className="h-7 w-7 rounded-lg grid place-items-center text-xs font-bold shrink-0"
-                                 style={{ background: AGENTE_COR[f.agente] || 'var(--accent)', color: f.agente === 'Gerente' ? '#15140f' : '#15140f' }}>
-                              {f.agente[0]}
+                      <div className="space-y-2.5">
+                        {(conselho.diretores || []).map((d, i) => (
+                          <div key={i} className="bg-glass border border-glassb rounded-xl p-3">
+                            <div className="flex items-center gap-2 mb-2">
+                              <div className="h-7 w-7 rounded-lg grid place-items-center shrink-0" style={{ background: DIR_COR[d.icone] || 'var(--accent)' }}>
+                                <DirIcon name={d.icone} />
+                              </div>
+                              <div className="min-w-0">
+                                <div className="text-[13px] font-semibold leading-tight">{d.nome}</div>
+                                <div className="text-[10px] text-faint">{d.papel}</div>
+                              </div>
                             </div>
-                            <div className="flex-1 bg-glass border border-glassb rounded-xl rounded-tl-sm px-3 py-2">
-                              <div className="text-[11px] text-dim mb-0.5">{f.papel}</div>
-                              <div className="text-[13px]">{f.texto}</div>
+                            <div className="space-y-1.5 pl-1">
+                              {d.subagentes.map((s, j) => (
+                                <div key={j} className="flex items-start gap-2 text-[12px]">
+                                  <span className="h-1.5 w-1.5 rounded-full mt-[5px] shrink-0" style={{ background: STATUS_COR[s.status] || 'var(--faint)' }} />
+                                  <div><span className="text-dim font-medium">{s.nome}:</span> {s.texto}</div>
+                                </div>
+                              ))}
                             </div>
                           </div>
                         ))}
@@ -637,6 +647,15 @@ const AGENTE_COR = {
   Mídia: '#FF9B7A',
   Conteúdo: '#C9A0FF',
   Gerente: '#EDEAE2',
+}
+
+const STATUS_COR = { ok: 'var(--accent2)', alerta: 'var(--warn)', acao: 'var(--danger)', info: 'var(--faint)' }
+const DIR_ICONE = { dollar: DollarSign, shield: ShieldCheck, image: ImageIcon, file: FileText, target: Target, boxes: Boxes, crown: Crown }
+const DIR_COR = { dollar: 'var(--accent)', shield: 'var(--accent2)', image: '#FF9B7A', file: '#C9A0FF', target: '#7AB8FF', boxes: '#9EE37D', crown: '#EDEAE2' }
+
+function DirIcon({ name }) {
+  const Ic = DIR_ICONE[name] || Users
+  return <Ic size={15} style={{ color: '#15140f' }} />
 }
 
 function tipoStyle(tipo) {

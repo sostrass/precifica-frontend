@@ -6,7 +6,7 @@ import {
 import { api } from './api.js'
 import { useToast } from './toast.jsx'
 
-const brl = (v) => 'R$ ' + Number(v ?? 0).toFixed(2).replace('.', ',')
+const brl = (v) => 'R$ ' + Number(v ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 export default function Nfe() {
   const notify = useToast()
