@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import {
   Plug, SlidersHorizontal, Store, Plus, Trash2, Save, RotateCcw, Power, Info, Stethoscope,
+  Webhook, Copy, Check, RefreshCw, Radio,
 } from 'lucide-react'
 import { api } from './api.js'
 import { useToast } from './toast.jsx'
@@ -106,6 +107,9 @@ export default function Configuracoes() {
         </div>
       </Card>
 
+      {/* Webhooks */}
+      <Webhooks />
+
       {/* Custos globais */}
       <Card icon={<SlidersHorizontal size={18} />} titulo="Custos globais">
         <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}>
@@ -193,6 +197,88 @@ export default function Configuracoes() {
       </div>
 
       <Diagnostico />
+    </div>
+  )
+}
+
+function Webhooks() {
+  const notify = useToast()
+  const [url, setUrl] = useState('')
+  const [eventos, setEventos] = useState(null)
+  const [copiado, setCopiado] = useState(false)
+  const [loadingEv, setLoadingEv] = useState(false)
+
+  useEffect(() => {
+    api.webhookUrl().then((r) => setUrl(r.url)).catch(() => {})
+    carregarEventos()
+  }, [])
+
+  const carregarEventos = async () => {
+    setLoadingEv(true)
+    try { setEventos((await api.webhookEventos()).eventos || []) } catch { /* vazio */ }
+    setLoadingEv(false)
+  }
+
+  const copiar = async () => {
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopiado(true); setTimeout(() => setCopiado(false), 1800)
+      notify('URL copiada', 'ok')
+    } catch { notify('Copie manualmente o endereço', 'danger') }
+  }
+
+  const fmtData = (iso) => {
+    if (!iso) return ''
+    try { return new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) } catch { return iso }
+  }
+  const recCor = (r) => ({ produto: 'var(--accent)', pedido_venda: 'var(--accent2)', nfe: '#C9A0FF', estoque: 'var(--warn)' }[r] || 'var(--faint)')
+
+  return (
+    <div className="glass rounded-2xl p-5">
+      <div className="flex items-center gap-2 font-semibold mb-1"><span className="text-accent"><Webhook size={16} /></span> Webhooks (tempo real)</div>
+      <p className="text-xs text-dim mb-4">Em vez de ficar consultando o Bling, ele <b>avisa o sistema na hora</b> que um produto, pedido, NF-e ou estoque muda. Cole a URL abaixo no Bling.</p>
+
+      <div className="text-[11px] text-faint uppercase tracking-wide mb-1.5">Sua URL de callback</div>
+      <div className="flex items-center gap-2 mb-4">
+        <code className="flex-1 min-w-0 truncate bg-glass border border-glassb rounded-xl px-3 py-2.5 text-xs num">{url || 'carregando…'}</code>
+        <button onClick={copiar} disabled={!url}
+                className="rounded-xl px-3 py-2.5 text-xs font-medium flex items-center gap-1.5 shrink-0"
+                style={{ background: copiado ? 'var(--ok)' : 'var(--glass-hover)', color: copiado ? '#0A0C12' : 'var(--accent)', border: '1px solid var(--accent)' }}>
+          {copiado ? <Check size={14} /> : <Copy size={14} />} {copiado ? 'Copiado' : 'Copiar'}
+        </button>
+      </div>
+
+      <div className="rounded-xl border border-glassb p-3 text-xs text-dim space-y-1.5 mb-4">
+        <div className="font-medium text-fg flex items-center gap-1.5"><Info size={13} /> Como ativar no Bling</div>
+        <div>1. No Bling: <b>Configurações → Webhooks → Configuração de servidores</b>. Dê um Alias (ex.: "Precifica AI") e cole a URL acima.</div>
+        <div>2. Em cada recurso (Produtos, Pedidos de Vendas, Notas Fiscais, Estoque), ligue o <b>webhook</b>, selecione o servidor que você criou e marque Criação / Atualização / Exclusão.</div>
+        <div>3. O app precisa ter os <b>escopos</b> desses recursos na autorização do Bling — se um recurso não aparecer pra configurar, falta o escopo.</div>
+      </div>
+
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-[11px] text-faint uppercase tracking-wide flex items-center gap-1.5"><Radio size={12} /> Eventos recebidos</div>
+        <button onClick={carregarEventos} className="text-[11px] text-dim hover:text-fg flex items-center gap-1">
+          <RefreshCw size={11} className={loadingEv ? 'animate-spin' : ''} /> Atualizar
+        </button>
+      </div>
+      {(eventos && eventos.length > 0) ? (
+        <div className="space-y-1.5 max-h-52 overflow-auto">
+          {eventos.map((e, i) => (
+            <div key={i} className="flex items-center gap-2 text-xs border border-glassb rounded-lg px-2.5 py-1.5">
+              <span className="h-1.5 w-1.5 rounded-full shrink-0" style={{ background: recCor(e.recurso) }} />
+              <span className="font-medium">{e.recurso}</span>
+              <span className="text-faint">{e.acao}</span>
+              {e.entidade_id && <span className="num text-faint">#{e.entidade_id}</span>}
+              <span className="flex-1" />
+              <span className="text-faint num">{fmtData(e.recebido_em)}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="text-xs text-faint border border-dashed border-glassb rounded-lg px-3 py-4 text-center">
+          Nenhum evento ainda. Assim que você ativar no Bling e algo mudar lá, aparece aqui.
+        </div>
+      )}
     </div>
   )
 }

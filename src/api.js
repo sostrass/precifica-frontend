@@ -36,6 +36,8 @@ export const api = {
   produtoSincronizacao: (id) => req(`/api/produtos/${id}/sincronizacao`),
   diagnosticoPrecos: (id) => req(`/api/diagnostico/precos/${id}`),
   diagnosticoMultiloja: (id) => req(`/api/diagnostico/multiloja/${id}`),
+  webhookUrl: () => req('/api/webhooks/url'),
+  webhookEventos: (limite = 30) => req(`/api/webhooks/eventos?limite=${limite}`),
   diagProduto: (id) => req(`/api/diagnostico/produto/${id}`),
   diagNfe: (id) => req(`/api/diagnostico/nfe/${id}`),
   diagSistema: () => req('/api/diagnostico/sistema'),
