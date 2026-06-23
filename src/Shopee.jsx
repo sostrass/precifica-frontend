@@ -588,8 +588,16 @@ function Avaliacoes({ conectado, notify }) {
     setAutoRun(true)
     try {
       const r = await api.shopeeReviewAuto()
-      notify(`${r.respondidos || 0} resposta(s) enviada(s) pelo agente` + (r.ignorados_para_revisao ? ` · ${r.ignorados_para_revisao} guardada(s) p/ você revisar` : ''), 'ok')
-      carregar()
+      if (r.acao === 'iniciado') {
+        notify(r.mensagem || 'Agente respondendo em segundo plano…', 'ok')
+        // as respostas saem espaçadas; atualiza a lista algumas vezes pra vê-las aparecer
+        setTimeout(carregar, 8000)
+        setTimeout(carregar, 25000)
+        setTimeout(carregar, 60000)
+      } else {
+        notify(`${r.respondidos || 0} resposta(s) enviada(s) pelo agente` + (r.ignorados_para_revisao ? ` · ${r.ignorados_para_revisao} guardada(s) p/ você revisar` : ''), 'ok')
+        carregar()
+      }
     } catch (e) { notify(e.message, 'danger') }
     setAutoRun(false)
   }
@@ -905,6 +913,15 @@ function ConfigReviewIA({ cfg, onSalvar, onClose }) {
             </div>
             <div className="text-[10px] text-faint mt-1.5">Recomendado deixar só 4 e 5. Notas baixas pedem um olhar humano.</div>
           </div>
+          {/* ritmo / anti-flood */}
+          <div className="rounded-xl p-3 space-y-3" style={{ background: 'var(--glass-hover)' }}>
+            <div className="text-xs text-dim font-medium flex items-center gap-1.5"><Clock size={14} style={{ color: LARANJA }} /> Ritmo das respostas (anti-flood)</div>
+            <SliderRegra label="Pausa entre respostas" valor={f.auto_pausa_seg ?? 5} min={0} max={30} sufixo=" s"
+                         onChange={(v) => up('auto_pausa_seg', v)} dica="espaça as chamadas pra não disparar tudo de uma vez na API da Shopee" />
+            <SliderRegra label="Máximo por ciclo" valor={f.auto_max_ciclo ?? 10} min={1} max={50}
+                         onChange={(v) => up('auto_max_ciclo', v)} dica="quantas avaliações o agente responde a cada rodada (de hora em hora); o resto fica pro próximo ciclo" />
+            <div className="text-[10px] text-faint">O agente roda a cada hora. Com pausa de 5s e teto de 10, são até ~10 respostas espaçadas por rodada — o suficiente pra ir limpando a fila sem parecer robô nem floodar.</div>
+          </div>
         </div>
         <div className="p-4 border-t border-glassb flex justify-end">
           <button onClick={salvar} className="rounded-lg px-4 py-2 text-sm font-semibold text-white flex items-center gap-2" style={{ background: LARANJA }}>
@@ -939,6 +956,56 @@ function SliderRegra({ label, valor, min, max, step = 1, sufixo = '', onChange, 
       <input type="range" min={min} max={max} step={step} value={valor}
              onChange={(e) => onChange(Number(e.target.value))} className="w-full" style={{ accentColor: LARANJA }} />
       {dica && <div className="text-[10px] text-faint mt-0.5">{dica}</div>}
+    </div>
+  )
+}
+
+function DiagnosticoPromo({ msg, diag }) {
+  // funil: cada etapa com a contagem; a 1ª que zera é o ponto de quebra
+  const etapas = diag ? [
+    ['Produtos no catálogo', diag.catalogo_skus],
+    ['Anúncios na Shopee', diag.shopee_itens],
+    ['SKU casou com o catálogo', diag.sku_casado, diag.anuncios_sem_sku ? `${diag.anuncios_sem_sku} anúncio(s) sem SKU` : null],
+    ['Passaram no estoque mínimo', diag.passaram_estoque],
+    [`Margem calculável${diag.canal_shopee_configurado ? '' : ' (canal Shopee não configurado!)'}`, diag.margem_calculavel],
+    ['Acima do piso de margem', diag.passaram_piso],
+    ['Cabe desconto seguro', diag.com_desconto_seguro],
+    ['Elegíveis', diag.elegiveis],
+  ] : []
+  // índice do ponto de quebra: primeira etapa = 0 cujo anterior > 0
+  let quebra = -1
+  for (let i = 0; i < etapas.length; i++) {
+    const v = etapas[i][1]
+    const prev = i === 0 ? 1 : etapas[i - 1][1]
+    if (v === 0 && prev > 0) { quebra = i; break }
+  }
+  return (
+    <div className="glass rounded-2xl p-5 space-y-4">
+      <div className="flex items-start gap-2.5">
+        <div className="h-8 w-8 rounded-lg grid place-items-center shrink-0" style={{ background: 'rgba(238,77,45,.12)' }}>
+          <Stethoscope size={16} style={{ color: LARANJA }} />
+        </div>
+        <div>
+          <div className="text-sm font-semibold mb-0.5">Nenhum produto elegível — veja o porquê</div>
+          <div className="text-xs text-dim leading-relaxed">{msg}</div>
+        </div>
+      </div>
+      {etapas.length > 0 && (
+        <div className="rounded-xl p-3 space-y-1.5" style={{ background: 'var(--glass-hover)' }}>
+          {etapas.map(([label, valor, nota], i) => {
+            const isQuebra = i === quebra
+            const cor = valor === 0 ? (isQuebra ? 'var(--danger, #FF6F6F)' : 'var(--text-faint)') : 'var(--ok, #14B8A6)'
+            return (
+              <div key={i} className="flex items-center gap-2 text-xs">
+                <span className="h-1.5 w-1.5 rounded-full shrink-0" style={{ background: cor }} />
+                <span className="flex-1" style={{ color: isQuebra ? 'var(--danger, #FF6F6F)' : 'var(--text-dim)' }}>{label}</span>
+                {nota && <span className="text-[10px] text-faint">{nota}</span>}
+                <span className="num font-semibold" style={{ color: cor }}>{valor}</span>
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
@@ -1171,7 +1238,7 @@ function MotorPromocoes({ conectado, notify }) {
         </div>
       )}
       {propostas?.acao === 'vazio' && (
-        <div className="glass rounded-2xl p-6 text-center text-sm text-faint">{propostas.msg || 'Nenhum produto elegível dentro das regras.'}</div>
+        <DiagnosticoPromo msg={propostas.msg} diag={propostas.diagnostico} />
       )}
 
       {/* Histórico */}
