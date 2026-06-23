@@ -4,6 +4,7 @@ import {
   Plus, X, Pin, PinOff, Play, Loader2, Zap, Clock, CheckCircle2,
   AlertTriangle, Plug, RefreshCw, Wand2, ChevronRight, Flame,
   HelpCircle, GitCompareArrows, Undo2, TrendingUp, TrendingDown, Trash2, Calendar,
+  Stethoscope, XCircle, ShieldAlert, CircleDot,
 } from 'lucide-react'
 import { api } from './api'
 import { useToast } from './toast.jsx'
@@ -45,7 +46,8 @@ function Countdown({ iso }) {
 }
 
 const TABS = [
-  { id: 'boost', label: 'Boost', icon: Rocket, destaque: true },
+  { id: 'diagnostico', label: 'Diagnóstico', icon: Stethoscope, destaque: true },
+  { id: 'boost', label: 'Boost', icon: Rocket },
   { id: 'avaliacoes', label: 'Avaliações', icon: Star },
   { id: 'qa', label: 'Perguntas', icon: HelpCircle },
   { id: 'catalogo', label: 'Bling × Shopee', icon: GitCompareArrows },
@@ -58,7 +60,7 @@ const TABS = [
 
 export default function Shopee() {
   const notify = useToast()
-  const [aba, setAba] = useState('boost')
+  const [aba, setAba] = useState('diagnostico')
   const [status, setStatus] = useState(null)
   const [carregando, setCarregando] = useState(true)
 
@@ -102,6 +104,7 @@ export default function Shopee() {
         })}
       </div>
 
+      {aba === 'diagnostico' && <Diagnostico status={status} />}
       {aba === 'boost' && <BoostCenter conectado={status?.ok} notify={notify} />}
       {aba === 'avaliacoes' && <Avaliacoes conectado={status?.ok} notify={notify} />}
       {aba === 'qa' && <Perguntas conectado={status?.ok} notify={notify} />}
@@ -1101,5 +1104,110 @@ function FlashForm({ onClose, onSaved, notify }) {
       <div className="text-[11px] text-faint">As variações de cada produto são preenchidas automaticamente com o preço que você definir. A loja precisa de estoque e elegibilidade para a oferta ser aceita.</div>
       {picker && <SeletorItens titulo="Produtos da oferta relâmpago" comPreco onConfirmar={(a) => { setItens(a); setPicker(false) }} onClose={() => setPicker(false)} />}
     </Modal>
+  )
+}
+
+/* ----------------------- Diagnóstico da integração ----------------------- */
+function dicaErro(erro = '') {
+  const e = erro.toLowerCase()
+  if (e.includes('token')) return 'Token inválido ou expirado — clique em reconectar a loja.'
+  if (e.includes('permission') || e.includes('no permission') || e.includes('auth')) return 'Falta a permissão desse módulo no seu app na Shopee Open Platform (Authorization → API list).'
+  if (e.includes('timeout') || e.includes('rede')) return 'A chamada demorou demais. Pode ser instabilidade da Shopee — tente de novo.'
+  if (e.includes('sign')) return 'Assinatura recusada — confira PARTNER_KEY no servidor.'
+  if (e.includes('not configured') || e.includes('não configurado')) return 'Defina PARTNER_ID e PARTNER_KEY no servidor (Railway).'
+  return null
+}
+
+function Diagnostico({ status }) {
+  const [res, setRes] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [erro, setErro] = useState('')
+
+  const rodar = async () => {
+    setLoading(true); setErro('')
+    try { setRes(await api.shopeeDiagnostico()) } catch (e) { setErro(e.message); setRes(null) }
+    setLoading(false)
+  }
+  useEffect(() => { rodar() }, [])
+
+  const pctOk = res?.total ? Math.round((res.ok / res.total) * 100) : 0
+
+  return (
+    <div className="space-y-3">
+      <div className="glass rounded-2xl p-4">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div className="min-w-0">
+            <div className="font-display font-semibold flex items-center gap-2"><Stethoscope size={17} style={{ color: LARANJA }} /> Diagnóstico da integração</div>
+            <div className="text-sm text-dim mt-0.5">Testa cada chamada da Shopee e mostra o que funciona e o que falha — com o erro exato de cada uma.</div>
+          </div>
+          <button onClick={rodar} disabled={loading}
+                  className="rounded-xl px-4 py-2 text-sm font-semibold text-white flex items-center gap-2 disabled:opacity-60 shrink-0" style={{ background: LARANJA }}>
+            {loading ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />} {loading ? 'Testando…' : 'Rodar de novo'}
+          </button>
+        </div>
+
+        {res && res.app && (
+          <div className="mt-3">
+            <div className="flex items-center justify-between text-xs mb-1">
+              <span className="text-dim">{res.ok} de {res.total} funcionalidades respondendo</span>
+              <span className="font-semibold num" style={{ color: pctOk >= 80 ? 'var(--ok)' : pctOk >= 40 ? 'var(--warn)' : 'var(--danger)' }}>{pctOk}%</span>
+            </div>
+            <div className="h-2 rounded-full overflow-hidden" style={{ background: 'var(--glass-hover)' }}>
+              <div className="h-full transition-all duration-700" style={{ width: `${pctOk}%`, background: pctOk >= 80 ? 'var(--ok)' : pctOk >= 40 ? 'var(--warn)' : 'var(--danger)' }} />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {loading && !res && (
+        <div className="space-y-2">{[0, 1, 2, 3, 4].map((i) => <div key={i} className="shimmer rounded-xl h-14" />)}</div>
+      )}
+
+      {erro && (
+        <div className="glass rounded-2xl p-4 flex items-start gap-3" style={{ border: '1px solid var(--danger)' }}>
+          <ShieldAlert size={18} style={{ color: 'var(--danger)' }} className="shrink-0 mt-0.5" />
+          <div>
+            <div className="text-sm font-medium">Não consegui rodar o diagnóstico</div>
+            <div className="text-xs text-dim mt-0.5">{erro}</div>
+          </div>
+        </div>
+      )}
+
+      {res && !res.app && (
+        <div className="glass rounded-2xl p-4 flex items-start gap-3" style={{ border: '1px solid var(--warn)' }}>
+          <AlertTriangle size={18} style={{ color: 'var(--warn)' }} className="shrink-0 mt-0.5" />
+          <div className="text-sm">{res.resumo || 'App Shopee não configurado no servidor.'}</div>
+        </div>
+      )}
+
+      {res?.testes?.map((t, i) => {
+        const dica = !t.ok && dicaErro(t.erro)
+        return (
+          <div key={i} className="glass rounded-xl px-4 py-3 flex items-start gap-3">
+            <span className="shrink-0 mt-0.5">
+              {t.ok ? <CheckCircle2 size={18} style={{ color: 'var(--ok)' }} /> : <XCircle size={18} style={{ color: 'var(--danger)' }} />}
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-medium flex items-center gap-2">
+                {t.nome}
+                {t.ok && t.qtd != null && <span className="text-[11px] text-faint num">{t.qtd} registro(s)</span>}
+              </div>
+              {!t.ok && <div className="text-xs mt-0.5 num" style={{ color: 'var(--danger)' }}>{t.erro}</div>}
+              {dica && <div className="text-[11px] text-dim mt-1 flex items-start gap-1"><CircleDot size={11} className="mt-0.5 shrink-0" style={{ color: 'var(--warn)' }} /> {dica}</div>}
+            </div>
+            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0"
+                  style={{ background: t.ok ? 'rgba(79,227,201,.12)' : 'rgba(255,111,111,.12)', color: t.ok ? 'var(--ok)' : 'var(--danger)' }}>
+              {t.ok ? 'OK' : 'FALHA'}
+            </span>
+          </div>
+        )
+      })}
+
+      {res?.testes?.some((t) => !t.ok) && (
+        <div className="text-xs text-faint px-1 leading-relaxed">
+          As falhas de "permissão" quase sempre são módulos não habilitados no seu app na Shopee Open Platform — abra <b>Authorization → API list</b> e marque os escopos (produtos, pedidos, logística, avaliações, promoções). Se o erro for de token, reconecte a loja na aba de conexão.
+        </div>
+      )}
+    </div>
   )
 }

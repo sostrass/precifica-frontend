@@ -10,11 +10,16 @@ export const DEFAULT_CUSTOS = { ganho: 30, imposto: 12, cartao: 2.5, embalagem: 
 async function req(path, { method = 'GET', body, auth = true } = {}) {
   const headers = { 'Content-Type': 'application/json' }
   if (auth && getToken()) headers.Authorization = `Bearer ${getToken()}`
-  const res = await fetch(`${BASE}${path}`, {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : undefined,
-  })
+  let res
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+    })
+  } catch (e) {
+    throw new Error('Sem resposta do servidor (rede ou timeout). Tente de novo em instantes.')
+  }
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(data.detail || data.erro || `Erro ${res.status}`)
   return data
@@ -50,6 +55,7 @@ export const api = {
   catalogoSyncStatus: () => req('/api/catalogo/sync_status'),
   catalogoListar: (q = '', pagina = 1) => req(`/api/catalogo?busca=${encodeURIComponent(q)}&pagina=${pagina}&limite=50`),
   shopeeStatus: () => req('/api/shopee/status'),
+  shopeeDiagnostico: () => req('/api/shopee/diagnostico'),
   shopeeAuthLogin: () => req('/api/shopee/auth/login'),
   shopeeConectar: (b) => req('/api/shopee/conectar', { method: 'POST', body: b }),
   shopeeRenovar: () => req('/api/shopee/renovar', { method: 'POST' }),
