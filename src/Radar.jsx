@@ -4,12 +4,27 @@ import {
 } from 'recharts'
 import {
   SatelliteDish, RefreshCw, Plus, Trash2, Target, TrendingDown, TrendingUp,
-  Minus, Lock, Gauge, Bell, Radar as RadarIcon,
+  Minus, Lock, Gauge, Bell, Radar as RadarIcon, Info,
 } from 'lucide-react'
 import { api } from './api.js'
 import { useToast } from './toast.jsx'
 
 const CORES = ['#6366f1', '#14b8a6', '#f59e0b', '#f43f5e', '#a855f7', '#38bdf8']
+
+// Marketplaces com rótulo bonito + dica de como pegar a URL do concorrente em cada um.
+const MARKETPLACES = [
+  ['mercadolivre', 'Mercado Livre', 'Abra o anúncio e copie o link (…/MLB-…). Leitura mais confiável.'],
+  ['shopee', 'Shopee', 'Abra o produto do concorrente e copie o link (shopee.com.br/...-i.XXXX.YYYY). Lido pela API interna via navegador.'],
+  ['tiktok', 'TikTok Shop', 'Cole o link do produto na TikTok Shop. Páginas bem protegidas — pode exigir proxy.'],
+  ['shein', 'Shein', 'Abra o produto e copie o link (shein.com.br/...). Lido por navegador; pode exigir proxy.'],
+  ['amazon', 'Amazon', 'Copie o link do produto (…/dp/…).'],
+  ['magalu', 'Magalu', 'Copie o link do produto no Magazine Luiza.'],
+  ['nuvemshop', 'Loja própria / Nuvemshop', 'Cole o link da página do produto na loja do concorrente.'],
+]
+const MKT_LABEL = Object.fromEntries(MARKETPLACES.map(([id, l]) => [id, l]))
+const MKT_HINT = Object.fromEntries(MARKETPLACES.map(([id, , h]) => [id, h]))
+const rotuloMkt = (m) => MKT_LABEL[m] || m
+
 const brl = (v) => (v == null ? '—' : 'R$ ' + Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
 const pct = (v) => Number(v ?? 0).toFixed(1).replace('.', ',') + '%'
 const dCurto = (s) => new Date(s).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
@@ -24,6 +39,8 @@ export default function Radar() {
   const [hist, setHist] = useState(null)
   const [scanning, setScanning] = useState(false)
   const [nonce, setNonce] = useState(0)
+  const [addNovo, setAddNovo] = useState(false)
+  const [ultimaVarredura, setUltimaVarredura] = useState(null)
 
   const carregarAlvos = async () => {
     const r = await api.radarAlvos()
@@ -52,6 +69,7 @@ export default function Radar() {
     try {
       const r = await api.radarVarrer({ sku })
       const achou = (r.resultados || []).filter((x) => x.preco != null).length
+      setUltimaVarredura(r.resultados || [])
       notify(`Varredura concluída — ${achou}/${r.varridos} preços capturados`, achou ? 'ok' : 'warn')
       const h = await api.radarHistorico(sku, dias)
       setHist(h)
@@ -95,6 +113,12 @@ export default function Radar() {
               <RefreshCw size={15} className={scanning ? 'animate-spin' : ''} />
               {scanning ? 'Varrendo…' : 'Varrer agora'}
             </button>
+            <button
+              onClick={() => setAddNovo((v) => !v)}
+              className="glass rounded-xl px-3 py-2 text-sm flex items-center gap-1.5 text-fg hover:text-accent"
+            >
+              <Plus size={15} /> Novo produto
+            </button>
           </>
         )}
       </div>
@@ -103,7 +127,14 @@ export default function Radar() {
         <EmptyStart sku={sku} onAdded={async (novoSku) => { await carregarAlvos(); setSku(novoSku) }} />
       ) : (
         <>
+          {addNovo && (
+            <EmptyStart
+              novo
+              onAdded={async (novoSku) => { await carregarAlvos(); setSku(novoSku); setAddNovo(false) }}
+            />
+          )}
           <AlertasPanel dias={dias} nonce={nonce} />
+          <VarreduraResultado resultados={ultimaVarredura} onFechar={() => setUltimaVarredura(null)} />
           <StatsRow stats={hist?.estatisticas} />
           <HistoryChart series={hist?.series || []} />
           <div className="grid gap-4" style={{ gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.3fr)' }}>
@@ -115,6 +146,44 @@ export default function Radar() {
           </div>
         </>
       )}
+    </div>
+  )
+}
+
+/* ----------------------- Resultado da varredura ------------------------- */
+const FONTE_ROTULO = {
+  shopee_api: 'Shopee (API interna)', api_ml: 'API Mercado Livre',
+  html: 'Página (HTML)', browser: 'Navegador',
+}
+function VarreduraResultado({ resultados, onFechar }) {
+  if (!resultados || resultados.length === 0) return null
+  const ok = resultados.filter((r) => r.preco != null).length
+  return (
+    <div className="glass rounded-2xl p-5">
+      <div className="flex items-center gap-2 mb-3">
+        <RefreshCw size={16} className="text-accent" />
+        <span className="text-sm font-semibold">Última varredura</span>
+        <span className="text-xs text-faint">{ok}/{resultados.length} capturados</span>
+        <button onClick={onFechar} className="ml-auto text-faint hover:text-fg text-xs">fechar</button>
+      </div>
+      <div className="space-y-1.5">
+        {resultados.map((r, i) => (
+          <div key={i} className="flex items-center gap-2 text-xs rounded-lg px-3 py-2" style={{ background: 'var(--glass-hover)' }}>
+            <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded-md shrink-0"
+                  style={{ background: 'var(--glass)', color: 'var(--accent2)' }}>{rotuloMkt(r.marketplace)}</span>
+            <span className="flex-1 truncate text-dim">{r.nome || 'Concorrente'}</span>
+            {r.preco != null ? (
+              <>
+                <span className="num font-semibold text-fg">{brl(r.preco)}</span>
+                <span className="text-[10px] text-faint shrink-0">{FONTE_ROTULO[r.fonte] || r.fonte}</span>
+              </>
+            ) : (
+              <span className="text-[11px] shrink-0" style={{ color: 'var(--danger, #FF6F6F)' }}
+                    title={r.erro || ''}>não capturado{r.erro && r.erro.toLowerCase().includes('proxy') ? ' (tente proxy)' : ''}</span>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
@@ -309,7 +378,7 @@ function AlvosPanel({ sku, alvos, onChange }) {
         {alvos.map((a) => (
           <div key={a.id} className="flex items-center gap-2 rounded-xl border border-glassb px-3 py-2">
             <span className="text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-md"
-                  style={{ background: 'var(--glass-hover)', color: 'var(--accent2)' }}>{a.marketplace}</span>
+                  style={{ background: 'var(--glass-hover)', color: 'var(--accent2)' }}>{rotuloMkt(a.marketplace)}</span>
             <div className="min-w-0">
               <div className="text-sm truncate">{a.nome || 'Concorrente'}</div>
               <a href={a.url} target="_blank" rel="noreferrer" className="text-[11px] text-faint truncate block hover:text-accent">{a.url}</a>
@@ -332,7 +401,7 @@ function AlvosPanel({ sku, alvos, onChange }) {
             value={form.marketplace} onChange={(e) => setForm({ ...form, marketplace: e.target.value })}
             className="bg-glass border border-glassb rounded-xl px-2 py-2 text-sm outline-none focus:border-accent"
           >
-            {['mercadolivre', 'shopee', 'amazon', 'magalu', 'shein', 'nuvemshop'].map((m) => <option key={m} value={m}>{m}</option>)}
+            {MARKETPLACES.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
           </select>
         </div>
         <div className="flex gap-2">
@@ -349,6 +418,9 @@ function AlvosPanel({ sku, alvos, onChange }) {
           >
             <Plus size={15} /> Add
           </button>
+        </div>
+        <div className="text-[11px] text-faint flex items-start gap-1.5">
+          <Info size={12} className="mt-0.5 shrink-0" /> {MKT_HINT[form.marketplace]}
         </div>
       </div>
     </div>
@@ -456,7 +528,7 @@ function Mini({ label, value, onChange }) {
 }
 
 /* ----------------------------- Empty state ------------------------------ */
-function EmptyStart({ sku, onAdded }) {
+function EmptyStart({ sku, onAdded, novo }) {
   const notify = useToast()
   const [form, setForm] = useState({ sku: '', nome: '', marketplace: 'mercadolivre', url: '' })
   const [busy, setBusy] = useState(false)
@@ -466,10 +538,50 @@ function EmptyStart({ sku, onAdded }) {
     setBusy(true)
     try {
       await api.addRadarAlvo(form)
-      notify('Primeiro alvo adicionado', 'ok')
+      notify(novo ? 'Produto adicionado ao radar' : 'Primeiro alvo adicionado', 'ok')
       onAdded(form.sku)
     } catch (e) { notify(e.message, 'danger') }
     setBusy(false)
+  }
+
+  const Campos = (
+    <div className={`w-full ${novo ? '' : 'max-w-md'} space-y-2 text-left`}>
+      <div className="flex gap-2">
+        <input value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })}
+               placeholder="SKU do seu produto"
+               className="flex-1 bg-glass border border-glassb rounded-xl px-3 py-2 text-sm outline-none focus:border-accent" />
+        <select value={form.marketplace} onChange={(e) => setForm({ ...form, marketplace: e.target.value })}
+                className="bg-glass border border-glassb rounded-xl px-2 py-2 text-sm outline-none focus:border-accent">
+          {MARKETPLACES.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+        </select>
+      </div>
+      <input value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })}
+             placeholder="Nome da loja concorrente (opcional)"
+             className="w-full bg-glass border border-glassb rounded-xl px-3 py-2 text-sm outline-none focus:border-accent" />
+      <div className="flex gap-2">
+        <input value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })}
+               onKeyDown={(e) => e.key === 'Enter' && add()}
+               placeholder="https://… link do anúncio concorrente"
+               className="flex-1 bg-glass border border-glassb rounded-xl px-3 py-2 text-sm outline-none focus:border-accent" />
+        <button onClick={add} disabled={busy}
+                className="rounded-xl px-4 text-white text-sm font-medium disabled:opacity-60"
+                style={{ background: 'var(--accent)' }}>{busy ? '…' : 'Monitorar'}</button>
+      </div>
+      <div className="text-[11px] text-faint flex items-start gap-1.5">
+        <Info size={12} className="mt-0.5 shrink-0" /> {MKT_HINT[form.marketplace]}
+      </div>
+    </div>
+  )
+
+  if (novo) {
+    return (
+      <div className="glass rounded-2xl p-5">
+        <div className="flex items-center gap-2 text-sm font-semibold mb-3">
+          <Plus size={16} className="text-accent" /> Monitorar um novo produto
+        </div>
+        {Campos}
+      </div>
+    )
   }
 
   return (
@@ -480,31 +592,10 @@ function EmptyStart({ sku, onAdded }) {
       </div>
       <div className="font-display font-semibold text-lg">Comece a monitorar a concorrência</div>
       <div className="text-sm text-dim mt-1 max-w-md">
-        Aponte o radar para um anúncio concorrente. A cada varredura ele guarda o preço, e o histórico
-        e as recomendações nascem desse acúmulo.
+        Aponte o radar para um anúncio concorrente em qualquer marketplace. A cada varredura ele guarda
+        o preço, e o histórico e as recomendações nascem desse acúmulo.
       </div>
-      <div className="mt-5 w-full max-w-md space-y-2 text-left">
-        <div className="flex gap-2">
-          <input value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })}
-                 placeholder="SKU do seu produto"
-                 className="flex-1 bg-glass border border-glassb rounded-xl px-3 py-2 text-sm outline-none focus:border-accent" />
-          <select value={form.marketplace} onChange={(e) => setForm({ ...form, marketplace: e.target.value })}
-                  className="bg-glass border border-glassb rounded-xl px-2 py-2 text-sm outline-none focus:border-accent">
-            {['mercadolivre', 'shopee', 'amazon', 'magalu'].map((m) => <option key={m} value={m}>{m}</option>)}
-          </select>
-        </div>
-        <input value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })}
-               placeholder="Nome da loja concorrente (opcional)"
-               className="w-full bg-glass border border-glassb rounded-xl px-3 py-2 text-sm outline-none focus:border-accent" />
-        <div className="flex gap-2">
-          <input value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })}
-                 placeholder="https://… link do anúncio"
-                 className="flex-1 bg-glass border border-glassb rounded-xl px-3 py-2 text-sm outline-none focus:border-accent" />
-          <button onClick={add} disabled={busy}
-                  className="rounded-xl px-4 text-white text-sm font-medium disabled:opacity-60"
-                  style={{ background: 'var(--accent)' }}>{busy ? '…' : 'Monitorar'}</button>
-        </div>
-      </div>
+      <div className="mt-5">{Campos}</div>
     </div>
   )
 }

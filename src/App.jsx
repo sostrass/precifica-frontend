@@ -1,5 +1,5 @@
 import { useEffect, useState, lazy, Suspense } from 'react'
-import { LayoutDashboard, Boxes, Calculator, SatelliteDish, FileText, Sparkles, Aperture, Bot, Settings, Sun, Moon, LogOut, Plug, ShoppingBag, CalendarDays } from 'lucide-react'
+import { LayoutDashboard, Boxes, Calculator, SatelliteDish, FileText, Sparkles, Aperture, Bot, Settings, Sun, Moon, LogOut, Plug, ShoppingBag, CalendarDays, Crown } from 'lucide-react'
 import { api, getToken, setToken } from './api.js'
 import { useToast } from './toast.jsx'
 import Login from './Login.jsx'
@@ -10,6 +10,7 @@ const Precificacao = lazy(() => import('./Precificacao.jsx'))
 const Radar = lazy(() => import('./Radar.jsx'))
 const Nfe = lazy(() => import('./Nfe.jsx'))
 const CentralIa = lazy(() => import('./CentralIa.jsx'))
+const Conselho = lazy(() => import('./Conselho.jsx'))
 const Estudio = lazy(() => import('./Estudio.jsx'))
 const Agentes = lazy(() => import('./Agentes.jsx'))
 const Configuracoes = lazy(() => import('./Configuracoes.jsx'))
@@ -23,6 +24,7 @@ const TITULOS = {
   radar: 'Radar de mercado',
   nfe: 'Notas fiscais',
   ia: 'Central de IA',
+  conselho: 'Conselho de IA',
   estudio: 'Estúdio criativo',
   agentes: 'Agentes',
   configuracoes: 'Configurações',
@@ -106,6 +108,7 @@ export default function App() {
           <NavItem icon={<SatelliteDish size={18} />} label="Radar" active={view === 'radar'} onClick={() => setView('radar')} />
           <NavSecao>Inteligência</NavSecao>
           <NavItem icon={<Sparkles size={18} />} label="Central IA" active={view === 'ia'} onClick={() => setView('ia')} />
+          <NavItem icon={<Crown size={18} />} label="Conselho" active={view === 'conselho'} onClick={() => setView('conselho')} />
           <NavItem icon={<Bot size={18} />} label="Agentes" active={view === 'agentes'} onClick={() => setView('agentes')} />
           <NavItem icon={<Aperture size={18} />} label="Estúdio" active={view === 'estudio'} onClick={() => setView('estudio')} />
           <NavSecao>Conta</NavSecao>
@@ -159,6 +162,7 @@ export default function App() {
             {view === 'radar' && <Radar />}
             {view === 'nfe' && <Nfe />}
             {view === 'ia' && <CentralIa />}
+            {view === 'conselho' && <Conselho />}
             {view === 'estudio' && <Estudio />}
             {view === 'agentes' && <Agentes />}
             {view === 'shopee' && <Shopee />}

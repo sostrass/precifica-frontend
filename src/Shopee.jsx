@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Rocket, Star, Activity, ShoppingBag, Tag, Megaphone, Package,
   Plus, X, Pin, PinOff, Play, Loader2, Zap, Clock, CheckCircle2,
   AlertTriangle, Plug, RefreshCw, Wand2, ChevronRight, Flame,
   HelpCircle, GitCompareArrows, Undo2, TrendingUp, TrendingDown, Trash2, Calendar,
-  Stethoscope, XCircle, ShieldAlert, CircleDot,
+  Stethoscope, XCircle, ShieldAlert, CircleDot, Bot, Search,
+  Send, Sparkles, SlidersHorizontal, MessageSquare, ImageIcon, Settings2, Smile, ThumbsUp,
 } from 'lucide-react'
 import { api } from './api'
 import { useToast } from './toast.jsx'
@@ -52,6 +53,7 @@ const TABS = [
   { id: 'qa', label: 'Perguntas', icon: HelpCircle },
   { id: 'catalogo', label: 'Bling × Shopee', icon: GitCompareArrows },
   { id: 'promocoes', label: 'Promoções', icon: Tag },
+  { id: 'motor', label: 'Promoções IA', icon: Sparkles, destaque: true },
   { id: 'ads', label: 'Shopee Ads', icon: Megaphone },
   { id: 'pedidos', label: 'Pedidos & Financeiro', icon: ShoppingBag },
   { id: 'devolucoes', label: 'Devoluções', icon: Undo2 },
@@ -110,6 +112,7 @@ export default function Shopee() {
       {aba === 'qa' && <Perguntas conectado={status?.ok} notify={notify} />}
       {aba === 'catalogo' && <Divergencia conectado={status?.ok} />}
       {aba === 'promocoes' && <Promocoes conectado={status?.ok} notify={notify} />}
+      {aba === 'motor' && <MotorPromocoes conectado={status?.ok} notify={notify} />}
       {aba === 'ads' && <Ads conectado={status?.ok} />}
       {aba === 'pedidos' && <Pedidos conectado={status?.ok} />}
       {aba === 'devolucoes' && <Devolucoes conectado={status?.ok} />}
@@ -209,8 +212,14 @@ function BoostCenter({ conectado, notify }) {
   const [bs, setBs] = useState(null)
   const [rodando, setRodando] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
+  const [sincNomes, setSincNomes] = useState(false)
+  const [autoSel, setAutoSel] = useState(false)
+  const editandoJanela = useRef(false)
 
-  const carregar = () => api.shopeeBoostStatus().then(setBs).catch(() => {})
+  const carregar = () => api.shopeeBoostStatus().then((d) => {
+    // não sobrescreve a janela enquanto o usuário está mexendo nela
+    setBs((b) => (editandoJanela.current && b) ? { ...d, janela_inicio: b.janela_inicio, janela_fim: b.janela_fim } : d)
+  }).catch(() => {})
   useEffect(() => {
     carregar()
     const t = setInterval(carregar, 15000)
@@ -218,8 +227,37 @@ function BoostCenter({ conectado, notify }) {
   }, [])
 
   const setConfig = async (patch) => {
+    if ('janela_inicio' in patch || 'janela_fim' in patch) editandoJanela.current = true
     setBs((b) => ({ ...b, ...patch }))
-    try { await api.shopeeBoostConfig(patch) } catch (e) { notify(e.message, 'danger'); carregar() }
+    try {
+      await api.shopeeBoostConfig(patch)
+      if ('janela_inicio' in patch || 'janela_fim' in patch) notify('Janela salva', 'ok')
+    } catch (e) {
+      notify('Não salvou: ' + e.message, 'danger')
+    } finally {
+      setTimeout(() => { editandoJanela.current = false }, 1500)
+    }
+  }
+  const sincronizarNomes = async () => {
+    setSincNomes(true)
+    try {
+      const r = await api.shopeeBoostSincronizarNomes()
+      notify(r.atualizados ? `${r.atualizados} nome(s) atualizado(s)` : 'Nomes já estavam em dia', 'ok')
+      carregar()
+    } catch (e) { notify(e.message, 'danger') }
+    setSincNomes(false)
+  }
+  const autoSelecionar = async (estrategia) => {
+    setAutoSel(true)
+    try {
+      const r = await api.shopeeBoostAutoSelecionar(estrategia || bs?.auto_estrategia)
+      if (r.acao === 'ok') notify(`${r.selecionados} produto(s) escolhido(s) automaticamente (de ${r.candidatos} candidatos)`, 'ok')
+      else if (r.acao === 'sem_catalogo') notify(r.msg || 'Sincronize o catálogo completo primeiro', 'warn')
+      else if (r.acao === 'erro') notify(r.erro, 'danger')
+      else notify('Nenhum produto elegível encontrado', 'warn')
+      carregar()
+    } catch (e) { notify(e.message, 'danger') }
+    setAutoSel(false)
   }
   const rodarAgora = async () => {
     setRodando(true)
@@ -276,6 +314,46 @@ function BoostCenter({ conectado, notify }) {
               <CheckCircle2 size={13} /> Motor ligado. {proximo ? <>Próximo a entrar: <b className="ml-1">{proximo.nome || proximo.item_id}</b></> : 'Todos impulsionados ou fila vazia.'}
             </div>
           : <div className="text-xs mt-3 flex items-center gap-1.5 text-faint"><AlertTriangle size={13} /> Motor desligado — nenhum boost automático está acontecendo.</div>}
+      </div>
+
+      {/* Auto-seleção pelos agentes */}
+      <div className="glass rounded-2xl p-4 space-y-3" style={{ border: bs?.auto_selecao ? `1px solid ${LARANJA}` : '1px solid var(--glass-border)' }}>
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="min-w-0">
+            <div className="text-sm font-medium flex items-center gap-2"><Bot size={15} style={{ color: LARANJA }} /> Agente de auto-seleção</div>
+            <div className="text-xs text-faint mt-0.5">O agente escolhe os produtos do boost sozinho — sem você selecionar um a um.</div>
+          </div>
+          <button onClick={() => { const v = !bs?.auto_selecao; setConfig({ auto_selecao: v }); if (v) autoSelecionar() }}
+                  disabled={!conectado}
+                  className="relative h-7 w-12 rounded-full transition-colors shrink-0 disabled:opacity-50"
+                  style={{ background: bs?.auto_selecao ? LARANJA : 'var(--glass-hover)' }}>
+            <span className="absolute top-1 h-5 w-5 rounded-full bg-white transition-all" style={{ left: bs?.auto_selecao ? '26px' : '4px' }} />
+          </button>
+        </div>
+        <div className="flex items-end gap-2 flex-wrap">
+          <div>
+            <div className="text-xs text-faint mb-1.5">Estratégia</div>
+            <div className="flex gap-1.5">
+              {[['estoque_parado', 'Estoque parado', 'Gira o que não vende'], ['margem', 'Maior margem', 'Empurra os mais lucrativos']].map(([id, t, sub]) => (
+                <button key={id} onClick={() => { setConfig({ auto_estrategia: id }); if (bs?.auto_selecao) autoSelecionar(id) }}
+                        title={sub}
+                        className="text-xs px-3 py-1.5 rounded-lg font-medium transition"
+                        style={(bs?.auto_estrategia || 'estoque_parado') === id ? { background: LARANJA, color: '#fff' } : { background: 'var(--glass-hover)', color: 'var(--text-dim)' }}>{t}</button>
+              ))}
+            </div>
+          </div>
+          <button onClick={() => autoSelecionar()} disabled={autoSel || !conectado}
+                  className="rounded-lg px-4 py-2 text-sm font-semibold text-white flex items-center gap-2 disabled:opacity-60"
+                  style={{ background: LARANJA }}>
+            {autoSel ? <Loader2 size={15} className="animate-spin" /> : <Wand2 size={15} />} Selecionar agora
+          </button>
+        </div>
+        {bs?.qtd_auto > 0 && (
+          <div className="text-[11px] text-faint flex items-center gap-1.5">
+            <CheckCircle2 size={12} style={{ color: 'var(--ok)' }} /> {bs.qtd_auto} produto(s) escolhido(s) pelo agente
+            {bs.qtd_manual > 0 && ` · ${bs.qtd_manual} adicionado(s) por você`}. Reabastece sozinho a cada ~12h quando ligado.
+          </div>
+        )}
       </div>
 
       {/* Config */}
@@ -339,11 +417,18 @@ function BoostCenter({ conectado, notify }) {
       <div className="glass rounded-2xl p-4">
         <div className="flex items-center justify-between mb-3">
           <div className="text-sm font-medium flex items-center gap-2"><Clock size={15} className="text-dim" /> Fila de rodízio <span className="text-faint">({fila.length})</span></div>
-          <button onClick={() => setAddOpen(true)} disabled={!conectado}
-                  className="rounded-lg px-3 py-1.5 text-sm font-medium text-white flex items-center gap-1.5 disabled:opacity-60"
-                  style={{ background: LARANJA }}>
-            <Plus size={14} /> Adicionar produtos
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={sincronizarNomes} disabled={!conectado || sincNomes}
+                    className="rounded-lg px-3 py-1.5 text-sm font-medium flex items-center gap-1.5 disabled:opacity-60"
+                    style={{ background: 'var(--glass-hover)', color: 'var(--text-dim)' }} title="Busca os nomes reais dos produtos na Shopee">
+              {sincNomes ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Atualizar nomes
+            </button>
+            <button onClick={() => setAddOpen(true)} disabled={!conectado}
+                    className="rounded-lg px-3 py-1.5 text-sm font-medium text-white flex items-center gap-1.5 disabled:opacity-60"
+                    style={{ background: LARANJA }}>
+              <Plus size={14} /> Adicionar produtos
+            </button>
+          </div>
         </div>
         {fila.length === 0
           ? <div className="text-sm text-faint py-6 text-center">Fila vazia. Adicione produtos da sua loja Shopee para o rodízio.</div>
@@ -387,18 +472,14 @@ function HoraInput({ v, on }) {
 }
 
 function AddProdutos({ onClose, onAdded, notify }) {
-  const [itens, setItens] = useState(null)
+  const { itens, carregando, completo } = useItensShopeeProg()
+  const [busca, setBusca] = useState('')
   const [sel, setSel] = useState(() => new Set())
   const [salvando, setSalvando] = useState(false)
-  useEffect(() => {
-    api.shopeeProdutos().then((r) => {
-      const lista = r?.response?.item || r?.item || []
-      setItens(lista.map((x) => ({ item_id: x.item_id, nome: x.item_name || `#${x.item_id}` })))
-    }).catch(() => setItens([]))
-  }, [])
+  const filtrados = useMemo(() => filtrarItens(itens, busca), [itens, busca])
   const toggle = (id) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
   const salvar = async () => {
-    const escolhidos = (itens || []).filter((i) => sel.has(i.item_id))
+    const escolhidos = itens.filter((i) => sel.has(i.item_id))
     if (!escolhidos.length) return
     setSalvando(true)
     try { await api.shopeeBoostAdd(escolhidos); notify(`${escolhidos.length} produto(s) na lista de boost`, 'ok'); onAdded() }
@@ -413,12 +494,15 @@ function AddProdutos({ onClose, onAdded, notify }) {
           <button onClick={onClose} className="text-faint hover:text-fg"><X size={18} /></button>
         </div>
         <div className="p-3 overflow-y-auto flex-1">
-          {itens === null
+          <BarraBusca valor={busca} onChange={setBusca} carregando={carregando} completo={completo} mostrando={filtrados.length} total={itens.length} />
+          {itens.length === 0 && carregando
             ? <div className="py-10 text-center text-faint flex items-center justify-center gap-2"><Loader2 size={16} className="animate-spin" /> carregando seus anúncios…</div>
             : itens.length === 0
               ? <div className="py-10 text-center text-faint text-sm">Não consegui listar os anúncios da Shopee. Verifique a conexão da loja.</div>
-              : <div className="space-y-1">
-                  {itens.map((i) => (
+              : filtrados.length === 0
+                ? <div className="py-8 text-center text-faint text-sm">Nenhum anúncio para "{busca}".</div>
+                : <div className="space-y-1">
+                  {filtrados.map((i) => (
                     <button key={i.item_id} onClick={() => toggle(i.item_id)}
                             className="w-full flex items-center gap-3 rounded-lg px-3 py-2 text-left"
                             style={{ background: sel.has(i.item_id) ? 'rgba(238,77,45,.12)' : 'var(--glass-hover)' }}>
@@ -426,8 +510,11 @@ function AddProdutos({ onClose, onAdded, notify }) {
                             style={{ background: sel.has(i.item_id) ? LARANJA : 'transparent', border: `1px solid ${sel.has(i.item_id) ? LARANJA : 'var(--glass-border)'}` }}>
                         {sel.has(i.item_id) && <CheckCircle2 size={11} className="text-white" />}
                       </span>
-                      <span className="text-sm truncate flex-1">{i.nome}</span>
-                      <span className="text-[11px] text-faint num">#{i.item_id}</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="text-sm truncate block">{i.nome}</span>
+                        {i.sku && <span className="text-[10px] text-faint num">SKU {i.sku}</span>}
+                      </span>
+                      <span className="text-[11px] text-faint num shrink-0">#{i.item_id}</span>
                     </button>
                   ))}
                 </div>}
@@ -445,59 +532,668 @@ function AddProdutos({ onClose, onAdded, notify }) {
 }
 
 /* ----------------------------- AVALIAÇÕES -------------------------------- */
+const TONS_UI = [
+  ['caloroso', 'Caloroso', '💛'],
+  ['profissional', 'Profissional', '🤝'],
+  ['descontraido', 'Descontraído', '😄'],
+]
+const CORES_AVATAR = ['#EE4D2D', '#E6B450', '#4FE3C9', '#8B7FE8', '#F08AAE', '#5BA3F0', '#6BCB77']
+function corAvatar(nome) {
+  let h = 0; for (const ch of (nome || 'x')) h = (h * 31 + ch.charCodeAt(0)) >>> 0
+  return CORES_AVATAR[h % CORES_AVATAR.length]
+}
+function iniciais(nome) {
+  const p = (nome || '?').trim().split(/\s+/)
+  return ((p[0]?.[0] || '') + (p[1]?.[0] || '')).toUpperCase() || '?'
+}
+function dataBR(epoch) {
+  if (!epoch) return ''
+  const d = new Date(epoch * 1000), hoje = Date.now()
+  const dias = Math.floor((hoje - d.getTime()) / 86400000)
+  if (dias === 0) return 'hoje'
+  if (dias === 1) return 'ontem'
+  if (dias < 30) return `há ${dias} dias`
+  return d.toLocaleDateString('pt-BR')
+}
+function Estrelas({ n, size = 14 }) {
+  return <div className="flex gap-0.5">{Array.from({ length: 5 }).map((_, i) =>
+    <Star key={i} size={size} fill={i < (n || 0) ? LARANJA : 'none'} style={{ color: i < (n || 0) ? LARANJA : 'var(--glass-border)' }} />)}</div>
+}
+
 function Avaliacoes({ conectado, notify }) {
   const [filtro, setFiltro] = useState('UNANSWERED')
+  const [estrela, setEstrela] = useState(0)
   const [dados, setDados] = useState(null)
-  const [respondendo, setRespondendo] = useState(null)
+  const [cfg, setCfg] = useState(null)
+  const [showCfg, setShowCfg] = useState(false)
+  const [autoRun, setAutoRun] = useState(false)
 
   const carregar = () => { setDados(null); api.shopeeAvaliacoes(filtro).then(setDados).catch(() => setDados({ erro: true })) }
-  useEffect(carregar, [filtro])
+  useEffect(() => { if (conectado) carregar() }, [filtro, conectado])
+  useEffect(() => { if (conectado) api.shopeeReviewConfig().then(setCfg).catch(() => {}) }, [conectado])
 
-  const itens = dados?.response?.item_comment_list || dados?.item_comment_list || []
+  const todos = dados?.response?.item_comment_list || dados?.item_comment_list || []
+  const itens = estrela ? todos.filter((c) => (c.rating_star || 0) === estrela) : todos
+  const total = todos.length
+  const media = total ? todos.reduce((s, c) => s + (c.rating_star || 0), 0) / total : 0
+  const dist = [5, 4, 3, 2, 1].map((n) => ({ n, qtd: todos.filter((c) => (c.rating_star || 0) === n).length }))
+  const maxQtd = Math.max(1, ...dist.map((d) => d.qtd))
 
-  const responder = async (c, ia) => {
-    setRespondendo(c.comment_id)
-    try {
-      const r = await api.shopeeResponder({ comment_id: c.comment_id, ia, nota: c.rating_star, comentario: c.comment })
-      notify('Resposta enviada' + (ia ? ' (gerada por IA)' : ''), 'ok'); carregar()
-    } catch (e) { notify(e.message, 'danger') }
-    setRespondendo(null)
+  const salvarCfg = async (patch) => {
+    setCfg((c) => ({ ...c, ...patch }))
+    try { const r = await api.shopeeReviewConfigSalvar(patch); setCfg(r) }
+    catch (e) { notify(e.message, 'danger') }
   }
+  const rodarAuto = async () => {
+    setAutoRun(true)
+    try {
+      const r = await api.shopeeReviewAuto()
+      notify(`${r.respondidos || 0} resposta(s) enviada(s) pelo agente` + (r.ignorados_para_revisao ? ` · ${r.ignorados_para_revisao} guardada(s) p/ você revisar` : ''), 'ok')
+      carregar()
+    } catch (e) { notify(e.message, 'danger') }
+    setAutoRun(false)
+  }
+
+  if (!conectado) return <div className="text-sm text-faint py-6 text-center glass rounded-2xl">Conecte a loja Shopee para gerenciar as avaliações.</div>
+
+  const auto = cfg?.modo === 'auto'
+  const faixaAuto = (cfg?.auto_estrelas || [4, 5]).slice().sort().join(' e ')
 
   return (
     <div className="space-y-3">
-      <div className="flex gap-1.5">
-        {[['UNANSWERED', 'Sem resposta'], ['ANSWERED', 'Respondidas'], ['ALL', 'Todas']].map(([id, t]) => (
-          <button key={id} onClick={() => setFiltro(id)} className="text-xs px-3 py-1.5 rounded-lg font-medium"
-                  style={filtro === id ? { background: LARANJA, color: '#fff' } : { background: 'var(--glass)', color: 'var(--text-dim)', border: '1px solid var(--glass-border)' }}>{t}</button>
-        ))}
-      </div>
-      {!conectado && <div className="text-sm text-faint py-6 text-center glass rounded-2xl">Conecte a loja Shopee para ver as avaliações.</div>}
-      {conectado && dados === null && <div className="py-10 text-center text-faint flex items-center justify-center gap-2"><Loader2 size={16} className="animate-spin" /> carregando avaliações…</div>}
-      {conectado && itens.length === 0 && dados !== null && <div className="text-sm text-faint py-6 text-center glass rounded-2xl">Nenhuma avaliação {filtro === 'UNANSWERED' ? 'sem resposta' : ''} no momento.</div>}
-      <div className="space-y-2">
-        {itens.map((c) => (
-          <div key={c.comment_id} className="glass rounded-xl p-3">
-            <div className="flex items-center gap-2 mb-1">
-              <div className="flex">{Array.from({ length: 5 }).map((_, i) => <Star key={i} size={14} fill={i < (c.rating_star || 0) ? LARANJA : 'none'} style={{ color: LARANJA }} />)}</div>
-              <span className="text-xs text-faint">{c.buyer_username || 'comprador'}</span>
+      {/* Barra de modo + config */}
+      <div className="glass rounded-2xl p-4">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="h-9 w-9 rounded-xl grid place-items-center shrink-0" style={{ background: 'rgba(238,77,45,.12)' }}>
+              <MessageSquare size={18} style={{ color: LARANJA }} />
             </div>
-            <div className="text-sm">{c.comment || <span className="text-faint italic">sem comentário</span>}</div>
-            {c.comment_reply?.reply
-              ? <div className="text-xs mt-2 rounded-lg px-2.5 py-1.5" style={{ background: 'var(--glass-hover)' }}><b>Sua resposta:</b> {c.comment_reply.reply}</div>
-              : <div className="flex gap-2 mt-2">
-                  <button onClick={() => responder(c, true)} disabled={respondendo === c.comment_id}
-                          className="text-xs px-3 py-1.5 rounded-lg font-medium flex items-center gap-1.5 disabled:opacity-60"
-                          style={{ background: 'rgba(238,77,45,.12)', color: LARANJA, border: `1px solid ${LARANJA}` }}>
-                    {respondendo === c.comment_id ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />} Responder com IA
-                  </button>
-                </div>}
+            <div className="min-w-0">
+              <div className="font-display font-semibold leading-tight">Avaliações da loja</div>
+              <div className="text-xs text-faint">A IA lê cada review e responde no padrão da sua loja.</div>
+            </div>
           </div>
-        ))}
+          <div className="flex items-center gap-2">
+            <div className="flex rounded-lg p-0.5" style={{ background: 'var(--glass-hover)' }}>
+              {[['manual', 'Manual'], ['auto', 'Automático']].map(([id, t]) => (
+                <button key={id} onClick={() => salvarCfg({ modo: id })}
+                        className="text-xs px-3 py-1.5 rounded-md font-medium transition"
+                        style={(cfg?.modo || 'manual') === id ? { background: LARANJA, color: '#fff' } : { color: 'var(--text-dim)' }}>{t}</button>
+              ))}
+            </div>
+            <button onClick={() => setShowCfg(true)} title="Configurar a IA"
+                    className="h-8 w-8 grid place-items-center rounded-lg glass hover:text-fg text-dim">
+              <SlidersHorizontal size={16} />
+            </button>
+          </div>
+        </div>
+        {auto && (
+          <div className="mt-3 rounded-xl px-3 py-2.5 flex items-center justify-between gap-3 flex-wrap" style={{ background: 'rgba(238,77,45,.08)', border: `1px solid rgba(238,77,45,.25)` }}>
+            <div className="text-xs flex items-center gap-2">
+              <Bot size={15} style={{ color: LARANJA }} />
+              <span className="text-dim">O agente responde sozinho as notas <b style={{ color: LARANJA }}>{faixaAuto}★</b> a cada hora. Notas mais baixas ficam aqui pra você revisar com cuidado.</span>
+            </div>
+            <button onClick={rodarAuto} disabled={autoRun}
+                    className="text-xs px-3 py-1.5 rounded-lg font-semibold text-white flex items-center gap-1.5 shrink-0 disabled:opacity-60" style={{ background: LARANJA }}>
+              {autoRun ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />} Rodar agora
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Distribuição de notas */}
+      {total > 0 && (
+        <div className="glass rounded-2xl p-4 flex items-center gap-5 flex-wrap">
+          <div className="text-center shrink-0">
+            <div className="text-3xl font-display font-bold leading-none" style={{ color: LARANJA }}>{media.toFixed(1)}</div>
+            <div className="mt-1"><Estrelas n={Math.round(media)} size={13} /></div>
+            <div className="text-[11px] text-faint mt-1">{total} avaliação(ões)</div>
+          </div>
+          <div className="flex-1 min-w-[180px] space-y-1">
+            {dist.map((d) => (
+              <button key={d.n} onClick={() => setEstrela(estrela === d.n ? 0 : d.n)}
+                      className="w-full flex items-center gap-2 group">
+                <span className="text-[11px] text-faint w-3 text-right">{d.n}</span>
+                <Star size={11} fill={LARANJA} style={{ color: LARANJA }} />
+                <span className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: 'var(--glass-hover)' }}>
+                  <span className="block h-full rounded-full transition-all" style={{ width: `${(d.qtd / maxQtd) * 100}%`, background: estrela === d.n ? LARANJA : 'rgba(238,77,45,.45)' }} />
+                </span>
+                <span className="text-[11px] text-faint num w-6">{d.qtd}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Filtros */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex gap-1.5">
+          {[['UNANSWERED', 'Sem resposta'], ['ANSWERED', 'Respondidas'], ['ALL', 'Todas']].map(([id, t]) => (
+            <button key={id} onClick={() => { setFiltro(id); setEstrela(0) }} className="text-xs px-3 py-1.5 rounded-lg font-medium"
+                    style={filtro === id ? { background: LARANJA, color: '#fff' } : { background: 'var(--glass)', color: 'var(--text-dim)', border: '1px solid var(--glass-border)' }}>{t}</button>
+          ))}
+        </div>
+        {estrela > 0 && (
+          <button onClick={() => setEstrela(0)} className="text-xs px-2.5 py-1.5 rounded-lg flex items-center gap-1" style={{ background: 'rgba(238,77,45,.12)', color: LARANJA }}>
+            {estrela}★ <X size={11} />
+          </button>
+        )}
+        <button onClick={carregar} className="text-xs px-2.5 py-1.5 rounded-lg text-dim hover:text-fg flex items-center gap-1 ml-auto"><RefreshCw size={12} /> atualizar</button>
+      </div>
+
+      {/* Lista */}
+      {dados === null && <div className="py-10 text-center text-faint flex items-center justify-center gap-2"><Loader2 size={16} className="animate-spin" /> carregando avaliações…</div>}
+      {dados !== null && itens.length === 0 && <div className="text-sm text-faint py-8 text-center glass rounded-2xl">Nenhuma avaliação {filtro === 'UNANSWERED' ? 'sem resposta' : estrela ? `de ${estrela}★` : ''} no momento.</div>}
+      <div className="space-y-2.5">
+        {itens.map((c) => <ReviewCard key={c.comment_id} c={c} cfg={cfg} notify={notify} onRespondida={carregar} />)}
+      </div>
+
+      {showCfg && cfg && <ConfigReviewIA cfg={cfg} onSalvar={salvarCfg} onClose={() => setShowCfg(false)} />}
+    </div>
+  )
+}
+
+function ReviewCard({ c, cfg, notify, onRespondida }) {
+  const respondida = !!c.comment_reply?.reply
+  const [aberto, setAberto] = useState(false)
+  const [rascunho, setRascunho] = useState('')
+  const [gerando, setGerando] = useState(false)
+  const [enviando, setEnviando] = useState(false)
+  const limite = cfg?.limite_chars || 450
+  const nota = c.rating_star || 0
+  const baixa = nota > 0 && nota <= 3
+  const fotos = c.media?.image_url_list || c.image_url_list || []
+
+  const gerar = async (tom) => {
+    setGerando(true); setAberto(true)
+    try {
+      const r = await api.shopeeReviewSugerir({
+        nota, comentario: c.comment || '', produto: c.produto_nome,
+        nome: c.buyer_username, tom,
+      })
+      setRascunho(r.texto || '')
+    } catch (e) { notify(e.message, 'danger') }
+    setGerando(false)
+  }
+  const enviar = async () => {
+    if (!rascunho.trim()) return
+    setEnviando(true)
+    try { await api.shopeeResponder({ comment_id: c.comment_id, texto: rascunho.trim() }); notify('Resposta enviada', 'ok'); onRespondida() }
+    catch (e) { notify(e.message, 'danger') }
+    setEnviando(false)
+  }
+
+  return (
+    <div className="glass rounded-2xl p-3.5" style={baixa && !respondida ? { borderLeft: `3px solid ${LARANJA}` } : undefined}>
+      <div className="flex items-start gap-3">
+        <div className="h-9 w-9 rounded-full grid place-items-center text-xs font-bold text-white shrink-0" style={{ background: corAvatar(c.buyer_username) }}>
+          {iniciais(c.buyer_username)}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-medium truncate">{c.buyer_username || 'comprador'}</span>
+            <Estrelas n={nota} size={13} />
+            <span className="text-[11px] text-faint">· {dataBR(c.comment_time || c.create_time)}</span>
+            {baixa && !respondida && <span className="text-[10px] px-1.5 py-0.5 rounded font-medium" style={{ background: 'rgba(238,77,45,.15)', color: LARANJA }}>atenção</span>}
+          </div>
+
+          {/* produto */}
+          {(c.produto_nome || c.produto_imagem) && (
+            <div className="flex items-center gap-2 mt-1.5">
+              {c.produto_imagem && <img src={c.produto_imagem} alt="" className="h-6 w-6 rounded object-cover" style={{ border: '1px solid var(--glass-border)' }} />}
+              <span className="text-[11px] text-faint truncate">{c.produto_nome || `#${c.item_id}`}</span>
+            </div>
+          )}
+
+          {/* comentário */}
+          <div className="text-sm mt-1.5 leading-relaxed">{c.comment || <span className="text-faint italic">sem comentário escrito</span>}</div>
+
+          {/* fotos do comprador */}
+          {fotos.length > 0 && (
+            <div className="flex gap-1.5 mt-2">
+              {fotos.slice(0, 5).map((u, i) => (
+                <a key={i} href={u} target="_blank" rel="noreferrer">
+                  <img src={u} alt="" className="h-12 w-12 rounded-lg object-cover" style={{ border: '1px solid var(--glass-border)' }} />
+                </a>
+              ))}
+            </div>
+          )}
+
+          {/* resposta existente */}
+          {respondida && (
+            <div className="mt-2.5 rounded-xl px-3 py-2" style={{ background: 'var(--glass-hover)' }}>
+              <div className="text-[11px] font-medium flex items-center gap-1.5 mb-0.5" style={{ color: LARANJA }}><ThumbsUp size={11} /> Sua resposta</div>
+              <div className="text-xs text-dim leading-relaxed">{c.comment_reply.reply}</div>
+            </div>
+          )}
+
+          {/* composer */}
+          {!respondida && (
+            <div className="mt-2.5">
+              {!aberto && rascunho === '' ? (
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button onClick={() => gerar()} disabled={gerando}
+                          className="text-xs px-3 py-1.5 rounded-lg font-semibold text-white flex items-center gap-1.5 disabled:opacity-60" style={{ background: LARANJA }}>
+                    {gerando ? <Loader2 size={13} className="animate-spin" /> : <Wand2 size={13} />} Gerar resposta com IA
+                  </button>
+                  <button onClick={() => setAberto(true)} className="text-xs px-3 py-1.5 rounded-lg font-medium glass text-dim hover:text-fg flex items-center gap-1.5">
+                    <MessageSquare size={13} /> Escrever eu mesmo
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="relative">
+                    <textarea value={rascunho} onChange={(e) => setRascunho(e.target.value)} rows={3}
+                              placeholder="Escreva ou gere uma resposta…"
+                              className="w-full glass rounded-xl px-3 py-2.5 text-sm bg-transparent outline-none resize-none leading-relaxed"
+                              style={{ borderColor: rascunho.length > limite ? 'var(--danger)' : undefined }} />
+                    {gerando && <div className="absolute inset-0 grid place-items-center rounded-xl" style={{ background: 'rgba(0,0,0,.25)' }}><Loader2 size={18} className="animate-spin" style={{ color: LARANJA }} /></div>}
+                  </div>
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] text-faint mr-0.5">tom:</span>
+                      {TONS_UI.map(([id, t, e]) => (
+                        <button key={id} onClick={() => gerar(id)} disabled={gerando} title={`Gerar ${t.toLowerCase()}`}
+                                className="text-[11px] px-2 py-1 rounded-md glass text-dim hover:text-fg disabled:opacity-50">{e} {t}</button>
+                      ))}
+                    </div>
+                    <span className="text-[10px] num" style={{ color: rascunho.length > limite ? 'var(--danger)' : 'var(--faint)' }}>{rascunho.length}/{limite}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button onClick={enviar} disabled={enviando || !rascunho.trim()}
+                            className="text-xs px-3.5 py-2 rounded-lg font-semibold text-white flex items-center gap-1.5 disabled:opacity-60" style={{ background: LARANJA }}>
+                      {enviando ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />} Enviar resposta
+                    </button>
+                    <button onClick={() => gerar(cfg?.tom)} disabled={gerando} className="text-xs px-3 py-2 rounded-lg glass text-dim hover:text-fg flex items-center gap-1.5">
+                      <RefreshCw size={12} /> Regerar
+                    </button>
+                    {rascunho && <button onClick={() => { setRascunho(''); setAberto(false) }} className="text-xs px-2 py-2 rounded-lg text-faint hover:text-fg">limpar</button>}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
 }
+
+function ConfigReviewIA({ cfg, onSalvar, onClose }) {
+  const [f, setF] = useState(cfg)
+  const up = (k, v) => setF((x) => ({ ...x, [k]: v }))
+  const toggleEstrela = (n) => setF((x) => {
+    const s = new Set(x.auto_estrelas || []); s.has(n) ? s.delete(n) : s.add(n)
+    return { ...x, auto_estrelas: [...s].sort() }
+  })
+  const salvar = () => { onSalvar(f); onClose() }
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center p-4" style={{ background: 'rgba(0,0,0,.5)' }} onClick={onClose}>
+      <div className="glass rounded-2xl w-full max-w-lg max-h-[88vh] flex flex-col" style={{ background: 'var(--bg-elev, var(--glass))', backdropFilter: 'blur(20px)' }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-4 border-b border-glassb">
+          <div className="font-display font-semibold flex items-center gap-2"><Settings2 size={17} style={{ color: LARANJA }} /> Como a IA responde</div>
+          <button onClick={onClose} className="text-faint hover:text-fg"><X size={18} /></button>
+        </div>
+        <div className="p-4 overflow-y-auto flex-1 space-y-4">
+          {/* tom */}
+          <div>
+            <div className="text-xs text-dim mb-1.5 font-medium">Tom de voz</div>
+            <div className="flex gap-1.5">
+              {TONS_UI.map(([id, t, e]) => (
+                <button key={id} onClick={() => up('tom', id)} className="flex-1 text-xs px-3 py-2 rounded-lg font-medium transition"
+                        style={f.tom === id ? { background: LARANJA, color: '#fff' } : { background: 'var(--glass-hover)', color: 'var(--text-dim)' }}>{e} {t}</button>
+              ))}
+            </div>
+          </div>
+          {/* assinatura + saudação */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <div className="text-xs text-dim mb-1.5 font-medium">Assinatura (fim da resposta)</div>
+              <input value={f.assinatura || ''} onChange={(e) => up('assinatura', e.target.value)} placeholder="Equipe Sóstrass"
+                     className="w-full glass rounded-lg px-3 py-2 text-sm bg-transparent outline-none" />
+            </div>
+            <div>
+              <div className="text-xs text-dim mb-1.5 font-medium">Saudação (opcional)</div>
+              <input value={f.saudacao || ''} onChange={(e) => up('saudacao', e.target.value)} placeholder="Oi, tudo bem?"
+                     className="w-full glass rounded-lg px-3 py-2 text-sm bg-transparent outline-none" />
+            </div>
+          </div>
+          {/* limite */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <div className="text-xs text-dim font-medium">Tamanho máximo da resposta</div>
+              <span className="text-xs num" style={{ color: LARANJA }}>{f.limite_chars || 450} caracteres</span>
+            </div>
+            <input type="range" min="150" max="900" step="50" value={f.limite_chars || 450}
+                   onChange={(e) => up('limite_chars', Number(e.target.value))} className="w-full" style={{ accentColor: LARANJA }} />
+          </div>
+          {/* instruções */}
+          <div>
+            <div className="text-xs text-dim mb-1.5 font-medium">Regras da loja (instruções livres pra IA)</div>
+            <textarea value={f.instrucoes || ''} onChange={(e) => up('instrucoes', e.target.value)} rows={3}
+                      placeholder="Ex.: sempre lembrar que enviamos em até 24h; oferecer 5% na próxima compra com o cupom VOLTA5; nunca prometer reembolso sem avaliar."
+                      className="w-full glass rounded-xl px-3 py-2.5 text-sm bg-transparent outline-none resize-none leading-relaxed" />
+          </div>
+          {/* toggles */}
+          <div className="space-y-2">
+            {[
+              ['usar_nome', 'Chamar o cliente pelo nome', <Smile size={14} key="a" />],
+              ['usar_emoji', 'Permitir emojis leves', <Smile size={14} key="b" />],
+              ['oferecer_chat', 'Em notas baixas, oferecer resolver pelo chat', <MessageSquare size={14} key="c" />],
+            ].map(([k, label, ic]) => (
+              <button key={k} onClick={() => up(k, !f[k])} className="w-full flex items-center justify-between rounded-lg px-3 py-2.5" style={{ background: 'var(--glass-hover)' }}>
+                <span className="text-sm text-dim flex items-center gap-2">{ic} {label}</span>
+                <span className="relative h-5 w-9 rounded-full transition-colors shrink-0" style={{ background: f[k] ? LARANJA : 'var(--glass-border)' }}>
+                  <span className="absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all" style={{ left: f[k] ? '18px' : '2px' }} />
+                </span>
+              </button>
+            ))}
+          </div>
+          {/* auto estrelas */}
+          <div className="rounded-xl p-3" style={{ background: 'rgba(238,77,45,.06)', border: '1px solid rgba(238,77,45,.2)' }}>
+            <div className="text-xs text-dim font-medium flex items-center gap-1.5 mb-2"><Bot size={14} style={{ color: LARANJA }} /> No modo automático, responder sozinho as notas:</div>
+            <div className="flex gap-1.5">
+              {[5, 4, 3, 2, 1].map((n) => {
+                const on = (f.auto_estrelas || []).includes(n)
+                return (
+                  <button key={n} onClick={() => toggleEstrela(n)} className="flex-1 text-xs py-2 rounded-lg font-medium flex items-center justify-center gap-0.5 transition"
+                          style={on ? { background: LARANJA, color: '#fff' } : { background: 'var(--glass-hover)', color: 'var(--text-dim)' }}>
+                    {n}<Star size={10} fill={on ? '#fff' : 'none'} />
+                  </button>
+                )
+              })}
+            </div>
+            <div className="text-[10px] text-faint mt-1.5">Recomendado deixar só 4 e 5. Notas baixas pedem um olhar humano.</div>
+          </div>
+        </div>
+        <div className="p-4 border-t border-glassb flex justify-end">
+          <button onClick={salvar} className="rounded-lg px-4 py-2 text-sm font-semibold text-white flex items-center gap-2" style={{ background: LARANJA }}>
+            <CheckCircle2 size={15} /> Salvar
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* -------------------- MOTOR DE PROMOÇÕES AUTOMÁTICAS --------------------- */
+const money = (x) => 'R$ ' + Number(x || 0).toFixed(2).replace('.', ',')
+function corMargem(m) { return m >= 20 ? 'var(--ok, #14B8A6)' : m >= 10 ? '#E6B450' : 'var(--danger, #FF6F6F)' }
+
+function MiniToggle({ on, onClick, disabled }) {
+  return (
+    <button onClick={onClick} disabled={disabled}
+            className="relative h-6 w-11 rounded-full transition-colors shrink-0 disabled:opacity-50"
+            style={{ background: on ? LARANJA : 'var(--glass-border)' }}>
+      <span className="absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all" style={{ left: on ? '22px' : '2px' }} />
+    </button>
+  )
+}
+function SliderRegra({ label, valor, min, max, step = 1, sufixo = '', onChange, dica }) {
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-xs text-dim font-medium">{label}</span>
+        <span className="text-xs num" style={{ color: LARANJA }}>{valor}{sufixo}</span>
+      </div>
+      <input type="range" min={min} max={max} step={step} value={valor}
+             onChange={(e) => onChange(Number(e.target.value))} className="w-full" style={{ accentColor: LARANJA }} />
+      {dica && <div className="text-[10px] text-faint mt-0.5">{dica}</div>}
+    </div>
+  )
+}
+
+function MotorPromocoes({ conectado, notify }) {
+  const [cfg, setCfg] = useState(null)
+  const [propostas, setPropostas] = useState(null)
+  const [sel, setSel] = useState(() => new Set())
+  const [gerando, setGerando] = useState(false)
+  const [aplicando, setAplicando] = useState(false)
+  const [queda, setQueda] = useState(null)
+  const [hist, setHist] = useState([])
+
+  const recarregarMeta = () => {
+    api.shopeePromoQueda().then(setQueda).catch(() => {})
+    api.shopeePromoHistorico().then((r) => setHist(r.itens || [])).catch(() => {})
+  }
+  useEffect(() => {
+    if (!conectado) return
+    api.shopeePromoConfig().then(setCfg).catch(() => {})
+    recarregarMeta()
+  }, [conectado])
+
+  const salvar = async (patch) => {
+    setCfg((c) => ({ ...c, ...patch }))
+    try { const r = await api.shopeePromoConfigSalvar(patch); setCfg(r) }
+    catch (e) { notify(e.message, 'danger') }
+  }
+  const gerar = async () => {
+    setGerando(true); setPropostas(null)
+    try {
+      const r = await api.shopeePromoPropor()
+      setPropostas(r)
+      setSel(new Set((r.propostas || []).map((p) => p.item_id)))  // tudo marcado por padrão
+      if (r.acao === 'vazio') notify(r.msg || 'Nenhum produto elegível', 'warn')
+    } catch (e) { notify(e.message, 'danger') }
+    setGerando(false)
+  }
+  const aplicar = async () => {
+    const escolhidas = (propostas?.propostas || []).filter((p) => sel.has(p.item_id))
+    if (!escolhidas.length) return notify('Selecione ao menos um produto', 'warn')
+    setAplicando(true)
+    try {
+      const r = await api.shopeePromoAplicar({ propostas: escolhidas, tipo: cfg?.tipo })
+      if (r.acao === 'ok') {
+        const tot = (r.criadas || []).reduce((s, c) => s + (c.itens || 0), 0)
+        notify(`Promoção criada com ${tot} produto(s)` + ((r.erros || []).length ? ` · ${r.erros.length} aviso(s)` : ''), 'ok')
+        setPropostas(null); recarregarMeta()
+      } else {
+        notify((r.erros || []).join(' · ') || 'Falha ao criar', 'danger')
+      }
+    } catch (e) { notify(e.message, 'danger') }
+    setAplicando(false)
+  }
+  const toggleSel = (id) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+
+  if (!conectado) return <div className="text-sm text-faint py-6 text-center glass rounded-2xl">Conecte a loja Shopee para usar o motor de promoções.</div>
+  if (!cfg) return <div className="py-10 text-center text-faint flex items-center justify-center gap-2"><Loader2 size={16} className="animate-spin" /> carregando motor…</div>
+
+  const auto = cfg.modo === 'auto'
+  const nSel = sel.size
+
+  return (
+    <div className="space-y-3">
+      {/* Cabeçalho / modo */}
+      <div className="glass rounded-2xl p-4" style={{ border: cfg.ativo ? `1px solid ${LARANJA}` : '1px solid var(--glass-border)' }}>
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="h-10 w-10 rounded-xl grid place-items-center shrink-0" style={{ background: 'rgba(238,77,45,.12)' }}>
+              <Sparkles size={20} style={{ color: LARANJA }} />
+            </div>
+            <div className="min-w-0">
+              <div className="font-display font-semibold leading-tight">Motor de promoções</div>
+              <div className="text-xs text-faint">O agente acha os produtos parados, calcula um desconto seguro e cria a campanha — sem furar sua margem.</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-dim">{cfg.ativo ? 'Ativo' : 'Desligado'}</span>
+            <MiniToggle on={cfg.ativo} onClick={() => salvar({ ativo: !cfg.ativo })} />
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 mt-3 flex-wrap">
+          <span className="text-xs text-faint">Modo:</span>
+          <div className="flex rounded-lg p-0.5" style={{ background: 'var(--glass-hover)' }}>
+            {[['auto', '🤖 Agente cria sozinho'], ['sugerir', 'Sugerir e eu aprovo']].map(([id, t]) => (
+              <button key={id} onClick={() => salvar({ modo: id })} className="text-xs px-3 py-1.5 rounded-md font-medium transition"
+                      style={cfg.modo === id ? { background: LARANJA, color: '#fff' } : { color: 'var(--text-dim)' }}>{t}</button>
+            ))}
+          </div>
+        </div>
+        {auto && !cfg.ativo && (
+          <div className="mt-2 text-[11px] text-faint flex items-center gap-1.5"><AlertTriangle size={12} style={{ color: '#E6B450' }} /> Ligue a chave acima pra o agente começar a criar promoções sozinho.</div>
+        )}
+
+        {auto && (
+          <div className="mt-3 rounded-xl p-3 space-y-3" style={{ background: 'rgba(238,77,45,.06)', border: '1px solid rgba(238,77,45,.2)' }}>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-faint">Disparar:</span>
+              <div className="flex rounded-lg p-0.5" style={{ background: 'var(--glass-hover)' }}>
+                {[['agendado', 'Por agenda'], ['queda', 'Quando cair a venda']].map(([id, t]) => (
+                  <button key={id} onClick={() => salvar({ gatilho: id })} className="text-xs px-3 py-1.5 rounded-md font-medium transition"
+                          style={cfg.gatilho === id ? { background: LARANJA, color: '#fff' } : { color: 'var(--text-dim)' }}>{t}</button>
+                ))}
+              </div>
+            </div>
+            {cfg.gatilho === 'agendado'
+              ? <SliderRegra label="A cada quantos dias" valor={cfg.intervalo_dias} min={1} max={30} sufixo=" dias" onChange={(v) => salvar({ intervalo_dias: v })} />
+              : <div className="space-y-3">
+                  <div>
+                    <div className="text-xs text-dim mb-1.5 font-medium">Como medir a queda</div>
+                    <div className="flex gap-1.5">
+                      {[['dia', 'Por dia', 'total de 24h vs média dos dias — mais estável'], ['horario', 'Por horário', 'a faixa atual vs a mesma faixa em outros dias — mais reativo']].map(([id, t, sub]) => (
+                        <button key={id} onClick={() => salvar({ base_comparacao: id })} title={sub}
+                                className="flex-1 text-xs px-2 py-2 rounded-lg font-medium transition"
+                                style={(cfg.base_comparacao || 'dia') === id ? { background: LARANJA, color: '#fff' } : { background: 'var(--glass-hover)', color: 'var(--text-dim)' }}>{t}</button>
+                      ))}
+                    </div>
+                    <div className="text-[10px] text-faint mt-1">{(cfg.base_comparacao || 'dia') === 'horario' ? 'Compara, p.ex., “esta tarde” com as tardes anteriores. Mais sensível — pede um pouco mais de histórico e volume.' : 'Compara o total das últimas 24h com a média dos dias anteriores. Recomendado.'}</div>
+                  </div>
+                  <SliderRegra label="Disparar com queda de" valor={cfg.queda_limiar} min={10} max={70} step={5} sufixo="%" onChange={(v) => salvar({ queda_limiar: v })} />
+                </div>}
+            <button onClick={gerar} disabled={gerando}
+                    className="text-xs px-3 py-1.5 rounded-lg font-semibold text-white flex items-center gap-1.5 disabled:opacity-60" style={{ background: LARANJA }}>
+              {gerando ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />} Pré-visualizar agora
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Detecção de queda */}
+      {queda && (
+        <div className="glass rounded-2xl px-4 py-3 flex items-center gap-3 flex-wrap">
+          <TrendingDown size={18} style={{ color: queda.queda ? 'var(--danger)' : 'var(--faint)' }} />
+          {['coletando', 'coletando_horario', 'volume_baixo'].includes(queda.motivo)
+            ? <div className="text-xs text-faint">{queda.msg || 'Coletando histórico de vendas…'} {queda.amostras != null && `(${queda.amostras} amostras)`}</div>
+            : queda.base
+              ? <div className="text-xs text-dim flex items-center gap-3 flex-wrap">
+                  <span>{queda.base_modo === 'horario' ? `Pedidos na ${queda.rotulo}` : 'Pedidos (24h)'}: <b className="num">{queda.atual}</b></span>
+                  <span className="text-faint">·</span>
+                  <span>Média{queda.base_modo === 'horario' ? ' dessa faixa' : ' dos dias'}: <b className="num">{queda.base}</b></span>
+                  {queda.queda
+                    ? <span className="px-2 py-0.5 rounded font-medium" style={{ background: 'rgba(255,111,111,.15)', color: 'var(--danger)' }}>queda de {queda.queda_pct}% ⚠</span>
+                    : <span className="px-2 py-0.5 rounded font-medium" style={{ background: 'rgba(20,184,166,.12)', color: 'var(--ok)' }}>venda estável</span>}
+                </div>
+              : <div className="text-xs text-faint">Sem base de comparação ainda.</div>}
+        </div>
+      )}
+
+      {/* Regras */}
+      <div className="glass rounded-2xl p-4 space-y-4">
+        <div className="text-sm font-medium flex items-center gap-2"><SlidersHorizontal size={15} style={{ color: LARANJA }} /> Regras do agente</div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4">
+          <div>
+            <div className="text-xs text-dim mb-1.5 font-medium">Quais produtos</div>
+            <div className="flex gap-1.5">
+              {[['estoque_parado', 'Estoque parado'], ['margem_alta', 'Maior margem']].map(([id, t]) => (
+                <button key={id} onClick={() => salvar({ estrategia: id })} className="flex-1 text-xs px-2 py-2 rounded-lg font-medium transition"
+                        style={cfg.estrategia === id ? { background: LARANJA, color: '#fff' } : { background: 'var(--glass-hover)', color: 'var(--text-dim)' }}>{t}</button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs text-dim mb-1.5 font-medium">Tipo de promoção</div>
+            <div className="flex gap-1.5">
+              {[['desconto', 'Desconto'], ['flash', 'Relâmpago'], ['ambos', 'Ambos']].map(([id, t]) => (
+                <button key={id} onClick={() => salvar({ tipo: id })} className="flex-1 text-xs px-2 py-2 rounded-lg font-medium transition"
+                        style={cfg.tipo === id ? { background: LARANJA, color: '#fff' } : { background: 'var(--glass-hover)', color: 'var(--text-dim)' }}>{t}</button>
+              ))}
+            </div>
+          </div>
+          <SliderRegra label="Desconto máximo" valor={cfg.desconto_max} min={1} max={50} sufixo="%" onChange={(v) => salvar({ desconto_max: v })} dica="o teto que o agente pode aplicar" />
+          <SliderRegra label="Piso de margem (trava)" valor={cfg.piso_margem} min={0} max={50} sufixo="%" onChange={(v) => salvar({ piso_margem: v })} dica="NUNCA desconta abaixo disso — sua proteção" />
+          <SliderRegra label="Máximo de produtos" valor={cfg.max_produtos} min={1} max={100} onChange={(v) => salvar({ max_produtos: v })} />
+          <SliderRegra label="Estoque mínimo pra entrar" valor={cfg.estoque_minimo} min={0} max={50} onChange={(v) => salvar({ estoque_minimo: v })} />
+          <SliderRegra label="Duração do desconto" valor={cfg.duracao_dias} min={1} max={30} sufixo=" dias" onChange={(v) => salvar({ duracao_dias: v })} />
+          {(cfg.tipo === 'flash' || cfg.tipo === 'ambos') &&
+            <SliderRegra label="Reservar do estoque (relâmpago)" valor={cfg.reserva_estoque} min={0} max={20} sufixo=" un" onChange={(v) => salvar({ reserva_estoque: v })} dica="segura unidades fora da oferta" />}
+        </div>
+      </div>
+
+      {/* Gerar propostas */}
+      <button onClick={gerar} disabled={gerando}
+              className="w-full rounded-2xl py-3 font-semibold text-white flex items-center justify-center gap-2 disabled:opacity-60" style={{ background: LARANJA }}>
+        {gerando ? <Loader2 size={17} className="animate-spin" /> : <Wand2 size={17} />} {gerando ? 'O agente está analisando…' : 'Gerar propostas de promoção'}
+      </button>
+
+      {/* Tabela de propostas */}
+      {propostas?.acao === 'ok' && propostas.propostas.length > 0 && (
+        <div className="glass rounded-2xl overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-glassb">
+            <div className="text-sm font-medium flex items-center gap-2"><CheckCircle2 size={15} style={{ color: LARANJA }} /> {propostas.propostas.length} proposta(s) · {nSel} selecionada(s)</div>
+            <button onClick={() => setSel(nSel === propostas.propostas.length ? new Set() : new Set(propostas.propostas.map((p) => p.item_id)))}
+                    className="text-xs text-dim hover:text-fg">{nSel === propostas.propostas.length ? 'desmarcar todos' : 'marcar todos'}</button>
+          </div>
+          <div className="max-h-[420px] overflow-y-auto divide-y" style={{ borderColor: 'var(--glass-border)' }}>
+            {propostas.propostas.map((p) => {
+              const on = sel.has(p.item_id)
+              return (
+                <button key={p.item_id} onClick={() => toggleSel(p.item_id)} className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-[var(--glass-hover)]"
+                        style={{ background: on ? 'rgba(238,77,45,.06)' : undefined }}>
+                  <span className="h-4 w-4 rounded grid place-items-center shrink-0" style={{ background: on ? LARANJA : 'transparent', border: `1px solid ${on ? LARANJA : 'var(--glass-border)'}` }}>
+                    {on && <CheckCircle2 size={11} className="text-white" />}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="text-sm truncate block">{p.nome}</span>
+                    <span className="text-[10px] text-faint num">SKU {p.sku} · {p.estoque} em estoque</span>
+                  </span>
+                  <span className="text-right shrink-0">
+                    <span className="text-xs num flex items-center gap-1.5 justify-end">
+                      <span className="text-faint line-through">{money(p.preco_atual)}</span>
+                      <span className="font-semibold">{money(p.preco_promo)}</span>
+                    </span>
+                    <span className="flex items-center gap-1.5 justify-end mt-0.5">
+                      <span className="text-[10px] px-1.5 py-0.5 rounded font-medium" style={{ background: 'rgba(238,77,45,.12)', color: LARANJA }}>-{p.desconto_pct}%</span>
+                      <span className="text-[10px] num" style={{ color: corMargem(p.margem_promo) }}>margem {p.margem_promo}%</span>
+                    </span>
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+          <div className="p-3 border-t border-glassb flex items-center justify-between gap-2">
+            <span className="text-[11px] text-faint">Revise e aplique. {cfg.tipo === 'ambos' ? 'Cria desconto + relâmpago.' : cfg.tipo === 'flash' ? 'Cria oferta relâmpago.' : 'Cria campanha de desconto.'}</span>
+            <button onClick={aplicar} disabled={aplicando || !nSel}
+                    className="rounded-lg px-4 py-2 text-sm font-semibold text-white flex items-center gap-2 disabled:opacity-60" style={{ background: LARANJA }}>
+              {aplicando ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />} Aplicar {nSel} promoção(ões)
+            </button>
+          </div>
+        </div>
+      )}
+      {propostas?.acao === 'vazio' && (
+        <div className="glass rounded-2xl p-6 text-center text-sm text-faint">{propostas.msg || 'Nenhum produto elegível dentro das regras.'}</div>
+      )}
+
+      {/* Histórico */}
+      {hist.length > 0 && (
+        <div className="glass rounded-2xl p-4">
+          <div className="text-sm font-medium mb-2 flex items-center gap-2"><Clock size={14} className="text-dim" /> Promoções criadas pelo motor</div>
+          <div className="space-y-1.5">
+            {hist.map((h, i) => (
+              <div key={i} className="flex items-center gap-2 text-xs rounded-lg px-3 py-2" style={{ background: 'var(--glass-hover)' }}>
+                {h.tipo === 'flash' ? <Flame size={13} style={{ color: LARANJA }} /> : <Tag size={13} style={{ color: LARANJA }} />}
+                <span className="flex-1 truncate text-dim">{h.nome || h.tipo} · {h.qtd_itens} itens · -{h.desconto_pct}%</span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'var(--glass)', color: 'var(--faint)' }}>{h.motivo}</span>
+                <span className="text-[10px] text-faint">{h.criado_em ? new Date(h.criado_em).toLocaleDateString('pt-BR') : ''}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 
 /* ----------------------------- SAÚDE DA LOJA ----------------------------- */
 function SaudeLoja({ conectado }) {
@@ -828,20 +1524,67 @@ function Modal({ titulo, children, onClose, onSalvar, salvando }) {
 }
 
 /* -------------------- Seletor de itens da Shopee (reuso) ----------------- */
-function useItensShopee() {
-  const [itens, setItens] = useState(null)
+// Carrega os anúncios da Shopee página a página (100 por vez), mostrando conforme chegam.
+// Com milhares de SKUs, sem isso só viria a 1ª página e a busca não acharia a maioria.
+function useItensShopeeProg(ativo = true) {
+  const [itens, setItens] = useState([])
+  const [carregando, setCarregando] = useState(true)
+  const [completo, setCompleto] = useState(false)
   useEffect(() => {
-    api.shopeeProdutos().then((r) => {
-      const lista = r?.response?.item || r?.item || []
-      setItens(lista.map((x) => ({ item_id: x.item_id, nome: x.item_name || `#${x.item_id}` })))
-    }).catch(() => setItens([]))
-  }, [])
-  return itens
+    if (!ativo) return
+    let cancel = false
+    const PAGINA = 100, MAX_PAGINAS = 8   // até ~800 anúncios
+    setCarregando(true); setCompleto(false); setItens([])
+    ;(async () => {
+      const acc = []
+      for (let p = 0; p < MAX_PAGINAS && !cancel; p++) {
+        let r
+        try { r = await api.shopeeProdutos(p * PAGINA, PAGINA) } catch { break }
+        const lista = r?.response?.item || r?.item || []
+        for (const x of lista) acc.push({
+          item_id: x.item_id, nome: x.item_name || `#${x.item_id}`,
+          sku: x.item_sku || '', preco: x.price, estoque: x.stock, imagem: x.image,
+        })
+        if (!cancel) setItens(acc.slice())
+        if (lista.length < PAGINA) break   // última página
+      }
+      if (!cancel) { setCarregando(false); setCompleto(true) }
+    })()
+    return () => { cancel = true }
+  }, [ativo])
+  return { itens, carregando, completo }
+}
+
+function filtrarItens(itens, q) {
+  const t = (q || '').trim().toLowerCase()
+  if (!t) return itens
+  return itens.filter((i) => (i.nome || '').toLowerCase().includes(t) || (i.sku || '').toLowerCase().includes(t))
+}
+
+// Barra de busca reutilizável (fica fixa no topo da lista enquanto rola)
+function BarraBusca({ valor, onChange, carregando, completo, mostrando, total }) {
+  return (
+    <div className="sticky top-0 z-10 pb-2 -mt-1" style={{ background: 'var(--bg-elev, var(--glass))' }}>
+      <div className="relative">
+        <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
+        <input value={valor} onChange={(e) => onChange(e.target.value)} autoFocus
+               placeholder="Buscar por nome ou SKU…"
+               className="w-full glass rounded-lg pl-9 pr-3 py-2 text-sm bg-transparent outline-none" />
+      </div>
+      <div className="text-[11px] text-faint mt-1.5 flex items-center gap-1.5">
+        {carregando
+          ? <><Loader2 size={11} className="animate-spin" /> carregando anúncios… {total} até agora</>
+          : <>{valor ? `${mostrando} de ${total}` : `${total} anúncio(s)`}{!completo && total >= 800 && ' (primeiros 800 — refine pela busca)'}</>}
+      </div>
+    </div>
+  )
 }
 
 function SeletorItens({ titulo, comPreco, onConfirmar, onClose }) {
-  const itens = useItensShopee()
+  const { itens, carregando, completo } = useItensShopeeProg()
+  const [busca, setBusca] = useState('')
   const [sel, setSel] = useState({})  // item_id -> {nome, preco}
+  const filtrados = useMemo(() => filtrarItens(itens, busca), [itens, busca])
   const toggle = (it) => setSel((s) => {
     const n = { ...s }
     if (n[it.item_id]) delete n[it.item_id]; else n[it.item_id] = { nome: it.nome, preco: '' }
@@ -852,19 +1595,25 @@ function SeletorItens({ titulo, comPreco, onConfirmar, onClose }) {
     const arr = Object.entries(sel).map(([item_id, v]) => ({ item_id, nome: v.nome, preco: v.preco }))
     onConfirmar(arr)
   }
+  const nSel = Object.keys(sel).length
   return (
-    <Modal titulo={titulo} onClose={onClose} onSalvar={confirmar} salvando={false}>
-      {itens === null ? <Carregando txt="carregando anúncios…" />
+    <Modal titulo={nSel ? `${titulo} · ${nSel} selecionado(s)` : titulo} onClose={onClose} onSalvar={confirmar} salvando={false}>
+      <BarraBusca valor={busca} onChange={setBusca} carregando={carregando} completo={completo} mostrando={filtrados.length} total={itens.length} />
+      {itens.length === 0 && carregando ? <Carregando txt="carregando anúncios…" />
         : itens.length === 0 ? <Vazio txt="Não consegui listar os anúncios da Shopee." />
+        : filtrados.length === 0 ? <div className="py-8 text-center text-faint text-sm">Nenhum anúncio para "{busca}".</div>
         : <div className="space-y-1">
-            {itens.map((i) => (
+            {filtrados.map((i) => (
               <div key={i.item_id} className="rounded-lg px-2.5 py-1.5" style={{ background: sel[i.item_id] ? 'rgba(238,77,45,.1)' : 'var(--glass-hover)' }}>
                 <button onClick={() => toggle(i)} className="w-full flex items-center gap-2 text-left">
                   <span className="h-4 w-4 rounded grid place-items-center shrink-0" style={{ background: sel[i.item_id] ? LARANJA : 'transparent', border: `1px solid ${sel[i.item_id] ? LARANJA : 'var(--glass-border)'}` }}>
                     {sel[i.item_id] && <CheckCircle2 size={11} className="text-white" />}
                   </span>
-                  <span className="text-sm truncate flex-1">{i.nome}</span>
-                  <span className="text-[11px] text-faint num">#{i.item_id}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="text-sm truncate block">{i.nome}</span>
+                    {i.sku && <span className="text-[10px] text-faint num">SKU {i.sku}</span>}
+                  </span>
+                  <span className="text-[11px] text-faint num shrink-0">#{i.item_id}</span>
                 </button>
                 {comPreco && sel[i.item_id] && (
                   <input type="number" value={sel[i.item_id].preco} onChange={(e) => setPreco(i.item_id, e.target.value)}
