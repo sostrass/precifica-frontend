@@ -116,3 +116,16 @@ body::after  { width: 520px; height: 520px; background: radial-gradient(circle, 
   animation: shimmer 1.6s infinite;
 }
 @keyframes fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+/* ===== Terminal / bolsa de valores ===== */
+.mono { font-family: ui-monospace, "SF Mono", "JetBrains Mono", "Menlo", monospace; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+@keyframes ticker { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
+.ticker-track { display: inline-flex; white-space: nowrap; animation: ticker 38s linear infinite; }
+.ticker-wrap:hover .ticker-track { animation-play-state: paused; }
+@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+.live-dot { animation: blink 1.4s ease-in-out infinite; }
+.term-panel { background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 12px; }
+.term-head { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); font-weight: 600; }
+.term-row:hover { background: var(--glass-hover); }
+.heat-cell { transition: transform .12s ease, box-shadow .12s ease; }
+.heat-cell:hover { transform: scale(1.12); box-shadow: 0 4px 18px rgba(0,0,0,.5); z-index: 5; }
