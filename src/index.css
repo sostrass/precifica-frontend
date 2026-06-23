@@ -98,3 +98,21 @@ body::after  { width: 520px; height: 520px; background: radial-gradient(circle, 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }
+
+/* Skeleton shimmer + fade para o Dashboard */
+@keyframes shimmer { 100% { transform: translateX(100%); } }
+.shimmer {
+  position: relative;
+  overflow: hidden;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+}
+.shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, var(--glass-hover), transparent);
+  animation: shimmer 1.6s infinite;
+}
+@keyframes fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
