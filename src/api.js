@@ -30,6 +30,7 @@ export const api = {
   produtoDetalhe: (id) => req(`/api/produtos/${id}`),
   produtoAtualizar: (id, b) => req(`/api/produtos/${id}`, { method: 'PUT', body: b }),
   iaCampo: (b) => req('/api/ia/campo', { method: 'POST', body: b }),
+  dashboardCarteira: (canal='mercadolivre') => req('/api/dashboard/carteira?canal='+canal),
   kpis: (dias) => req('/api/kpis' + (dias ? `?dias=${dias}` : '')),
   produtoConselho: (id) => req(`/api/produtos/${id}/conselho`),
   produtoPosicionamento: (id, canal) => req(`/api/produtos/${id}/posicionamento` + (canal ? `?canal=${canal}` : '')),
