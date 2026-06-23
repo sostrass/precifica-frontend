@@ -248,11 +248,34 @@ function Webhooks() {
         </button>
       </div>
 
-      <div className="rounded-xl border border-glassb p-3 text-xs text-dim space-y-1.5 mb-4">
-        <div className="font-medium text-fg flex items-center gap-1.5"><Info size={13} /> Como ativar no Bling</div>
-        <div>1. No Bling: <b>Configurações → Webhooks → Configuração de servidores</b>. Dê um Alias (ex.: "Precifica AI") e cole a URL acima.</div>
-        <div>2. Em cada recurso (Produtos, Pedidos de Vendas, Notas Fiscais, Estoque), ligue o <b>webhook</b>, selecione o servidor que você criou e marque Criação / Atualização / Exclusão.</div>
-        <div>3. O app precisa ter os <b>escopos</b> desses recursos na autorização do Bling — se um recurso não aparecer pra configurar, falta o escopo.</div>
+      <div className="rounded-xl border border-glassb p-3 text-xs text-dim space-y-2.5 mb-4">
+        <div className="font-medium text-fg flex items-center gap-1.5"><Info size={13} /> Passo a passo completo</div>
+
+        <div>
+          <div className="font-medium text-fg mb-1">Etapa 1 — Habilitar os escopos no app (portal do desenvolvedor Bling)</div>
+          <div className="text-faint">Sem os escopos, os recursos nem aparecem pra configurar webhook. No portal onde você criou o app:</div>
+          <ul className="mt-1 space-y-0.5">
+            {['Produtos', 'Pedidos de Vendas', 'Estoques', 'Notas Fiscais Eletrônicas'].map((e) => (
+              <li key={e} className="flex items-center gap-1.5"><Check size={12} style={{ color: 'var(--accent2)' }} /> Escopo de <b className="text-fg">{e}</b></li>
+            ))}
+          </ul>
+          <div className="text-faint mt-1">Salve e <b>reconecte o Bling</b> aqui no app (Conectar Bling) pra valer os novos escopos.</div>
+        </div>
+
+        <div>
+          <div className="font-medium text-fg mb-1">Etapa 2 — Cadastrar o servidor</div>
+          <div className="text-faint">No Bling: <b>Configurações → Webhooks → Configuração de servidores</b>. Em <b>Alias</b> coloque "Precifica AI" e em <b>URL</b> cole o endereço acima. Salve.</div>
+        </div>
+
+        <div>
+          <div className="font-medium text-fg mb-1">Etapa 3 — Ligar cada recurso</div>
+          <div className="text-faint">Em cada bloco (Produtos, Pedidos, Estoque, NF-e): ative o <b>toggle do webhook</b>, selecione o servidor "Precifica AI", marque <b>Criação, Atualização e Exclusão</b> e mantenha a versão <b>v1</b>.</div>
+        </div>
+
+        <div>
+          <div className="font-medium text-fg mb-1">Etapa 4 — Testar</div>
+          <div className="text-faint">Edite qualquer produto no Bling. Em segundos o evento aparece aqui embaixo e o status do produto vira "Sincronizado" na Ficha.</div>
+        </div>
       </div>
 
       <div className="flex items-center justify-between mb-2">

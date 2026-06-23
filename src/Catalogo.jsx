@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Search, RefreshCw, Plug, X, Check, Zap, Radar } from 'lucide-react'
+import { Search, RefreshCw, Plug, X, Check, Zap, Radar, Wand2, Database, Loader2 } from 'lucide-react'
 import { api, DEFAULT_CUSTOS } from './api.js'
 import { useToast } from './toast.jsx'
 import RadarDrawer from './RadarDrawer.jsx'
@@ -22,6 +22,36 @@ export default function Catalogo() {
   const [drawer, setDrawer] = useState(null)
   const [abrir, setAbrir] = useState(null)
   const [aplicando, setAplicando] = useState(false)
+  const [loteIa, setLoteIa] = useState(null)
+  const [syncStatus, setSyncStatus] = useState(null)
+
+  useEffect(() => {
+    let timer
+    const poll = async () => {
+      try {
+        const s = await api.catalogoSyncStatus()
+        setSyncStatus(s)
+        if (s.status === 'rodando') timer = setTimeout(poll, 2500)
+      } catch { /* silencioso */ }
+    }
+    poll()
+    return () => clearTimeout(timer)
+  }, [])
+
+  const sincronizarTudo = async () => {
+    try {
+      await api.catalogoSincronizar()
+      notify('Sincronização do catálogo iniciada', 'ok')
+      setSyncStatus({ status: 'rodando', total: 0, paginas: 0 })
+      const poll = async () => {
+        const s = await api.catalogoSyncStatus()
+        setSyncStatus(s)
+        if (s.status === 'rodando') setTimeout(poll, 2500)
+        else if (s.status === 'concluido') notify(`Catálogo sincronizado: ${s.total} produtos`, 'ok')
+      }
+      setTimeout(poll, 2000)
+    } catch (e) { notify(e.message, 'danger') }
+  }
 
   const carregar = () => {
     setItens(null); setErro('')
@@ -69,6 +99,18 @@ export default function Catalogo() {
     setAplicando(false)
   }
 
+  const aplicarLoteIa = async (campo) => {
+    const ids = (itens || []).filter((i) => sel.has(i.id)).map((i) => i.id)
+    if (ids.length === 0) return
+    setLoteIa(campo)
+    try {
+      const r = await api.loteIa({ produto_ids: ids, campo, aplicar: true })
+      notify(`IA: ${r.ok} de ${r.total} ${campo === 'titulo' ? 'títulos' : 'descrições'} gravados no Bling`, r.ok ? 'ok' : 'warn')
+      setSel(new Set())
+    } catch (e) { notify(e.message, 'danger') }
+    setLoteIa(null)
+  }
+
   if (!itens && !erro) return <Skeleton />
   if (erro || (itens && itens.length === 0)) return <SemDados />
 
@@ -91,7 +133,24 @@ export default function Catalogo() {
         <button onClick={carregar} className="glass rounded-xl px-3 py-2 text-sm flex items-center gap-2 text-dim hover:text-fg">
           <RefreshCw size={15} /> Atualizar
         </button>
+        <button onClick={sincronizarTudo} disabled={syncStatus?.status === 'rodando'}
+                className="rounded-xl px-3 py-2 text-sm flex items-center gap-2 disabled:opacity-70"
+                style={{ background: 'rgba(230,180,80,.12)', color: 'var(--accent)', border: '1px solid var(--accent)' }}>
+          <Database size={15} /> {syncStatus?.status === 'rodando' ? 'Sincronizando…' : 'Sincronizar catálogo completo'}
+        </button>
       </div>
+
+      {syncStatus && syncStatus.status !== 'ocioso' && (
+        <div className="glass rounded-xl px-4 py-2.5 text-sm flex items-center gap-3"
+             style={{ border: `1px solid ${syncStatus.status === 'erro' ? 'var(--danger)' : 'var(--accent2)'}` }}>
+          {syncStatus.status === 'rodando' && <Loader2 size={15} className="animate-spin" style={{ color: 'var(--accent2)' }} />}
+          <span className="flex-1">
+            {syncStatus.status === 'rodando' && <>Puxando o catálogo do Bling… <b className="num">{syncStatus.total}</b> produtos no servidor (página {syncStatus.paginas}).</>}
+            {syncStatus.status === 'concluido' && <>Catálogo sincronizado: <b className="num">{syncStatus.total}</b> produtos no servidor. As alterações agora chegam por webhook.</>}
+            {syncStatus.status === 'erro' && <span style={{ color: 'var(--danger)' }}>Erro na sincronização: {syncStatus.erro}</span>}
+          </span>
+        </div>
+      )}
 
       {/* Filtros por status */}
       <div className="flex flex-wrap gap-2">
@@ -111,16 +170,26 @@ export default function Catalogo() {
 
       {/* Barra de ação em massa */}
       {sel.size > 0 && (
-        <div className="rounded-xl px-4 py-2.5 flex items-center justify-between" style={{ background: 'var(--glass-hover)', border: '1px solid var(--accent)' }}>
+        <div className="rounded-xl px-4 py-2.5 flex items-center justify-between flex-wrap gap-2" style={{ background: 'var(--glass-hover)', border: '1px solid var(--accent)' }}>
           <span className="text-sm flex items-center gap-2">
             <Zap size={15} className="text-accent" /> <b className="num">{sel.size}</b> selecionado(s)
           </span>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <button onClick={() => setSel(new Set())} className="text-xs text-dim hover:text-fg flex items-center gap-1"><X size={13} /> limpar</button>
-            <button disabled={aplicando} onClick={aplicarLote}
+            <button disabled={loteIa || aplicando} onClick={() => aplicarLoteIa('titulo')}
+                    className="rounded-lg px-3 py-1.5 text-sm font-medium flex items-center gap-1.5 disabled:opacity-60"
+                    style={{ background: 'rgba(79,227,201,.12)', color: 'var(--accent2)', border: '1px solid var(--accent2)' }}>
+              <Wand2 size={14} /> {loteIa === 'titulo' ? 'Gerando…' : 'Títulos IA'}
+            </button>
+            <button disabled={loteIa || aplicando} onClick={() => aplicarLoteIa('descricao')}
+                    className="rounded-lg px-3 py-1.5 text-sm font-medium flex items-center gap-1.5 disabled:opacity-60"
+                    style={{ background: 'rgba(201,160,255,.12)', color: '#C9A0FF', border: '1px solid #C9A0FF' }}>
+              <Wand2 size={14} /> {loteIa === 'descricao' ? 'Gerando…' : 'Descrições IA'}
+            </button>
+            <button disabled={aplicando || loteIa} onClick={aplicarLote}
                     className="rounded-lg px-4 py-1.5 text-sm font-medium text-white disabled:opacity-60 flex items-center gap-2"
                     style={{ background: 'var(--accent)' }}>
-              <Check size={14} /> {aplicando ? 'Aplicando…' : 'Aplicar sugerido no Bling'}
+              <Check size={14} /> {aplicando ? 'Aplicando…' : 'Aplicar preço'}
             </button>
           </div>
         </div>

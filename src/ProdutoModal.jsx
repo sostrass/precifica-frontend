@@ -9,10 +9,19 @@ import { useToast } from './toast.jsx'
 
 const brl = (v) => (v == null || v === '' ? '—' : 'R$ ' + Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
 
+const SYNC_ESTADO = {
+  confirmado: { t: 'Sincronizado', c: 'var(--accent2)', ic: '●' },
+  pendente: { t: 'Pendente', c: 'var(--warn)', ic: '◐' },
+  enviado: { t: 'Enviado', c: 'var(--warn)', ic: '◐' },
+  erro: { t: 'Erro', c: 'var(--danger)', ic: '✕' },
+  sem_alteracoes: { t: 'Em dia', c: 'var(--faint)', ic: '○' },
+}
+
 export default function ProdutoModal({ produtoId, onClose, onSaved }) {
   const notify = useToast()
   const [d, setD] = useState(null)
   const [form, setForm] = useState(null)
+  const [statusProd, setStatusProd] = useState(null)
   const [erro, setErro] = useState('')
   const [saving, setSaving] = useState(false)
   const [aplicando, setAplicando] = useState(null)
@@ -30,6 +39,18 @@ export default function ProdutoModal({ produtoId, onClose, onSaved }) {
   const [precoManual, setPrecoManual] = useState({})
   const [probeML, setProbeML] = useState(null)
   const [probeLoading, setProbeLoading] = useState(false)
+  const [corrigindo, setCorrigindo] = useState(null)
+
+  const corrigirCanal = async (l) => {
+    if (!l.id_loja || !l.preco_alvo) return
+    setCorrigindo(l.id_loja)
+    try {
+      await api.precoCanal(produtoId, { id_loja: l.id_loja, preco: l.preco_alvo })
+      notify(`${l.nome}: preço corrigido para ${brl(l.preco_alvo)}`, 'ok')
+      carregarSinc()
+    } catch (e) { notify(e.message, 'danger') }
+    setCorrigindo(null)
+  }
 
   const rodarProbe = async () => {
     setProbeLoading(true)
@@ -55,6 +76,7 @@ export default function ProdutoModal({ produtoId, onClose, onSaved }) {
         })
       })
       .catch((e) => setErro(e.message))
+    api.produtoStatus(produtoId).then(setStatusProd).catch(() => {})
   }
   useEffect(carregar, [produtoId])
 
@@ -169,7 +191,28 @@ export default function ProdutoModal({ produtoId, onClose, onSaved }) {
           </div>
           <div className="min-w-0 flex-1">
             <div className="font-display font-semibold truncate">{d?.nome || 'Carregando…'}</div>
-            <div className="text-xs text-faint num">{d?.sku}</div>
+            <div className="flex items-center gap-2 flex-wrap mt-0.5">
+              <span className="text-xs text-faint num">{d?.sku}</span>
+              {statusProd?.sync && (() => {
+                const e = SYNC_ESTADO[statusProd.sync.estado] || SYNC_ESTADO.sem_alteracoes
+                return (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-md font-medium inline-flex items-center gap-1"
+                        style={{ color: e.c, background: 'var(--glass-hover)', border: `1px solid ${e.c}` }}
+                        title={statusProd.sync.campos ? 'Último envio: ' + statusProd.sync.campos.join(', ') : ''}>
+                    <span style={{ fontSize: 8 }}>{e.ic}</span> {e.t}
+                  </span>
+                )
+              })()}
+              {(statusProd?.plataformas || []).map((p, i) => (
+                <span key={i} className="text-[10px] px-1.5 py-0.5 rounded-md inline-flex items-center gap-1"
+                      style={{ color: p.ativo ? 'var(--accent2)' : 'var(--faint)', background: 'var(--glass-hover)',
+                               border: `1px solid ${p.ativo ? 'var(--accent2)' : 'var(--glass-border)'}` }}
+                      title={p.ativo ? 'anúncio ativo' : (p.publicado ? 'publicado sem preço' : 'inativo')}>
+                  <span className="h-1.5 w-1.5 rounded-full" style={{ background: p.ativo ? 'var(--accent2)' : 'var(--faint)' }} />
+                  {p.nome}
+                </span>
+              ))}
+            </div>
           </div>
           <button onClick={onClose} className="text-dim hover:text-fg p-1"><X size={20} /></button>
         </div>
@@ -432,6 +475,13 @@ export default function ProdutoModal({ produtoId, onClose, onSaved }) {
                                       <div className="text-[10px] text-faint uppercase tracking-wide">alvo</div>
                                       <div className="num font-semibold text-accent">{brl(d.preco_alvo)}</div>
                                     </div>
+                                  )}
+                                  {sinc.fonte_lida && l.id_loja && l.preco_alvo && (l.prejuizo || (d && d.status === 'divergente')) && (
+                                    <button onClick={() => corrigirCanal(l)} disabled={corrigindo === l.id_loja}
+                                            className="text-[10px] px-2 py-1 rounded-md font-medium shrink-0 inline-flex items-center gap-1 disabled:opacity-60"
+                                            style={{ background: 'var(--glass-hover)', color: 'var(--accent2)', border: '1px solid var(--accent2)' }}>
+                                      {corrigindo === l.id_loja ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />} Corrigir
+                                    </button>
                                   )}
                                   <span className="text-[10px] px-2 py-1 rounded-md font-medium shrink-0" style={{ background: 'var(--glass-hover)', color: st.c, border: `1px solid ${st.c}` }}>{st.t}</span>
                                 </div>

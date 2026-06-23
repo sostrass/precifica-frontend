@@ -1,5 +1,5 @@
 import { useEffect, useState, lazy, Suspense } from 'react'
-import { LayoutDashboard, Boxes, Calculator, SatelliteDish, FileText, Sparkles, Aperture, Bot, Settings, Sun, Moon, LogOut, Plug } from 'lucide-react'
+import { LayoutDashboard, Boxes, Calculator, SatelliteDish, FileText, Sparkles, Aperture, Bot, Settings, Sun, Moon, LogOut, Plug, ShoppingBag } from 'lucide-react'
 import { api, getToken, setToken } from './api.js'
 import { useToast } from './toast.jsx'
 import Login from './Login.jsx'
@@ -13,10 +13,12 @@ const CentralIa = lazy(() => import('./CentralIa.jsx'))
 const Estudio = lazy(() => import('./Estudio.jsx'))
 const Agentes = lazy(() => import('./Agentes.jsx'))
 const Configuracoes = lazy(() => import('./Configuracoes.jsx'))
+const Shopee = lazy(() => import('./Shopee.jsx'))
 
 const TITULOS = {
   dashboard: 'Inteligência Comercial',
   catalogo: 'Catálogo',
+  shopee: 'Shopee',
   precificacao: 'Precificação por canal',
   radar: 'Radar de mercado',
   nfe: 'Notas fiscais',
@@ -83,6 +85,7 @@ export default function App() {
           <NavItem icon={<Sparkles size={18} />} label="Central IA" active={view === 'ia'} onClick={() => setView('ia')} />
           <NavItem icon={<Aperture size={18} />} label="Estúdio" active={view === 'estudio'} onClick={() => setView('estudio')} />
           <NavItem icon={<Bot size={18} />} label="Agentes" active={view === 'agentes'} onClick={() => setView('agentes')} />
+          <NavItem icon={<ShoppingBag size={18} />} label="Shopee" active={view === 'shopee'} onClick={() => setView('shopee')} />
           <NavItem icon={<Settings size={18} />} label="Configurações" active={view === 'configuracoes'} onClick={() => setView('configuracoes')} />
         </nav>
 
@@ -131,6 +134,7 @@ export default function App() {
             {view === 'ia' && <CentralIa />}
             {view === 'estudio' && <Estudio />}
             {view === 'agentes' && <Agentes />}
+            {view === 'shopee' && <Shopee />}
             {view === 'configuracoes' && <Configuracoes />}
           </Suspense>
         </main>
