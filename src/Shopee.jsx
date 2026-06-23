@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Rocket, Star, Activity, ShoppingBag, Tag, Megaphone, Package,
-  Plus, X, Pin, PinOff, Play, Loader2, Zap, Clock, CheckCircle2,
+  Plus, X, Pin, PinOff, Play, Square, Loader2, Zap, Clock, CheckCircle2,
   AlertTriangle, Plug, RefreshCw, Wand2, ChevronRight, Flame,
   HelpCircle, GitCompareArrows, Undo2, TrendingUp, TrendingDown, Trash2, Calendar,
   Stethoscope, XCircle, ShieldAlert, CircleDot, Bot, Search,
@@ -567,17 +567,67 @@ function Avaliacoes({ conectado, notify }) {
   const [cfg, setCfg] = useState(null)
   const [showCfg, setShowCfg] = useState(false)
   const [autoRun, setAutoRun] = useState(false)
+  const [ativ, setAtiv] = useState(null)   // estado vivo do agente (progresso, log, contagem)
 
   const carregar = () => { setDados(null); api.shopeeAvaliacoes(filtro).then(setDados).catch(() => setDados({ erro: true })) }
   useEffect(() => { if (conectado) carregar() }, [filtro, conectado])
   useEffect(() => { if (conectado) api.shopeeReviewConfig().then(setCfg).catch(() => {}) }, [conectado])
 
-  const todos = dados?.response?.item_comment_list || dados?.item_comment_list || []
-  const itens = estrela ? todos.filter((c) => (c.rating_star || 0) === estrela) : todos
-  const total = todos.length
-  const media = total ? todos.reduce((s, c) => s + (c.rating_star || 0), 0) / total : 0
-  const dist = [5, 4, 3, 2, 1].map((n) => ({ n, qtd: todos.filter((c) => (c.rating_star || 0) === n).length }))
+  // Polling do estado do agente: rápido quando está trabalhando, lento quando ocioso.
+  useEffect(() => {
+    if (!conectado) return
+    let anterior = false
+    const tick = async () => {
+      try {
+        const a = await api.shopeeReviewAtividade()
+        setAtiv(a)
+        const rodando = a?.progresso?.em_andamento
+        if (anterior && !rodando) carregar()   // acabou um lote → recarrega a lista
+        anterior = rodando
+      } catch { /* silencioso */ }
+    }
+    tick()
+    const lento = setInterval(tick, 12000)
+    let rapido = null
+    const ajusta = setInterval(() => {
+      const rodando = ativ?.progresso?.em_andamento
+      if (rodando && !rapido) rapido = setInterval(tick, 3000)
+      if (!rodando && rapido) { clearInterval(rapido); rapido = null }
+    }, 2000)
+    return () => { clearInterval(lento); clearInterval(ajusta); if (rapido) clearInterval(rapido) }
+  }, [conectado, ativ?.progresso?.em_andamento])
+
+  // separa pendentes x respondidas no cliente (garante a divisão, não confia só no filtro da API)
+  const brutos = dados?.response?.item_comment_list || dados?.item_comment_list || []
+  const temResposta = (c) => !!(c.comment_reply && c.comment_reply.reply)
+  const filtrados = filtro === 'ANSWERED' ? brutos.filter(temResposta)
+    : filtro === 'UNANSWERED' ? brutos.filter((c) => !temResposta(c))
+    : brutos
+  const itens = estrela ? filtrados.filter((c) => (c.rating_star || 0) === estrela) : filtrados
+  const total = filtrados.length
+  const media = total ? filtrados.reduce((s, c) => s + (c.rating_star || 0), 0) / total : 0
+  const dist = [5, 4, 3, 2, 1].map((n) => ({ n, qtd: filtrados.filter((c) => (c.rating_star || 0) === n).length }))
   const maxQtd = Math.max(1, ...dist.map((d) => d.qtd))
+
+  const contar = async (forcar = true) => {
+    try { await api.shopeeReviewContar(forcar); if (forcar) notify('Contando suas avaliações…', 'ok') }
+    catch (e) { if (forcar) notify(e.message, 'danger') }
+  }
+  // conta sozinho ao abrir (usa cache no servidor; só pagina se não tiver contagem fresca)
+  useEffect(() => { if (conectado) contar(false) }, [conectado])
+
+  const mutirao = async () => {
+    try {
+      const r = await api.shopeeReviewMutirao()
+      if (r.acao === 'ja_rodando') notify(r.msg || 'O agente já está respondendo.', 'warn')
+      else notify(r.mensagem || 'Mutirão iniciado — respondendo a fila inteira…', 'ok')
+      setTimeout(() => api.shopeeReviewAtividade().then(setAtiv).catch(() => {}), 1200)
+    } catch (e) { notify(e.message, 'danger') }
+  }
+  const parar = async () => {
+    try { await api.shopeeReviewParar(); notify('Pedindo para o agente parar…', 'ok') }
+    catch (e) { notify(e.message, 'danger') }
+  }
 
   const salvarCfg = async (patch) => {
     setCfg((c) => ({ ...c, ...patch }))
@@ -590,10 +640,7 @@ function Avaliacoes({ conectado, notify }) {
       const r = await api.shopeeReviewAuto()
       if (r.acao === 'iniciado') {
         notify(r.mensagem || 'Agente respondendo em segundo plano…', 'ok')
-        // as respostas saem espaçadas; atualiza a lista algumas vezes pra vê-las aparecer
-        setTimeout(carregar, 8000)
-        setTimeout(carregar, 25000)
-        setTimeout(carregar, 60000)
+        setTimeout(() => api.shopeeReviewAtividade().then(setAtiv).catch(() => {}), 1500)
       } else {
         notify(`${r.respondidos || 0} resposta(s) enviada(s) pelo agente` + (r.ignorados_para_revisao ? ` · ${r.ignorados_para_revisao} guardada(s) p/ você revisar` : ''), 'ok')
         carregar()
@@ -636,18 +683,15 @@ function Avaliacoes({ conectado, notify }) {
           </div>
         </div>
         {auto && (
-          <div className="mt-3 rounded-xl px-3 py-2.5 flex items-center justify-between gap-3 flex-wrap" style={{ background: 'rgba(238,77,45,.08)', border: `1px solid rgba(238,77,45,.25)` }}>
-            <div className="text-xs flex items-center gap-2">
-              <Bot size={15} style={{ color: LARANJA }} />
-              <span className="text-dim">O agente responde sozinho as notas <b style={{ color: LARANJA }}>{faixaAuto}★</b> a cada hora. Notas mais baixas ficam aqui pra você revisar com cuidado.</span>
-            </div>
-            <button onClick={rodarAuto} disabled={autoRun}
-                    className="text-xs px-3 py-1.5 rounded-lg font-semibold text-white flex items-center gap-1.5 shrink-0 disabled:opacity-60" style={{ background: LARANJA }}>
-              {autoRun ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />} Rodar agora
-            </button>
+          <div className="mt-3 rounded-xl px-3 py-2.5 flex items-center gap-2" style={{ background: 'rgba(238,77,45,.08)', border: `1px solid rgba(238,77,45,.25)` }}>
+            <Bot size={15} style={{ color: LARANJA }} className="shrink-0" />
+            <span className="text-xs text-dim">O agente responde sozinho as notas <b style={{ color: LARANJA }}>{faixaAuto}★</b> de hora em hora. Pra limpar a fila toda agora, use <b>“Responder todas as pendentes”</b> abaixo. Notas mais baixas ficam pra você revisar com cuidado.</span>
           </div>
         )}
       </div>
+
+      {/* Painel de atividade do agente — contadores + progresso ao vivo + feed */}
+      <AgenteAtividade ativ={ativ} onContar={() => contar(true)} onMutirao={mutirao} onParar={parar} notasAlvo={faixaAuto} />
 
       {/* Distribuição de notas */}
       {total > 0 && (
@@ -676,9 +720,12 @@ function Avaliacoes({ conectado, notify }) {
       {/* Filtros */}
       <div className="flex items-center gap-2 flex-wrap">
         <div className="flex gap-1.5">
-          {[['UNANSWERED', 'Sem resposta'], ['ANSWERED', 'Respondidas'], ['ALL', 'Todas']].map(([id, t]) => (
-            <button key={id} onClick={() => { setFiltro(id); setEstrela(0) }} className="text-xs px-3 py-1.5 rounded-lg font-medium"
-                    style={filtro === id ? { background: LARANJA, color: '#fff' } : { background: 'var(--glass)', color: 'var(--text-dim)', border: '1px solid var(--glass-border)' }}>{t}</button>
+          {[['UNANSWERED', 'Sem resposta', ativ?.contagem?.pendentes], ['ANSWERED', 'Respondidas', ativ?.contagem?.respondidas], ['ALL', 'Todas', ativ?.contagem?.total]].map(([id, t, n]) => (
+            <button key={id} onClick={() => { setFiltro(id); setEstrela(0) }} className="text-xs px-3 py-1.5 rounded-lg font-medium flex items-center gap-1.5"
+                    style={filtro === id ? { background: LARANJA, color: '#fff' } : { background: 'var(--glass)', color: 'var(--text-dim)', border: '1px solid var(--glass-border)' }}>
+              {t}
+              {n != null && <span className="text-[10px] num px-1.5 py-0.5 rounded-md" style={{ background: filtro === id ? 'rgba(255,255,255,.25)' : 'var(--glass-hover)' }}>{n}{ativ?.contagem?.parcial ? '+' : ''}</span>}
+            </button>
           ))}
         </div>
         {estrela > 0 && (
@@ -697,6 +744,134 @@ function Avaliacoes({ conectado, notify }) {
       </div>
 
       {showCfg && cfg && <ConfigReviewIA cfg={cfg} onSalvar={salvarCfg} onClose={() => setShowCfg(false)} />}
+    </div>
+  )
+}
+
+function _haQuanto(iso) {
+  if (!iso) return ''
+  const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000)
+  if (s < 60) return 'agora'
+  if (s < 3600) return `há ${Math.floor(s / 60)} min`
+  if (s < 86400) return `há ${Math.floor(s / 3600)} h`
+  return `há ${Math.floor(s / 86400)} d`
+}
+
+function AgenteAtividade({ ativ, onContar, onMutirao, onParar, notasAlvo }) {
+  const p = ativ?.progresso || {}
+  const c = ativ?.contagem
+  const log = ativ?.log || []
+  const rodando = !!p.em_andamento
+  const descobrindo = rodando && p.fase === 'descobrindo'
+  const pct = p.alvo ? Math.round((p.processados / p.alvo) * 100) : 0
+  const pend = c?.pendentes
+
+  return (
+    <div className="glass rounded-2xl p-4 space-y-3">
+      {/* Contadores */}
+      <div className="flex items-stretch gap-2 flex-wrap">
+        <Contador rotulo="Total" valor={c?.total} parcial={c?.parcial} cor="var(--text-dim)" />
+        <Contador rotulo="Respondidas" valor={c?.respondidas} parcial={c?.parcial} cor="var(--ok, #14B8A6)" />
+        <Contador rotulo="Pendentes" valor={c?.pendentes} parcial={c?.parcial} cor={LARANJA} destaque />
+        <button onClick={onContar} disabled={ativ?.contando}
+                className="ml-auto self-center text-xs px-3 py-2 rounded-lg glass text-dim hover:text-fg flex items-center gap-1.5 disabled:opacity-60">
+          {ativ?.contando ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+          {ativ?.contando ? 'contando…' : c ? 'recontar' : 'contar avaliações'}
+        </button>
+      </div>
+      {c?.parcial && <div className="text-[10px] text-faint">Loja com muitas avaliações — contagem parcial (amostra das primeiras páginas).</div>}
+
+      {/* Ação principal: mutirão / parar */}
+      {rodando ? (
+        <button onClick={onParar}
+                className="w-full text-sm px-4 py-2.5 rounded-xl font-semibold flex items-center justify-center gap-2"
+                style={{ background: 'rgba(255,111,111,.12)', color: 'var(--danger, #FF6F6F)', border: '1px solid rgba(255,111,111,.3)' }}>
+          <Square size={15} fill="currentColor" /> Parar o agente
+        </button>
+      ) : (
+        (pend == null || pend > 0) && (
+          <button onClick={onMutirao}
+                  className="w-full text-sm px-4 py-2.5 rounded-xl font-semibold text-white flex items-center justify-center gap-2"
+                  style={{ background: LARANJA }}>
+            <Sparkles size={15} /> Responder todas as pendentes{pend != null ? ` (${pend})` : ''}
+            {notasAlvo ? <span className="text-[11px] font-normal opacity-90">· notas {notasAlvo}★</span> : null}
+          </button>
+        )
+      )}
+
+      {/* Barra de progresso ao vivo */}
+      {rodando ? (
+        <div className="rounded-xl p-3" style={{ background: 'rgba(238,77,45,.08)', border: '1px solid rgba(238,77,45,.25)' }}>
+          <div className="flex items-center gap-2 mb-2">
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-60" style={{ background: LARANJA }} />
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5" style={{ background: LARANJA }} />
+            </span>
+            <span className="text-xs font-semibold" style={{ color: LARANJA }}>
+              {descobrindo ? 'Mapeando a fila de avaliações…' : 'Agente respondendo agora…'}
+            </span>
+            <span className="text-xs text-dim ml-auto num">
+              {descobrindo ? `${p.alvo || 0} encontradas` : `${p.processados} de ${p.alvo}`}
+            </span>
+          </div>
+          {!descobrindo && (
+            <div className="h-2 rounded-full overflow-hidden" style={{ background: 'var(--glass-hover)' }}>
+              <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, background: LARANJA }} />
+            </div>
+          )}
+          {descobrindo && <div className="text-[11px] text-faint">Percorrendo as páginas pra montar a fila completa antes de começar a responder.</div>}
+          {!descobrindo && p.ultimo && (
+            <div className="text-[11px] text-dim mt-2 flex items-center gap-1.5">
+              <CheckCircle2 size={12} style={{ color: 'var(--ok, #14B8A6)' }} />
+              respondeu {p.ultimo.nota}★ de <b>@{p.ultimo.buyer}</b>{p.ultimo.produto ? ` · ${p.ultimo.produto}` : ''}
+            </div>
+          )}
+        </div>
+      ) : p.resumo ? (
+        <div className="text-xs rounded-xl px-3 py-2.5 flex items-center gap-2" style={{ background: 'var(--glass-hover)' }}>
+          <CheckCircle2 size={14} style={{ color: 'var(--ok, #14B8A6)' }} />
+          <span className="text-dim">
+            {p.resumo.interrompido ? 'Mutirão interrompido' : 'Mutirão concluído'} — <b style={{ color: 'var(--ok, #14B8A6)' }}>{p.resumo.respondidos}</b> resposta(s)
+            {p.resumo.falhas ? ` · ${p.resumo.falhas} falha(s)` : ''} {p.fim ? `· ${_haQuanto(p.fim)}` : ''}
+          </span>
+        </div>
+      ) : (
+        <div className="text-xs text-faint flex items-center gap-1.5">
+          <Bot size={13} /> Agente ocioso. {pend > 0 ? 'Clique acima pra responder a fila inteira.' : 'Sem pendências no momento.'}
+        </div>
+      )}
+
+      {/* Feed das últimas respostas */}
+      {log.length > 0 && (
+        <div className="pt-1">
+          <div className="text-[11px] text-faint mb-1.5 flex items-center gap-1"><Activity size={12} /> Últimas respostas do agente</div>
+          <div className="space-y-1 max-h-52 overflow-y-auto pr-1">
+            {log.map((l, i) => (
+              <div key={i} className="flex items-center gap-2 text-xs rounded-lg px-2.5 py-1.5" style={{ background: 'var(--glass-hover)' }}>
+                <span className="flex items-center gap-0.5 shrink-0" style={{ color: LARANJA }}>
+                  {l.nota}<Star size={9} fill={LARANJA} />
+                </span>
+                <span className="text-dim truncate flex-1">
+                  <b>@{l.buyer || 'cliente'}</b>{l.produto ? ` · ${l.produto}` : ''}
+                  {l.trecho ? <span className="text-faint"> — “{l.trecho}{l.trecho.length >= 140 ? '…' : ''}”</span> : ''}
+                </span>
+                <span className="text-[10px] text-faint shrink-0">{l.modo === 'auto' ? 'auto' : 'manual'} · {_haQuanto(l.quando)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Contador({ rotulo, valor, parcial, cor, destaque }) {
+  return (
+    <div className="rounded-xl px-3 py-2 text-center min-w-[88px]" style={{ background: destaque ? 'rgba(238,77,45,.1)' : 'var(--glass-hover)', border: destaque ? '1px solid rgba(238,77,45,.25)' : '1px solid transparent' }}>
+      <div className="text-lg font-display font-bold leading-none num" style={{ color: cor }}>
+        {valor == null ? '—' : valor}{parcial && valor != null ? '+' : ''}
+      </div>
+      <div className="text-[10px] text-faint mt-1">{rotulo}</div>
     </div>
   )
 }
@@ -918,7 +1093,7 @@ function ConfigReviewIA({ cfg, onSalvar, onClose }) {
             <div className="text-xs text-dim font-medium flex items-center gap-1.5"><Clock size={14} style={{ color: LARANJA }} /> Ritmo das respostas (anti-flood)</div>
             <SliderRegra label="Pausa entre respostas" valor={f.auto_pausa_seg ?? 5} min={0} max={30} sufixo=" s"
                          onChange={(v) => up('auto_pausa_seg', v)} dica="espaça as chamadas pra não disparar tudo de uma vez na API da Shopee" />
-            <SliderRegra label="Máximo por ciclo" valor={f.auto_max_ciclo ?? 10} min={1} max={50}
+            <SliderRegra label="Máximo por ciclo" valor={f.auto_max_ciclo ?? 10} min={1} max={100}
                          onChange={(v) => up('auto_max_ciclo', v)} dica="quantas avaliações o agente responde a cada rodada (de hora em hora); o resto fica pro próximo ciclo" />
             <div className="text-[10px] text-faint">O agente roda a cada hora. Com pausa de 5s e teto de 10, são até ~10 respostas espaçadas por rodada — o suficiente pra ir limpando a fila sem parecer robô nem floodar.</div>
           </div>
@@ -1016,6 +1191,7 @@ function MotorPromocoes({ conectado, notify }) {
   const [sel, setSel] = useState(() => new Set())
   const [gerando, setGerando] = useState(false)
   const [aplicando, setAplicando] = useState(false)
+  const [rodando, setRodando] = useState(false)
   const [queda, setQueda] = useState(null)
   const [hist, setHist] = useState([])
 
@@ -1061,6 +1237,19 @@ function MotorPromocoes({ conectado, notify }) {
     setAplicando(false)
   }
   const toggleSel = (id) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const rodarAgora = async () => {
+    setRodando(true)
+    try {
+      const r = await api.shopeePromoRodar()
+      if (r.acao === 'iniciado') {
+        notify(r.mensagem || 'Agente aplicando promoções em segundo plano…', 'ok')
+        setTimeout(recarregarMeta, 6000); setTimeout(recarregarMeta, 20000)
+      } else if (r.acao === 'vazio') {
+        setPropostas(r); notify(r.msg || 'Nenhum produto elegível', 'warn')
+      } else { notify(r.msg || 'Pronto', 'ok'); recarregarMeta() }
+    } catch (e) { notify(e.message, 'danger') }
+    setRodando(false)
+  }
 
   if (!conectado) return <div className="text-sm text-faint py-6 text-center glass rounded-2xl">Conecte a loja Shopee para usar o motor de promoções.</div>
   if (!cfg) return <div className="py-10 text-center text-faint flex items-center justify-center gap-2"><Loader2 size={16} className="animate-spin" /> carregando motor…</div>
@@ -1128,10 +1317,21 @@ function MotorPromocoes({ conectado, notify }) {
                   </div>
                   <SliderRegra label="Disparar com queda de" valor={cfg.queda_limiar} min={10} max={70} step={5} sufixo="%" onChange={(v) => salvar({ queda_limiar: v })} />
                 </div>}
-            <button onClick={gerar} disabled={gerando}
-                    className="text-xs px-3 py-1.5 rounded-lg font-semibold text-white flex items-center gap-1.5 disabled:opacity-60" style={{ background: LARANJA }}>
-              {gerando ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />} Pré-visualizar agora
-            </button>
+            <div className="text-[11px] text-dim flex items-start gap-1.5 pt-1 border-t border-glassb">
+              <Bot size={13} style={{ color: LARANJA }} className="mt-0.5 shrink-0" />
+              <span>No automático, o agente <b style={{ color: LARANJA }}>aplica sozinho</b> quando a regra dispara ({cfg.gatilho === 'queda' ? 'queda nas vendas' : `a cada ${cfg.intervalo_dias} dias`}) — você <b>não precisa aprovar</b>. Tudo respeitando o piso de margem. Quer disparar na hora?</span>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button onClick={rodarAgora} disabled={rodando || !cfg.ativo}
+                      className="text-xs px-3 py-1.5 rounded-lg font-semibold text-white flex items-center gap-1.5 disabled:opacity-50" style={{ background: LARANJA }}>
+                {rodando ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />} Aplicar agora
+              </button>
+              <button onClick={gerar} disabled={gerando}
+                      className="text-xs px-3 py-1.5 rounded-lg font-medium flex items-center gap-1.5 disabled:opacity-60 glass text-dim hover:text-fg">
+                {gerando ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />} Só pré-visualizar
+              </button>
+              {!cfg.ativo && <span className="text-[10px] text-faint">ligue a chave “Ativo” pra liberar</span>}
+            </div>
           </div>
         )}
       </div>
@@ -1187,17 +1387,19 @@ function MotorPromocoes({ conectado, notify }) {
         </div>
       </div>
 
-      {/* Gerar propostas */}
-      <button onClick={gerar} disabled={gerando}
-              className="w-full rounded-2xl py-3 font-semibold text-white flex items-center justify-center gap-2 disabled:opacity-60" style={{ background: LARANJA }}>
-        {gerando ? <Loader2 size={17} className="animate-spin" /> : <Wand2 size={17} />} {gerando ? 'O agente está analisando…' : 'Gerar propostas de promoção'}
-      </button>
+      {/* Gerar propostas (modo Sugerir: aqui é o fluxo principal de revisão) */}
+      {!auto && (
+        <button onClick={gerar} disabled={gerando}
+                className="w-full rounded-2xl py-3 font-semibold text-white flex items-center justify-center gap-2 disabled:opacity-60" style={{ background: LARANJA }}>
+          {gerando ? <Loader2 size={17} className="animate-spin" /> : <Wand2 size={17} />} {gerando ? 'O agente está analisando…' : 'Gerar propostas de promoção'}
+        </button>
+      )}
 
       {/* Tabela de propostas */}
       {propostas?.acao === 'ok' && propostas.propostas.length > 0 && (
         <div className="glass rounded-2xl overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b border-glassb">
-            <div className="text-sm font-medium flex items-center gap-2"><CheckCircle2 size={15} style={{ color: LARANJA }} /> {propostas.propostas.length} proposta(s) · {nSel} selecionada(s)</div>
+            <div className="text-sm font-medium flex items-center gap-2"><CheckCircle2 size={15} style={{ color: LARANJA }} /> {auto ? 'Prévia: o que o agente faria agora' : `${propostas.propostas.length} proposta(s) · ${nSel} selecionada(s)`}</div>
             <button onClick={() => setSel(nSel === propostas.propostas.length ? new Set() : new Set(propostas.propostas.map((p) => p.item_id)))}
                     className="text-xs text-dim hover:text-fg">{nSel === propostas.propostas.length ? 'desmarcar todos' : 'marcar todos'}</button>
           </div>
@@ -1205,11 +1407,13 @@ function MotorPromocoes({ conectado, notify }) {
             {propostas.propostas.map((p) => {
               const on = sel.has(p.item_id)
               return (
-                <button key={p.item_id} onClick={() => toggleSel(p.item_id)} className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-[var(--glass-hover)]"
-                        style={{ background: on ? 'rgba(238,77,45,.06)' : undefined }}>
-                  <span className="h-4 w-4 rounded grid place-items-center shrink-0" style={{ background: on ? LARANJA : 'transparent', border: `1px solid ${on ? LARANJA : 'var(--glass-border)'}` }}>
-                    {on && <CheckCircle2 size={11} className="text-white" />}
-                  </span>
+                <button key={p.item_id} onClick={() => !auto && toggleSel(p.item_id)} className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-[var(--glass-hover)]"
+                        style={{ background: on && !auto ? 'rgba(238,77,45,.06)' : undefined, cursor: auto ? 'default' : 'pointer' }}>
+                  {!auto && (
+                    <span className="h-4 w-4 rounded grid place-items-center shrink-0" style={{ background: on ? LARANJA : 'transparent', border: `1px solid ${on ? LARANJA : 'var(--glass-border)'}` }}>
+                      {on && <CheckCircle2 size={11} className="text-white" />}
+                    </span>
+                  )}
                   <span className="min-w-0 flex-1">
                     <span className="text-sm truncate block">{p.nome}</span>
                     <span className="text-[10px] text-faint num">SKU {p.sku} · {p.estoque} em estoque</span>
@@ -1228,13 +1432,20 @@ function MotorPromocoes({ conectado, notify }) {
               )
             })}
           </div>
-          <div className="p-3 border-t border-glassb flex items-center justify-between gap-2">
-            <span className="text-[11px] text-faint">Revise e aplique. {cfg.tipo === 'ambos' ? 'Cria desconto + relâmpago.' : cfg.tipo === 'flash' ? 'Cria oferta relâmpago.' : 'Cria campanha de desconto.'}</span>
-            <button onClick={aplicar} disabled={aplicando || !nSel}
-                    className="rounded-lg px-4 py-2 text-sm font-semibold text-white flex items-center gap-2 disabled:opacity-60" style={{ background: LARANJA }}>
-              {aplicando ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />} Aplicar {nSel} promoção(ões)
-            </button>
-          </div>
+          {auto ? (
+            <div className="p-3 border-t border-glassb flex items-center gap-2 text-[11px] text-dim" style={{ background: 'rgba(238,77,45,.05)' }}>
+              <Bot size={13} style={{ color: LARANJA }} className="shrink-0" />
+              <span>Isto é só uma <b>prévia</b>. No modo automático o agente <b style={{ color: LARANJA }}>aplica sozinho</b> (quando a regra dispara, ou agora no botão <b>“Aplicar agora”</b> lá em cima) — você não precisa aprovar item a item.</span>
+            </div>
+          ) : (
+            <div className="p-3 border-t border-glassb flex items-center justify-between gap-2">
+              <span className="text-[11px] text-faint">Revise e aplique. {cfg.tipo === 'ambos' ? 'Cria desconto + relâmpago.' : cfg.tipo === 'flash' ? 'Cria oferta relâmpago.' : 'Cria campanha de desconto.'}</span>
+              <button onClick={aplicar} disabled={aplicando || !nSel}
+                      className="rounded-lg px-4 py-2 text-sm font-semibold text-white flex items-center gap-2 disabled:opacity-60" style={{ background: LARANJA }}>
+                {aplicando ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />} Aplicar {nSel} promoção(ões)
+              </button>
+            </div>
+          )}
         </div>
       )}
       {propostas?.acao === 'vazio' && (
