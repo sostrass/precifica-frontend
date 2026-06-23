@@ -3,6 +3,7 @@ import {
   Rocket, Star, Activity, ShoppingBag, Tag, Megaphone, Package,
   Plus, X, Pin, PinOff, Play, Loader2, Zap, Clock, CheckCircle2,
   AlertTriangle, Plug, RefreshCw, Wand2, ChevronRight, Flame,
+  HelpCircle, GitCompareArrows, Undo2, TrendingUp, TrendingDown, Trash2, Calendar,
 } from 'lucide-react'
 import { api } from './api'
 import { useToast } from './toast.jsx'
@@ -46,10 +47,13 @@ function Countdown({ iso }) {
 const TABS = [
   { id: 'boost', label: 'Boost', icon: Rocket, destaque: true },
   { id: 'avaliacoes', label: 'Avaliações', icon: Star },
-  { id: 'saude', label: 'Saúde da loja', icon: Activity },
-  { id: 'pedidos', label: 'Pedidos & Financeiro', icon: ShoppingBag },
+  { id: 'qa', label: 'Perguntas', icon: HelpCircle },
+  { id: 'catalogo', label: 'Bling × Shopee', icon: GitCompareArrows },
   { id: 'promocoes', label: 'Promoções', icon: Tag },
   { id: 'ads', label: 'Shopee Ads', icon: Megaphone },
+  { id: 'pedidos', label: 'Pedidos & Financeiro', icon: ShoppingBag },
+  { id: 'devolucoes', label: 'Devoluções', icon: Undo2 },
+  { id: 'saude', label: 'Saúde da loja', icon: Activity },
 ]
 
 export default function Shopee() {
@@ -100,10 +104,13 @@ export default function Shopee() {
 
       {aba === 'boost' && <BoostCenter conectado={status?.ok} notify={notify} />}
       {aba === 'avaliacoes' && <Avaliacoes conectado={status?.ok} notify={notify} />}
-      {aba === 'saude' && <SaudeLoja conectado={status?.ok} />}
+      {aba === 'qa' && <Perguntas conectado={status?.ok} notify={notify} />}
+      {aba === 'catalogo' && <Divergencia conectado={status?.ok} />}
+      {aba === 'promocoes' && <Promocoes conectado={status?.ok} notify={notify} />}
+      {aba === 'ads' && <Ads conectado={status?.ok} />}
       {aba === 'pedidos' && <Pedidos conectado={status?.ok} />}
-      {aba === 'promocoes' && <EmBreve titulo="Promoções" desc="Descontos, bundles, add-on, cupons e flash sale — todos com início/fim agendáveis e auto-continuar. Mesma base do motor de boost." icon={Tag} />}
-      {aba === 'ads' && <EmBreve titulo="Shopee Ads" desc="Campanhas de anúncios pagos com ROAS/ACOS e otimização automática de lance." icon={Megaphone} />}
+      {aba === 'devolucoes' && <Devolucoes conectado={status?.ok} />}
+      {aba === 'saude' && <SaudeLoja conectado={status?.ok} />}
     </div>
   )
 }
@@ -121,7 +128,25 @@ function ConectarShopee({ status, onSaved }) {
   const [at, setAt] = useState('')
   const [rt, setRt] = useState('')
   const [salvando, setSalvando] = useState(false)
-  const salvar = async () => {
+  const [manual, setManual] = useState(false)
+  const [conectando, setConectando] = useState(false)
+
+  const conectarOAuth = async () => {
+    setConectando(true)
+    try {
+      const { url } = await api.shopeeAuthLogin()
+      const pop = window.open(url, 'shopee_auth', 'width=520,height=720,menubar=no,toolbar=no')
+      const cleanup = () => { window.removeEventListener('message', onMsg); clearInterval(timer); setConectando(false) }
+      const onMsg = (e) => {
+        if (e.data === 'shopee_auth_ok') { cleanup(); notify('Loja Shopee conectada!', 'ok'); onSaved?.() }
+        else if (e.data === 'shopee_auth_err') { cleanup(); notify('Não foi possível conectar. Tente novamente.', 'danger') }
+      }
+      const timer = setInterval(() => { if (pop && pop.closed) { cleanup(); onSaved?.() } }, 1200)
+      window.addEventListener('message', onMsg)
+    } catch (e) { notify(e.message, 'danger'); setConectando(false) }
+  }
+
+  const salvarManual = async () => {
     if (!shop || !at) return notify('Informe shop_id e access_token', 'warn')
     setSalvando(true)
     try {
@@ -130,28 +155,40 @@ function ConectarShopee({ status, onSaved }) {
     } catch (e) { notify(e.message, 'danger') }
     setSalvando(false)
   }
+
   return (
     <div className="glass rounded-2xl p-4 space-y-3" style={{ border: `1px solid ${LARANJA}` }}>
-      <div className="text-sm">
-        {!status?.app
-          ? <span style={{ color: 'var(--warn)' }}>Faltam <b>SHOPEE_PARTNER_ID</b> e <b>SHOPEE_PARTNER_KEY</b> no servidor (Railway). Defina e reinicie.</span>
-          : <span>App pronto. Cole as credenciais da sua loja para conectar (o token é renovado sozinho depois):</span>}
-      </div>
-      {status?.app && (
+      {!status?.app ? (
+        <div className="text-sm" style={{ color: 'var(--warn)' }}>
+          Faltam <b>SHOPEE_PARTNER_ID</b> e <b>SHOPEE_PARTNER_KEY</b> no servidor (Railway). Defina e reinicie o backend.
+        </div>
+      ) : (
         <>
-          <div className="grid sm:grid-cols-3 gap-2">
-            <input value={shop} onChange={(e) => setShop(e.target.value)} placeholder="shop_id"
-                   className="glass rounded-lg px-3 py-2 text-sm bg-transparent outline-none" />
-            <input value={at} onChange={(e) => setAt(e.target.value)} placeholder="access_token"
-                   className="glass rounded-lg px-3 py-2 text-sm bg-transparent outline-none sm:col-span-2" />
-          </div>
-          <input value={rt} onChange={(e) => setRt(e.target.value)} placeholder="refresh_token (recomendado — permite renovar automático)"
-                 className="glass rounded-lg px-3 py-2 text-sm bg-transparent outline-none w-full" />
-          <button onClick={salvar} disabled={salvando}
-                  className="rounded-lg px-4 py-2 text-sm font-medium text-white flex items-center gap-2 disabled:opacity-60"
+          <div className="text-sm text-dim">Conecte sua loja autorizando o app na Shopee. Depois disso, o token é renovado sozinho.</div>
+          <button onClick={conectarOAuth} disabled={conectando}
+                  className="rounded-xl px-4 py-2.5 text-sm font-semibold text-white flex items-center gap-2 disabled:opacity-60 w-full justify-center"
                   style={{ background: LARANJA }}>
-            {salvando ? <Loader2 size={14} className="animate-spin" /> : <Plug size={14} />} Conectar loja
+            {conectando ? <Loader2 size={16} className="animate-spin" /> : <ShoppingBag size={16} />} Conectar com a Shopee
           </button>
+          <div className="text-[11px] text-faint">Cadastre a URL de redirect <span className="num">…/api/shopee/auth/callback</span> nas configurações do seu app na Shopee Open Platform.</div>
+
+          <button onClick={() => setManual((m) => !m)} className="text-xs text-dim hover:text-fg flex items-center gap-1">
+            <ChevronRight size={12} style={{ transform: manual ? 'rotate(90deg)' : 'none' }} /> ou colar o token manualmente
+          </button>
+          {manual && (
+            <div className="space-y-2 pt-1">
+              <div className="grid sm:grid-cols-3 gap-2">
+                <input value={shop} onChange={(e) => setShop(e.target.value)} placeholder="shop_id" className={INP} />
+                <input value={at} onChange={(e) => setAt(e.target.value)} placeholder="access_token" className={`${INP} sm:col-span-2`} />
+              </div>
+              <input value={rt} onChange={(e) => setRt(e.target.value)} placeholder="refresh_token (recomendado)" className={INP} />
+              <button onClick={salvarManual} disabled={salvando}
+                      className="rounded-lg px-4 py-2 text-sm font-medium flex items-center gap-2 disabled:opacity-60"
+                      style={{ background: 'var(--glass-hover)', color: LARANJA, border: `1px solid ${LARANJA}` }}>
+                {salvando ? <Loader2 size={14} className="animate-spin" /> : <Plug size={14} />} Salvar token manual
+              </button>
+            </div>
+          )}
         </>
       )}
     </div>
@@ -514,5 +551,555 @@ function EmBreve({ titulo, desc, icon: Ic }) {
       <div className="text-sm text-dim max-w-md mx-auto mt-1">{desc}</div>
       <div className="text-xs text-faint mt-3 inline-flex items-center gap-1">próxima fase <ChevronRight size={12} /></div>
     </div>
+  )
+}
+
+/* --------------------- BLING × SHOPEE (divergência) ---------------------- */
+function Divergencia({ conectado }) {
+  const [d, setD] = useState(null)
+  const [filtro, setFiltro] = useState('divergentes')
+  const carregar = () => { setD(null); api.shopeeDivergencia().then(setD).catch(() => setD({ erro: true })) }
+  useEffect(() => { if (conectado) carregar() }, [conectado])
+  if (!conectado) return <Vazio txt="Conecte a loja Shopee para comparar preços com o Bling." />
+  if (d === null) return <Carregando txt="cruzando anúncios da Shopee com o catálogo do Bling…" />
+  if (d.erro) return <Vazio txt="Não consegui ler o catálogo da Shopee. Verifique a conexão." />
+  const itens = (d.itens || []).filter((l) =>
+    filtro === 'divergentes' ? l.divergente : filtro === 'prejuizo' ? l.prejuizo : true)
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <Metric n={d.casados} sub="casados por SKU" icon={GitCompareArrows} />
+        <Metric n={d.divergentes} sub="preço divergente" cor="var(--warn)" icon={AlertTriangle} />
+        <Metric n={d.prejuizo} sub="prejuízo" cor="var(--danger)" icon={TrendingDown} />
+        <Metric n={d.sem_match} sub="sem match no Bling" icon={X} />
+      </div>
+      <div className="flex gap-1.5">
+        {[['divergentes', 'Divergentes'], ['prejuizo', 'Prejuízo'], ['todos', 'Todos']].map(([id, t]) => (
+          <button key={id} onClick={() => setFiltro(id)} className="text-xs px-3 py-1.5 rounded-lg font-medium"
+                  style={filtro === id ? { background: LARANJA, color: '#fff' } : { background: 'var(--glass)', color: 'var(--text-dim)', border: '1px solid var(--glass-border)' }}>{t}</button>
+        ))}
+        <button onClick={carregar} className="text-xs px-3 py-1.5 rounded-lg text-dim hover:text-fg flex items-center gap-1 ml-auto"><RefreshCw size={12} /> atualizar</button>
+      </div>
+      {itens.length === 0
+        ? <Vazio txt="Nenhum item nesse filtro." />
+        : <div className="glass rounded-2xl overflow-hidden">
+            {itens.map((l) => (
+              <div key={l.item_id} className="flex items-center gap-3 px-4 py-2.5 border-b border-glassb last:border-0">
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm truncate">{l.nome}</div>
+                  <div className="text-[11px] text-faint num">SKU {l.sku} • #{l.item_id}</div>
+                </div>
+                <div className="text-right shrink-0">
+                  <div className="text-[10px] text-faint uppercase">Bling</div>
+                  <div className="num text-sm">{brl(l.preco_bling)}</div>
+                </div>
+                <ChevronRight size={14} className="text-faint shrink-0" />
+                <div className="text-right shrink-0">
+                  <div className="text-[10px] text-faint uppercase">Shopee</div>
+                  <div className="num text-sm font-semibold" style={{ color: l.prejuizo ? 'var(--danger)' : l.divergente ? 'var(--warn)' : 'var(--text)' }}>{brl(l.preco_shopee)}</div>
+                </div>
+                {l.prejuizo && <span className="text-[10px] px-1.5 py-0.5 rounded shrink-0" style={{ background: 'rgba(239,68,68,.12)', color: 'var(--danger)' }}>prejuízo</span>}
+              </div>
+            ))}
+          </div>}
+    </div>
+  )
+}
+
+/* ----------------------------- PROMOÇÕES --------------------------------- */
+const toEpoch = (s) => (s ? Math.floor(new Date(s).getTime() / 1000) : 0)
+
+function Promocoes({ conectado, notify }) {
+  const [sub, setSub] = useState('cupons')
+  if (!conectado) return <Vazio txt="Conecte a loja Shopee para gerenciar promoções." />
+  return (
+    <div className="space-y-3">
+      <div className="flex gap-1.5 flex-wrap">
+        {[['cupons', 'Cupons'], ['descontos', 'Descontos'], ['bundle', 'Bundle'], ['addon', 'Add-on'], ['flash', 'Flash Sale']].map(([id, t]) => (
+          <button key={id} onClick={() => setSub(id)} className="text-xs px-3 py-1.5 rounded-lg font-medium"
+                  style={sub === id ? { background: LARANJA, color: '#fff' } : { background: 'var(--glass)', color: 'var(--text-dim)', border: '1px solid var(--glass-border)' }}>{t}</button>
+        ))}
+      </div>
+      {sub === 'cupons' && <Cupons notify={notify} />}
+      {sub === 'descontos' && <Descontos notify={notify} />}
+      {sub === 'bundle' && <Bundles notify={notify} />}
+      {sub === 'addon' && <Addons notify={notify} />}
+      {sub === 'flash' && <FlashSale notify={notify} />}
+    </div>
+  )
+}
+
+function Cupons({ notify }) {
+  const [lista, setLista] = useState(null)
+  const [form, setForm] = useState(false)
+  const carregar = () => { setLista(null); api.shopeeCupons('ongoing').then(setLista).catch(() => setLista({ erro: true })) }
+  useEffect(carregar, [])
+  const cupons = lista?.response?.voucher_list || []
+  return (
+    <div className="space-y-3">
+      <div className="flex justify-between items-center">
+        <div className="text-sm text-dim">Cupons ativos da loja</div>
+        <button onClick={() => setForm(true)} className="rounded-lg px-3 py-1.5 text-sm font-medium text-white flex items-center gap-1.5" style={{ background: LARANJA }}><Plus size={14} /> Novo cupom</button>
+      </div>
+      {lista === null ? <Carregando txt="carregando cupons…" />
+        : cupons.length === 0 ? <Vazio txt="Nenhum cupom ativo. Crie um para incentivar a compra." />
+        : <div className="space-y-1.5">{cupons.map((c) => (
+            <div key={c.voucher_id} className="glass rounded-xl px-4 py-2.5 flex items-center gap-3">
+              <Tag size={16} style={{ color: LARANJA }} />
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium">{c.voucher_name} <span className="num text-faint">({c.voucher_code})</span></div>
+                <div className="text-[11px] text-faint">{c.reward_type === 2 ? `${c.percentage}% off` : brl(c.discount_amount)} • mín {brl(c.min_basket_price)}</div>
+              </div>
+              <button onClick={async () => { try { await api.shopeeEncerrarCupom(c.voucher_id); notify('Cupom encerrado', 'ok'); carregar() } catch (e) { notify(e.message, 'danger') } }}
+                      className="text-faint hover:text-danger p-1"><Trash2 size={15} /></button>
+            </div>
+          ))}</div>}
+      {form && <CupomForm onClose={() => setForm(false)} onSaved={() => { setForm(false); carregar() }} notify={notify} />}
+    </div>
+  )
+}
+
+function CupomForm({ onClose, onSaved, notify }) {
+  const [f, setF] = useState({ nome: '', codigo: '', tipo: 1, valor: '', min: '', qtd: 100, inicio: '', fim: '' })
+  const [salvando, setSalvando] = useState(false)
+  const up = (k, v) => setF((x) => ({ ...x, [k]: v }))
+  const salvar = async () => {
+    if (!f.nome || !f.codigo || !f.valor || !f.inicio || !f.fim) return notify('Preencha os campos', 'warn')
+    setSalvando(true)
+    try {
+      await api.shopeeCriarCupom({ nome: f.nome, codigo: f.codigo, tipo_desconto: Number(f.tipo),
+        valor: Number(f.valor), compra_minima: Number(f.min || 0), quantidade: Number(f.qtd),
+        inicio: toEpoch(f.inicio), fim: toEpoch(f.fim), escopo: 1 })
+      notify('Cupom criado', 'ok'); onSaved()
+    } catch (e) { notify(e.message, 'danger') }
+    setSalvando(false)
+  }
+  return (
+    <Modal titulo="Novo cupom" onClose={onClose} onSalvar={salvar} salvando={salvando}>
+      <Campo label="Nome"><input value={f.nome} onChange={(e) => up('nome', e.target.value)} className={INP} placeholder="Frete Black Friday" /></Campo>
+      <Campo label="Código"><input value={f.codigo} onChange={(e) => up('codigo', e.target.value.toUpperCase())} className={INP} placeholder="BLACK10" /></Campo>
+      <div className="grid grid-cols-2 gap-2">
+        <Campo label="Tipo">
+          <select value={f.tipo} onChange={(e) => up('tipo', e.target.value)} className={INP}>
+            <option value={1}>Valor fixo (R$)</option><option value={2}>Percentual (%)</option>
+          </select>
+        </Campo>
+        <Campo label={f.tipo == 2 ? 'Percentual' : 'Valor (R$)'}><input type="number" value={f.valor} onChange={(e) => up('valor', e.target.value)} className={INP} /></Campo>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <Campo label="Compra mínima (R$)"><input type="number" value={f.min} onChange={(e) => up('min', e.target.value)} className={INP} /></Campo>
+        <Campo label="Quantidade"><input type="number" value={f.qtd} onChange={(e) => up('qtd', e.target.value)} className={INP} /></Campo>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <Campo label="Início"><input type="datetime-local" value={f.inicio} onChange={(e) => up('inicio', e.target.value)} className={INP} /></Campo>
+        <Campo label="Fim"><input type="datetime-local" value={f.fim} onChange={(e) => up('fim', e.target.value)} className={INP} /></Campo>
+      </div>
+    </Modal>
+  )
+}
+
+function Descontos({ notify }) {
+  const [lista, setLista] = useState(null)
+  const [stat, setStat] = useState('ongoing')
+  const carregar = () => { setLista(null); api.shopeeDescontos(stat).then(setLista).catch(() => setLista({ erro: true })) }
+  useEffect(carregar, [stat])
+  const ds = lista?.response?.discount_list || []
+  return (
+    <div className="space-y-3">
+      <div className="flex gap-1.5">
+        {[['ongoing', 'Ativos'], ['upcoming', 'Agendados'], ['expired', 'Expirados']].map(([id, t]) => (
+          <button key={id} onClick={() => setStat(id)} className="text-xs px-3 py-1.5 rounded-lg font-medium"
+                  style={stat === id ? { background: LARANJA, color: '#fff' } : { background: 'var(--glass)', color: 'var(--text-dim)', border: '1px solid var(--glass-border)' }}>{t}</button>
+        ))}
+      </div>
+      {lista === null ? <Carregando txt="carregando descontos…" />
+        : ds.length === 0 ? <Vazio txt="Nenhuma campanha de desconto aqui. Crie pelo Seller Center ou via API com início/fim agendados." />
+        : <div className="space-y-1.5">{ds.map((c) => (
+            <div key={c.discount_id} className="glass rounded-xl px-4 py-2.5 flex items-center gap-3">
+              <Calendar size={16} style={{ color: LARANJA }} />
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium truncate">{c.discount_name}</div>
+                <div className="text-[11px] text-faint">{new Date(c.start_time * 1000).toLocaleDateString('pt-BR')} → {new Date(c.end_time * 1000).toLocaleDateString('pt-BR')}</div>
+              </div>
+              {stat === 'ongoing' && <button onClick={async () => { try { await api.shopeeEncerrarDesconto(c.discount_id); notify('Desconto encerrado', 'ok'); carregar() } catch (e) { notify(e.message, 'danger') } }} className="text-faint hover:text-danger p-1"><Trash2 size={15} /></button>}
+            </div>
+          ))}</div>}
+    </div>
+  )
+}
+
+/* ------------------------------- ADS ------------------------------------- */
+function Ads({ conectado }) {
+  const [d, setD] = useState(null)
+  useEffect(() => { if (conectado) api.shopeeAds(7).then(setD).catch(() => setD({ erro: true })) }, [conectado])
+  if (!conectado) return <Vazio txt="Conecte a loja Shopee para ver os anúncios pagos." />
+  if (d === null) return <Carregando txt="carregando Shopee Ads…" />
+  const saldo = d.saldo?.response?.total_balance
+  const perf = d.desempenho?.response?.[0] || {}
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <Metric n={saldo != null ? brl(saldo) : '—'} sub="saldo Ads" cor={LARANJA} icon={Megaphone} />
+        <Metric n={perf.impression ?? '—'} sub="impressões" icon={TrendingUp} />
+        <Metric n={perf.clicks ?? '—'} sub="cliques" icon={Zap} />
+        <Metric n={perf.broad_gmv != null ? brl(perf.broad_gmv) : '—'} sub="GMV anúncios" icon={TrendingUp} />
+      </div>
+      <div className="glass rounded-2xl p-4 text-sm text-dim">
+        Campanhas com <b>ROAS/ACOS</b> e otimização automática de lance entram aqui. Quando a loja estiver conectada, os números de impressões, cliques, conversão e gasto aparecem ao vivo.
+      </div>
+    </div>
+  )
+}
+
+/* ----------------------------- PERGUNTAS (Q&A) --------------------------- */
+function Perguntas({ conectado, notify }) {
+  const [d, setD] = useState(null)
+  const [resp, setResp] = useState(null)
+  const carregar = () => { setD(null); api.shopeePerguntas('UNANSWERED').then(setD).catch(() => setD({ erro: true })) }
+  useEffect(() => { if (conectado) carregar() }, [conectado])
+  if (!conectado) return <Vazio txt="Conecte a loja Shopee para responder perguntas dos anúncios." />
+  if (d === null) return <Carregando txt="carregando perguntas…" />
+  const qs = d?.response?.qa_list || d?.qa_list || []
+  const responder = async (q) => {
+    setResp(q.qa_id)
+    try { const r = await api.shopeeResponderPergunta({ qa_id: q.qa_id, ia: true, pergunta: q.question }); notify('Resposta enviada (IA)', 'ok'); carregar() }
+    catch (e) { notify(e.message, 'danger') }
+    setResp(null)
+  }
+  return qs.length === 0 ? <Vazio txt="Nenhuma pergunta sem resposta. 🎉" />
+    : <div className="space-y-2">{qs.map((q) => (
+        <div key={q.qa_id} className="glass rounded-xl p-3">
+          <div className="text-sm flex items-start gap-2"><HelpCircle size={15} className="mt-0.5 shrink-0" style={{ color: LARANJA }} /> {q.question}</div>
+          <button onClick={() => responder(q)} disabled={resp === q.qa_id}
+                  className="text-xs px-3 py-1.5 rounded-lg font-medium flex items-center gap-1.5 mt-2 disabled:opacity-60"
+                  style={{ background: 'rgba(238,77,45,.12)', color: LARANJA, border: `1px solid ${LARANJA}` }}>
+            {resp === q.qa_id ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />} Responder com IA
+          </button>
+        </div>
+      ))}</div>
+}
+
+/* ----------------------------- DEVOLUÇÕES -------------------------------- */
+function Devolucoes({ conectado }) {
+  const [d, setD] = useState(null)
+  useEffect(() => { if (conectado) api.shopeeDevolucoes(30).then(setD).catch(() => setD({ erro: true })) }, [conectado])
+  if (!conectado) return <Vazio txt="Conecte a loja Shopee para ver devoluções." />
+  if (d === null) return <Carregando txt="carregando devoluções…" />
+  const lista = d?.response?.return || d?.return || []
+  return (
+    <div className="space-y-3">
+      <div className="text-sm text-dim">Devoluções e reembolsos dos últimos 30 dias. A taxa de retorno alta derruba a saúde da loja — vale monitorar.</div>
+      {lista.length === 0 ? <Vazio txt="Nenhuma devolução no período. 🎉" />
+        : <div className="space-y-1.5">{lista.slice(0, 30).map((r) => (
+            <div key={r.return_sn} className="glass rounded-xl px-4 py-2.5 flex items-center justify-between">
+              <div className="flex items-center gap-2"><Undo2 size={15} className="text-dim" /> <span className="num text-sm">#{r.return_sn}</span></div>
+              <span className="text-xs text-faint">{r.status} • {r.reason || ''}</span>
+            </div>
+          ))}</div>}
+    </div>
+  )
+}
+
+/* ------------------------------ Helpers UI ------------------------------- */
+const INP = 'glass rounded-lg px-3 py-2 text-sm bg-transparent outline-none w-full'
+function Campo({ label, children }) { return <label className="block"><span className="text-xs text-faint block mb-1">{label}</span>{children}</label> }
+function Vazio({ txt }) { return <div className="text-sm text-faint py-8 text-center glass rounded-2xl">{txt}</div> }
+function Carregando({ txt }) { return <div className="py-10 text-center text-faint flex items-center justify-center gap-2"><Loader2 size={16} className="animate-spin" /> {txt}</div> }
+function Modal({ titulo, children, onClose, onSalvar, salvando }) {
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center p-4" style={{ background: 'rgba(0,0,0,.5)' }} onClick={onClose}>
+      <div className="glass rounded-2xl w-full max-w-md max-h-[85vh] flex flex-col" style={{ background: 'var(--bg-elev, var(--glass))', backdropFilter: 'blur(20px)' }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-4 border-b border-glassb">
+          <div className="font-display font-semibold">{titulo}</div>
+          <button onClick={onClose} className="text-faint hover:text-fg"><X size={18} /></button>
+        </div>
+        <div className="p-4 overflow-y-auto flex-1 space-y-3">{children}</div>
+        <div className="p-4 border-t border-glassb flex justify-end">
+          <button onClick={onSalvar} disabled={salvando} className="rounded-lg px-4 py-2 text-sm font-medium text-white flex items-center gap-2 disabled:opacity-60" style={{ background: LARANJA }}>
+            {salvando ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />} Salvar
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* -------------------- Seletor de itens da Shopee (reuso) ----------------- */
+function useItensShopee() {
+  const [itens, setItens] = useState(null)
+  useEffect(() => {
+    api.shopeeProdutos().then((r) => {
+      const lista = r?.response?.item || r?.item || []
+      setItens(lista.map((x) => ({ item_id: x.item_id, nome: x.item_name || `#${x.item_id}` })))
+    }).catch(() => setItens([]))
+  }, [])
+  return itens
+}
+
+function SeletorItens({ titulo, comPreco, onConfirmar, onClose }) {
+  const itens = useItensShopee()
+  const [sel, setSel] = useState({})  // item_id -> {nome, preco}
+  const toggle = (it) => setSel((s) => {
+    const n = { ...s }
+    if (n[it.item_id]) delete n[it.item_id]; else n[it.item_id] = { nome: it.nome, preco: '' }
+    return n
+  })
+  const setPreco = (id, v) => setSel((s) => ({ ...s, [id]: { ...s[id], preco: v } }))
+  const confirmar = () => {
+    const arr = Object.entries(sel).map(([item_id, v]) => ({ item_id, nome: v.nome, preco: v.preco }))
+    onConfirmar(arr)
+  }
+  return (
+    <Modal titulo={titulo} onClose={onClose} onSalvar={confirmar} salvando={false}>
+      {itens === null ? <Carregando txt="carregando anúncios…" />
+        : itens.length === 0 ? <Vazio txt="Não consegui listar os anúncios da Shopee." />
+        : <div className="space-y-1">
+            {itens.map((i) => (
+              <div key={i.item_id} className="rounded-lg px-2.5 py-1.5" style={{ background: sel[i.item_id] ? 'rgba(238,77,45,.1)' : 'var(--glass-hover)' }}>
+                <button onClick={() => toggle(i)} className="w-full flex items-center gap-2 text-left">
+                  <span className="h-4 w-4 rounded grid place-items-center shrink-0" style={{ background: sel[i.item_id] ? LARANJA : 'transparent', border: `1px solid ${sel[i.item_id] ? LARANJA : 'var(--glass-border)'}` }}>
+                    {sel[i.item_id] && <CheckCircle2 size={11} className="text-white" />}
+                  </span>
+                  <span className="text-sm truncate flex-1">{i.nome}</span>
+                  <span className="text-[11px] text-faint num">#{i.item_id}</span>
+                </button>
+                {comPreco && sel[i.item_id] && (
+                  <input type="number" value={sel[i.item_id].preco} onChange={(e) => setPreco(i.item_id, e.target.value)}
+                         placeholder="preço promocional (R$)" className="glass rounded-lg px-2 py-1 text-xs bg-transparent outline-none w-full mt-1" />
+                )}
+              </div>
+            ))}
+          </div>}
+    </Modal>
+  )
+}
+
+/* ------------------------------ Bundle ----------------------------------- */
+function Bundles({ notify }) {
+  const [lista, setLista] = useState(null)
+  const [form, setForm] = useState(false)
+  const carregar = () => { setLista(null); api.shopeeBundles('ongoing').then(setLista).catch(() => setLista({ erro: true })) }
+  useEffect(carregar, [])
+  const bs = lista?.response?.bundle_deal_list || []
+  return (
+    <div className="space-y-3">
+      <div className="flex justify-between items-center">
+        <div className="text-sm text-dim">Bundles ativos (compre N, leve com desconto)</div>
+        <button onClick={() => setForm(true)} className="rounded-lg px-3 py-1.5 text-sm font-medium text-white flex items-center gap-1.5" style={{ background: LARANJA }}><Plus size={14} /> Novo bundle</button>
+      </div>
+      {lista === null ? <Carregando txt="carregando bundles…" />
+        : bs.length === 0 ? <Vazio txt="Nenhum bundle ativo." />
+        : <div className="space-y-1.5">{bs.map((b) => (
+            <div key={b.bundle_deal_id} className="glass rounded-xl px-4 py-2.5 flex items-center gap-3">
+              <Package size={16} style={{ color: LARANJA }} />
+              <div className="flex-1 min-w-0"><div className="text-sm font-medium truncate">{b.name}</div>
+                <div className="text-[11px] text-faint">{new Date(b.start_time * 1000).toLocaleDateString('pt-BR')} → {new Date(b.end_time * 1000).toLocaleDateString('pt-BR')}</div></div>
+              <button onClick={async () => { try { await api.shopeeEncerrarBundle(b.bundle_deal_id); notify('Bundle encerrado', 'ok'); carregar() } catch (e) { notify(e.message, 'danger') } }} className="text-faint hover:text-danger p-1"><Trash2 size={15} /></button>
+            </div>
+          ))}</div>}
+      {form && <BundleForm onClose={() => setForm(false)} onSaved={() => { setForm(false); carregar() }} notify={notify} />}
+    </div>
+  )
+}
+
+function BundleForm({ onClose, onSaved, notify }) {
+  const [f, setF] = useState({ nome: '', tipo: 1, valor: '', min: 2, inicio: '', fim: '' })
+  const [itens, setItens] = useState([])
+  const [picker, setPicker] = useState(false)
+  const [salvando, setSalvando] = useState(false)
+  const up = (k, v) => setF((x) => ({ ...x, [k]: v }))
+  const salvar = async () => {
+    if (!f.nome || !f.valor || !f.inicio || !f.fim || itens.length < 1) return notify('Preencha os campos e escolha itens', 'warn')
+    setSalvando(true)
+    try {
+      await api.shopeeCriarBundle({ nome: f.nome, rule_type: Number(f.tipo), valor: Number(f.valor),
+        min_itens: Number(f.min), inicio: toEpoch(f.inicio), fim: toEpoch(f.fim), item_ids: itens.map((i) => i.item_id) })
+      notify('Bundle criado', 'ok'); onSaved()
+    } catch (e) { notify(e.message, 'danger') }
+    setSalvando(false)
+  }
+  return (
+    <Modal titulo="Novo bundle" onClose={onClose} onSalvar={salvar} salvando={salvando}>
+      <Campo label="Nome"><input value={f.nome} onChange={(e) => up('nome', e.target.value)} className={INP} placeholder="Kit Miçangas" /></Campo>
+      <div className="grid grid-cols-2 gap-2">
+        <Campo label="Tipo de regra">
+          <select value={f.tipo} onChange={(e) => up('tipo', e.target.value)} className={INP}>
+            <option value={1}>Preço fixo do combo</option><option value={2}>% de desconto</option><option value={3}>Valor de desconto</option>
+          </select>
+        </Campo>
+        <Campo label={f.tipo == 2 ? '% desconto' : 'Valor (R$)'}><input type="number" value={f.valor} onChange={(e) => up('valor', e.target.value)} className={INP} /></Campo>
+      </div>
+      <Campo label="Quantidade mínima de itens"><input type="number" value={f.min} onChange={(e) => up('min', e.target.value)} className={INP} /></Campo>
+      <div className="grid grid-cols-2 gap-2">
+        <Campo label="Início"><input type="datetime-local" value={f.inicio} onChange={(e) => up('inicio', e.target.value)} className={INP} /></Campo>
+        <Campo label="Fim"><input type="datetime-local" value={f.fim} onChange={(e) => up('fim', e.target.value)} className={INP} /></Campo>
+      </div>
+      <Campo label={`Produtos do bundle (${itens.length})`}>
+        <button onClick={() => setPicker(true)} className="glass rounded-lg px-3 py-2 text-sm w-full text-left text-dim hover:text-fg flex items-center gap-2"><Plus size={14} /> {itens.length ? `${itens.length} produto(s) escolhido(s)` : 'Escolher produtos'}</button>
+      </Campo>
+      {picker && <SeletorItens titulo="Produtos do bundle" onConfirmar={(a) => { setItens(a); setPicker(false) }} onClose={() => setPicker(false)} />}
+    </Modal>
+  )
+}
+
+/* ------------------------------ Add-on ----------------------------------- */
+function Addons({ notify }) {
+  const [lista, setLista] = useState(null)
+  const [form, setForm] = useState(false)
+  const carregar = () => { setLista(null); api.shopeeAddons('ongoing').then(setLista).catch(() => setLista({ erro: true })) }
+  useEffect(carregar, [])
+  const as = lista?.response?.add_on_deal_list || []
+  return (
+    <div className="space-y-3">
+      <div className="flex justify-between items-center">
+        <div className="text-sm text-dim">Add-on (leve um adicional com desconto na compra)</div>
+        <button onClick={() => setForm(true)} className="rounded-lg px-3 py-1.5 text-sm font-medium text-white flex items-center gap-1.5" style={{ background: LARANJA }}><Plus size={14} /> Novo add-on</button>
+      </div>
+      {lista === null ? <Carregando txt="carregando add-ons…" />
+        : as.length === 0 ? <Vazio txt="Nenhum add-on ativo." />
+        : <div className="space-y-1.5">{as.map((a) => (
+            <div key={a.add_on_deal_id} className="glass rounded-xl px-4 py-2.5 flex items-center gap-3">
+              <Plus size={16} style={{ color: LARANJA }} />
+              <div className="flex-1 min-w-0"><div className="text-sm font-medium truncate">{a.add_on_deal_name}</div>
+                <div className="text-[11px] text-faint">{new Date(a.start_time * 1000).toLocaleDateString('pt-BR')} → {new Date(a.end_time * 1000).toLocaleDateString('pt-BR')}</div></div>
+              <button onClick={async () => { try { await api.shopeeEncerrarAddon(a.add_on_deal_id); notify('Add-on encerrado', 'ok'); carregar() } catch (e) { notify(e.message, 'danger') } }} className="text-faint hover:text-danger p-1"><Trash2 size={15} /></button>
+            </div>
+          ))}</div>}
+      {form && <AddonForm onClose={() => setForm(false)} onSaved={() => { setForm(false); carregar() }} notify={notify} />}
+    </div>
+  )
+}
+
+function AddonForm({ onClose, onSaved, notify }) {
+  const [f, setF] = useState({ nome: '', inicio: '', fim: '' })
+  const [principais, setPrincipais] = useState([])
+  const [adicionais, setAdicionais] = useState([])
+  const [pk, setPk] = useState(null)  // 'main' | 'sub'
+  const [salvando, setSalvando] = useState(false)
+  const up = (k, v) => setF((x) => ({ ...x, [k]: v }))
+  const salvar = async () => {
+    if (!f.nome || !f.inicio || !f.fim || !principais.length || !adicionais.length) return notify('Preencha tudo e escolha os produtos', 'warn')
+    setSalvando(true)
+    try {
+      await api.shopeeCriarAddon({ nome: f.nome, inicio: toEpoch(f.inicio), fim: toEpoch(f.fim),
+        principais: principais.map((i) => i.item_id),
+        adicionais: adicionais.map((i) => ({ item_id: i.item_id, add_on_deal_price: Number(i.preco || 0) })) })
+      notify('Add-on criado', 'ok'); onSaved()
+    } catch (e) { notify(e.message, 'danger') }
+    setSalvando(false)
+  }
+  return (
+    <Modal titulo="Novo add-on" onClose={onClose} onSalvar={salvar} salvando={salvando}>
+      <Campo label="Nome"><input value={f.nome} onChange={(e) => up('nome', e.target.value)} className={INP} placeholder="Compre linha, leve agulha barata" /></Campo>
+      <div className="grid grid-cols-2 gap-2">
+        <Campo label="Início"><input type="datetime-local" value={f.inicio} onChange={(e) => up('inicio', e.target.value)} className={INP} /></Campo>
+        <Campo label="Fim"><input type="datetime-local" value={f.fim} onChange={(e) => up('fim', e.target.value)} className={INP} /></Campo>
+      </div>
+      <Campo label={`Produtos principais (${principais.length})`}>
+        <button onClick={() => setPk('main')} className="glass rounded-lg px-3 py-2 text-sm w-full text-left text-dim hover:text-fg flex items-center gap-2"><Plus size={14} /> {principais.length ? `${principais.length} principal(is)` : 'Escolher principais'}</button>
+      </Campo>
+      <Campo label={`Adicionais com desconto (${adicionais.length})`}>
+        <button onClick={() => setPk('sub')} className="glass rounded-lg px-3 py-2 text-sm w-full text-left text-dim hover:text-fg flex items-center gap-2"><Plus size={14} /> {adicionais.length ? `${adicionais.length} adicional(is)` : 'Escolher adicionais + preço'}</button>
+      </Campo>
+      {pk === 'main' && <SeletorItens titulo="Produtos principais" onConfirmar={(a) => { setPrincipais(a); setPk(null) }} onClose={() => setPk(null)} />}
+      {pk === 'sub' && <SeletorItens titulo="Adicionais (com preço)" comPreco onConfirmar={(a) => { setAdicionais(a); setPk(null) }} onClose={() => setPk(null)} />}
+    </Modal>
+  )
+}
+
+/* ----------------------------- Flash Sale -------------------------------- */
+function FlashSale({ notify }) {
+  const [lista, setLista] = useState(null)
+  const [form, setForm] = useState(false)
+  const carregar = () => { setLista(null); api.shopeeFlash(2).then(setLista).catch(() => setLista({ erro: true })) }
+  useEffect(carregar, [])
+  const fs = lista?.response?.flash_sale_list || lista?.response || []
+  const arr = Array.isArray(fs) ? fs : []
+  return (
+    <div className="space-y-3">
+      <div className="flex justify-between items-center">
+        <div className="text-sm text-dim">Flash Sale da loja (slots de horário)</div>
+        <button onClick={() => setForm(true)} className="rounded-lg px-3 py-1.5 text-sm font-medium text-white flex items-center gap-1.5" style={{ background: LARANJA }}><Flame size={14} /> Nova flash sale</button>
+      </div>
+      {lista === null ? <Carregando txt="carregando flash sales…" />
+        : arr.length === 0 ? <Vazio txt="Nenhuma flash sale ativa ou agendada." />
+        : <div className="space-y-1.5">{arr.map((s) => (
+            <div key={s.flash_sale_id} className="glass rounded-xl px-4 py-2.5 flex items-center gap-3">
+              <Flame size={16} style={{ color: LARANJA }} />
+              <div className="flex-1 min-w-0"><div className="text-sm font-medium">Flash #{s.flash_sale_id}</div>
+                <div className="text-[11px] text-faint">{s.start_time ? new Date(s.start_time * 1000).toLocaleString('pt-BR') : ''} • {s.status === 1 ? 'agendada' : s.status === 2 ? 'ativa' : ''}</div></div>
+              <button onClick={async () => { try { await api.shopeeEncerrarFlash(s.flash_sale_id); notify('Flash sale removida', 'ok'); carregar() } catch (e) { notify(e.message, 'danger') } }} className="text-faint hover:text-danger p-1"><Trash2 size={15} /></button>
+            </div>
+          ))}</div>}
+      {form && <FlashForm onClose={() => setForm(false)} onSaved={() => { setForm(false); carregar() }} notify={notify} />}
+    </div>
+  )
+}
+
+function FlashForm({ onClose, onSaved, notify }) {
+  const [dias, setDias] = useState(7)
+  const [slots, setSlots] = useState(null)
+  const [slot, setSlot] = useState('')
+  const [itens, setItens] = useState([])
+  const [picker, setPicker] = useState(false)
+  const [salvando, setSalvando] = useState(false)
+  const buscarSlots = (d) => {
+    setSlots(null); setSlot('')
+    api.shopeeFlashSlots(d).then((r) => setSlots(r?.response || [])).catch(() => setSlots([]))
+  }
+  useEffect(() => { buscarSlots(dias) }, [])
+  const salvar = async () => {
+    if (!slot || !itens.length) return notify('Escolha um horário e produtos', 'warn')
+    setSalvando(true)
+    try {
+      await api.shopeeCriarFlash({ timeslot_id: Number(slot),
+        itens: itens.map((i) => ({ item_id: Number(i.item_id), preco: Number(i.preco || 0) })) })
+      notify('Oferta relâmpago criada', 'ok'); onSaved()
+    } catch (e) { notify(e.message, 'danger') }
+    setSalvando(false)
+  }
+  const fmtSlot = (s) => {
+    const ini = new Date((s.start_time || 0) * 1000)
+    const fim = new Date((s.end_time || 0) * 1000)
+    const dia = ini.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' })
+    const hi = ini.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+    const hf = fim.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+    return `${dia} • ${hi}–${hf}`
+  }
+  return (
+    <Modal titulo="Nova oferta relâmpago" onClose={onClose} onSalvar={salvar} salvando={salvando}>
+      <Campo label="Buscar horários nos próximos">
+        <div className="flex gap-1.5">
+          {[3, 7, 14, 30].map((d) => (
+            <button key={d} onClick={() => { setDias(d); buscarSlots(d) }} className="text-xs px-2.5 py-1.5 rounded-lg font-medium"
+                    style={dias === d ? { background: LARANJA, color: '#fff' } : { background: 'var(--glass-hover)', color: 'var(--text-dim)', border: '1px solid var(--glass-border)' }}>{d} dias</button>
+          ))}
+        </div>
+      </Campo>
+      <Campo label="Horário (slot disponível)">
+        {slots === null ? <div className="text-xs text-faint flex items-center gap-1"><Loader2 size={12} className="animate-spin" /> buscando horários disponíveis…</div>
+          : slots.length === 0 ? <div className="text-xs text-faint">Nenhum horário disponível nesse intervalo. Tente um período maior.</div>
+          : <select value={slot} onChange={(e) => setSlot(e.target.value)} className={INP}>
+              <option value="">selecione um horário…</option>
+              {slots.map((s) => <option key={s.timeslot_id} value={s.timeslot_id}>{fmtSlot(s)}</option>)}
+            </select>}
+        {slots && slots.length > 0 && <div className="text-[11px] text-faint mt-1">{slots.length} horário(s) disponível(is) no período</div>}
+      </Campo>
+      <Campo label={`Produtos do catálogo + preço promocional (${itens.length})`}>
+        <button onClick={() => setPicker(true)} className="glass rounded-lg px-3 py-2 text-sm w-full text-left text-dim hover:text-fg flex items-center gap-2"><Plus size={14} /> {itens.length ? `${itens.length} produto(s) escolhido(s)` : 'Escolher produtos + preço'}</button>
+        {itens.length > 0 && (
+          <div className="mt-1.5 space-y-1">
+            {itens.map((i) => (
+              <div key={i.item_id} className="flex items-center justify-between text-xs rounded-lg px-2.5 py-1.5" style={{ background: 'var(--glass-hover)' }}>
+                <span className="truncate flex-1">{i.nome}</span>
+                <span className="num font-medium" style={{ color: LARANJA }}>{i.preco ? brl(i.preco) : '—'}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </Campo>
+      <div className="text-[11px] text-faint">As variações de cada produto são preenchidas automaticamente com o preço que você definir. A loja precisa de estoque e elegibilidade para a oferta ser aceita.</div>
+      {picker && <SeletorItens titulo="Produtos da oferta relâmpago" comPreco onConfirmar={(a) => { setItens(a); setPicker(false) }} onClose={() => setPicker(false)} />}
+    </Modal>
   )
 }

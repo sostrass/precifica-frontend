@@ -77,15 +77,20 @@ export default function App() {
         </div>
 
         <nav className="mt-4 space-y-1">
+          <NavSecao>Visão geral</NavSecao>
           <NavItem icon={<LayoutDashboard size={18} />} label="Dashboard" active={view === 'dashboard'} onClick={() => setView('dashboard')} />
+          <NavSecao>Operação</NavSecao>
           <NavItem icon={<Boxes size={18} />} label="Catálogo" active={view === 'catalogo'} onClick={() => setView('catalogo')} />
           <NavItem icon={<Calculator size={18} />} label="Precificação" active={view === 'precificacao'} onClick={() => setView('precificacao')} />
-          <NavItem icon={<SatelliteDish size={18} />} label="Radar" active={view === 'radar'} onClick={() => setView('radar')} />
           <NavItem icon={<FileText size={18} />} label="Notas fiscais" active={view === 'nfe'} onClick={() => setView('nfe')} />
-          <NavItem icon={<Sparkles size={18} />} label="Central IA" active={view === 'ia'} onClick={() => setView('ia')} />
-          <NavItem icon={<Aperture size={18} />} label="Estúdio" active={view === 'estudio'} onClick={() => setView('estudio')} />
-          <NavItem icon={<Bot size={18} />} label="Agentes" active={view === 'agentes'} onClick={() => setView('agentes')} />
+          <NavSecao>Canais</NavSecao>
           <NavItem icon={<ShoppingBag size={18} />} label="Shopee" active={view === 'shopee'} onClick={() => setView('shopee')} />
+          <NavItem icon={<SatelliteDish size={18} />} label="Radar" active={view === 'radar'} onClick={() => setView('radar')} />
+          <NavSecao>Inteligência</NavSecao>
+          <NavItem icon={<Sparkles size={18} />} label="Central IA" active={view === 'ia'} onClick={() => setView('ia')} />
+          <NavItem icon={<Bot size={18} />} label="Agentes" active={view === 'agentes'} onClick={() => setView('agentes')} />
+          <NavItem icon={<Aperture size={18} />} label="Estúdio" active={view === 'estudio'} onClick={() => setView('estudio')} />
+          <NavSecao>Conta</NavSecao>
           <NavItem icon={<Settings size={18} />} label="Configurações" active={view === 'configuracoes'} onClick={() => setView('configuracoes')} />
         </nav>
 
@@ -141,6 +146,10 @@ export default function App() {
       </div>
     </div>
   )
+}
+
+function NavSecao({ children }) {
+  return <div className="px-3 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-faint select-none">{children}</div>
 }
 
 function NavItem({ icon, label, active, onClick }) {
