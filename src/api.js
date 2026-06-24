@@ -91,6 +91,7 @@ export const api = {
   shopeePromoHistorico: () => req('/api/shopee/promo/historico'),
   shopeePedidos: (dias = 7) => req(`/api/shopee/pedidos?dias=${dias}`),
   shopeePedidosPainel: (status = 'A_ENVIAR', dias = 15) => req(`/api/shopee/pedidos/painel?status=${status}&dias=${dias}`),
+  shopeePedidoDetalhe: (orderSn) => req(`/api/shopee/pedidos/${orderSn}/detalhe`),
   shopeePedidosSeparacao: (status = 'A_ENVIAR', dias = 15) => req(`/api/shopee/pedidos/separacao?status=${status}&dias=${dias}`),
   shopeeMargemReal: (dias = 7, limite = 40) => req(`/api/shopee/financeiro/margem-real?dias=${dias}&limite=${limite}`),
   shopeeDescontos: (status = 'ongoing') => req(`/api/shopee/descontos?status=${status}`),

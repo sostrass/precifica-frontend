@@ -12,7 +12,7 @@ import {
 } from 'lucide-react'
 import { api } from './api'
 import { useToast } from './toast.jsx'
-import { CampaignCard, fmtDur, useAgora, cicloInfo, TIPO_META } from './CampaignCard'
+import { CampaignCard, fmtDur, useAgora, cicloInfo, TIPO_META, fmtDataHora } from './CampaignCard'
 
 const LARANJA = '#EE4D2D'
 
@@ -1332,6 +1332,7 @@ function HistMotorItem({ h }) {
 function MotorPromocoes({ conectado, notify }) {
   const [cfg, setCfg] = useState(null)
   const [propostas, setPropostas] = useState(null)
+  const [resultado, setResultado] = useState(null)
   const [sel, setSel] = useState(() => new Set())
   const [gerando, setGerando] = useState(false)
   const [aplicando, setAplicando] = useState(false)
@@ -1377,12 +1378,19 @@ function MotorPromocoes({ conectado, notify }) {
     setAplicando(true)
     try {
       const r = await api.shopeePromoAplicar({ propostas: escolhidas, tipo: cfg?.tipo })
+      setResultado(r)
       if (r.acao === 'ok') {
         const tot = (r.criadas || []).reduce((s, c) => s + (c.itens || 0), 0)
-        notify(`Promoção criada com ${tot} produto(s)` + ((r.erros || []).length ? ` · ${r.erros.length} aviso(s)` : ''), 'ok')
-        setPropostas(null); recarregarMeta()
+        const env = (r.criadas || []).reduce((s, c) => s + (c.enviados || c.itens || 0), 0)
+        if (tot > 0) {
+          notify(`Promoção criada com ${tot} produto(s)`, 'ok')
+          setPropostas(null)
+        } else {
+          notify(`Campanha criada, mas 0 de ${env} produto(s) entraram — veja o motivo abaixo`, 'warn')
+        }
+        recarregarMeta()
       } else {
-        notify((r.erros || []).join(' · ') || 'Falha ao criar', 'danger')
+        notify((r.erros || [])[0] || 'Falha ao criar', 'danger')
       }
     } catch (e) { notify(e.message, 'danger') }
     setAplicando(false)
@@ -1603,6 +1611,35 @@ function MotorPromocoes({ conectado, notify }) {
         <DiagnosticoPromo msg={propostas.msg} diag={propostas.diagnostico} />
       )}
 
+      {resultado && (resultado.erros?.length > 0 || (resultado.criadas || []).some(c => (c.itens || 0) === 0)) && (
+        <div className="glass rounded-2xl p-4" style={{ borderLeft: '3px solid #E6B450' }}>
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-sm font-medium flex items-center gap-2"><AlertTriangle size={15} style={{ color: '#E6B450' }} /> Resultado da aplicação</div>
+            <button onClick={() => setResultado(null)} className="text-faint hover:text-fg"><X size={14} /></button>
+          </div>
+          {(resultado.criadas || []).map((c, i) => (
+            <div key={i} className="text-xs mb-1 flex items-center gap-2">
+              <span className="px-1.5 py-0.5 rounded num text-[10px]" style={{ background: (c.itens || 0) > 0 ? 'rgba(20,184,166,.14)' : 'rgba(255,111,111,.14)', color: (c.itens || 0) > 0 ? '#2DD4BF' : '#FF6F6F' }}>
+                {c.tipo} · {c.itens || 0}/{c.enviados || c.itens || 0} produto(s)
+              </span>
+              {(c.itens || 0) === 0 && <span className="text-faint">campanha criada vazia</span>}
+            </div>
+          ))}
+          {resultado.erros?.length > 0 && (
+            <ul className="mt-2 space-y-1">
+              {resultado.erros.map((e, i) => (
+                <li key={i} className="text-[11px] text-dim flex items-start gap-1.5">
+                  <span style={{ color: '#E6B450' }}>•</span><span>{e}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="text-[10px] text-faint mt-2 pt-2 border-t" style={{ borderColor: 'var(--glass-border)' }}>
+            Dica: se o motivo for "já está em outra promoção", encerre as campanhas antigas desses produtos na aba Promoções antes de recriar — a Shopee não deixa o mesmo produto em dois descontos ao mesmo tempo.
+          </div>
+        </div>
+      )}
+
       {/* Histórico */}
       {hist.length > 0 && (
         <div className="glass rounded-2xl p-4">
@@ -1669,19 +1706,24 @@ function prazoInfo(shipBy, agora) {
   return { ms, atrasado: ms < 0, urgente: ms >= 0 && ms < 12 * 3600 * 1000 }
 }
 
-function PedidoCard({ p, agora, sel, onSel }) {
+const corMargemReal = (m, alvo) => m == null ? 'var(--text-faint)' : m < 0 ? '#FF6F6F' : (alvo && m < alvo - 0.5) ? '#E6B450' : '#2DD4BF'
+
+function PedidoCard({ p, agora, alvo, sel, onSel, onAbrir }) {
   const prazo = prazoInfo(p.ship_by, agora)
   const corPrazo = !prazo ? 'var(--text-faint)' : prazo.atrasado ? '#FF6F6F' : prazo.urgente ? '#E6B450' : '#2DD4BF'
+  const corBorda = p.prejuizo ? '#FF6F6F' : p.abaixo_meta ? '#E6B450' : 'transparent'
   return (
-    <div className="glass rounded-xl p-3" style={{ borderLeft: p.abaixo_preco ? '3px solid #E6B450' : '3px solid transparent' }}>
+    <div onClick={() => onAbrir && onAbrir(p.order_sn)} className="glass rounded-xl p-3 transition-colors hover:bg-[var(--glass-hover)]"
+         style={{ borderLeft: `3px solid ${corBorda}`, cursor: 'pointer' }}>
       <div className="flex items-center gap-2 mb-2">
-        <button onClick={() => onSel(p.order_sn)} className="h-4 w-4 rounded border grid place-items-center shrink-0" style={{ borderColor: sel ? LARANJA : 'var(--glass-border)', background: sel ? LARANJA : 'transparent' }}>
+        <button onClick={(e) => { e.stopPropagation(); onSel(p.order_sn) }} className="h-4 w-4 rounded border grid place-items-center shrink-0" style={{ borderColor: sel ? LARANJA : 'var(--glass-border)', background: sel ? LARANJA : 'transparent' }}>
           {sel && <CheckCircle2 size={12} className="text-white" />}
         </button>
         <UserIcon size={13} className="text-faint shrink-0" />
         <span className="text-xs font-medium truncate flex-1">{p.comprador}</span>
         {p.cidade && <span className="text-[10px] text-faint flex items-center gap-0.5 shrink-0"><MapPin size={9} />{p.cidade}/{p.uf}</span>}
         <span className="num text-[10px] text-faint shrink-0">#{String(p.order_sn).slice(-8)}</span>
+        <ChevronRight size={13} className="text-faint shrink-0" />
       </div>
       <div className="space-y-1.5">
         {p.itens.map((it, i) => (
@@ -1693,12 +1735,11 @@ function PedidoCard({ p, agora, sel, onSel }) {
               <div className="flex items-center gap-1.5 mt-0.5">
                 {it.sku && <span className="text-[10px] text-faint num">{it.sku}</span>}
                 <span className="text-[11px] font-semibold num" style={{ color: LARANJA }}>{brl(it.preco_pago)}</span>
-                {it.preco_tabela != null && it.dif != null && Math.abs(it.dif) >= 0.01 && (
-                  <span className="text-[9px] px-1 py-0.5 rounded num" style={{ background: it.dif < 0 ? 'rgba(230,180,80,.14)' : 'rgba(20,184,166,.14)', color: it.dif < 0 ? '#E6B450' : '#2DD4BF' }}>
-                    {it.dif < 0 ? '' : '+'}{brl(it.dif)} vs tabela
-                  </span>
-                )}
-                {!it.tem_cadastro && <span className="text-[9px] text-faint">sem cadastro</span>}
+                {it.margem_real != null
+                  ? <span className="text-[9px] px-1 py-0.5 rounded num" style={{ background: `color-mix(in srgb, ${corMargemReal(it.margem_real, alvo)} 16%, transparent)`, color: corMargemReal(it.margem_real, alvo) }}>
+                      {it.margem_real}%{it.lucro_real != null ? ` · ${brl(it.lucro_real)}` : ''}
+                    </span>
+                  : !it.tem_cadastro ? <span className="text-[9px] text-faint">sem custo</span> : null}
               </div>
             </div>
           </div>
@@ -1708,7 +1749,104 @@ function PedidoCard({ p, agora, sel, onSel }) {
         {prazo ? <span className="text-[11px] font-medium flex items-center gap-1" style={{ color: corPrazo }}>
           <Clock size={11} />{prazo.atrasado ? 'envio atrasado' : `enviar em ${fmtDur(prazo.ms)}`}</span>
           : <span className="text-[11px] text-faint">{p.status}</span>}
-        <span className="text-xs font-semibold num">{brl(p.total_pago)}</span>
+        <div className="flex items-center gap-2">
+          {p.lucro_real != null && <span className="text-[10px] num" style={{ color: '#2DD4BF' }}>lucro {brl(p.lucro_real)}</span>}
+          <span className="text-xs font-semibold num">{brl(p.total_pago)}</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function LinhaFin({ rotulo, valor, negativo, forte, cor }) {
+  return (
+    <div className="flex items-center justify-between text-xs py-1">
+      <span className={forte ? 'font-semibold' : 'text-dim'}>{rotulo}</span>
+      <span className="num font-medium" style={{ color: cor || (negativo ? '#FF6F6F' : 'var(--text)') }}>{negativo ? '−' : ''}{brl(Math.abs(valor || 0))}</span>
+    </div>
+  )
+}
+
+function PedidoDetalhe({ orderSn, alvo, onClose }) {
+  const [d, setD] = useState(null)
+  useEffect(() => { api.shopeePedidoDetalhe(orderSn).then(setD).catch((e) => setD({ erro: e.message || true })) }, [orderSn])
+  const f = d?.financeiro
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center p-4" style={{ background: 'rgba(0,0,0,.55)' }} onClick={onClose}>
+      <div className="glass rounded-2xl w-full max-w-lg max-h-[88vh] flex flex-col" style={{ background: 'var(--bg-elev, var(--glass))', backdropFilter: 'blur(20px)' }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-4 border-b border-glassb">
+          <div className="min-w-0">
+            <div className="font-display font-semibold flex items-center gap-2"><Package size={16} style={{ color: LARANJA }} /> Pedido {d ? <span className="num text-dim font-normal">#{String(d.order_sn || orderSn).slice(-10)}</span> : ''}</div>
+            {d && !d.erro && <div className="text-[11px] text-faint mt-0.5">{d.comprador} · {d.status}</div>}
+          </div>
+          <button onClick={onClose} className="text-faint hover:text-fg shrink-0"><X size={18} /></button>
+        </div>
+        <div className="p-4 overflow-y-auto flex-1 space-y-3">
+          {d === null ? <div className="py-10 text-center text-faint flex items-center justify-center gap-2"><Loader2 size={16} className="animate-spin" /> carregando detalhe…</div>
+            : d?.erro ? <div className="py-6 text-center text-sm" style={{ color: '#FF6F6F' }}>{typeof d.erro === 'string' ? d.erro : 'Falha ao carregar.'}</div>
+            : <>
+                {/* Repasse real */}
+                <div className="rounded-xl p-3" style={{ background: 'var(--glass-hover)' }}>
+                  <div className="text-xs font-semibold mb-1 flex items-center gap-1.5"><Wallet size={13} style={{ color: LARANJA }} /> Repasse da Shopee</div>
+                  {f.tem_escrow ? <>
+                    <LinhaFin rotulo="Receita (comprador pagou)" valor={f.receita} forte />
+                    {f.comissao > 0 && <LinhaFin rotulo="Comissão" valor={f.comissao} negativo />}
+                    {f.servico > 0 && <LinhaFin rotulo="Taxa de serviço" valor={f.servico} negativo />}
+                    {f.transacao > 0 && <LinhaFin rotulo="Taxa de transação" valor={f.transacao} negativo />}
+                    {f.frete !== 0 && <LinhaFin rotulo="Frete" valor={f.frete} negativo={f.frete > 0} />}
+                    <div className="border-t my-1" style={{ borderColor: 'var(--glass-border)' }} />
+                    <LinhaFin rotulo="Você recebe (líquido)" valor={f.liquido} forte cor="#2DD4BF" />
+                    {f.custo_completo ? <>
+                      <LinhaFin rotulo="Custo dos produtos" valor={f.custo} negativo />
+                      <div className="border-t my-1" style={{ borderColor: 'var(--glass-border)' }} />
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-semibold">Lucro real</span>
+                        <span className="num text-base font-bold" style={{ color: corMargemReal(f.margem_pct, alvo) }}>{brl(f.lucro)} <span className="text-xs">({f.margem_pct}%)</span></span>
+                      </div>
+                    </> : <div className="text-[10px] text-faint mt-1 flex items-center gap-1"><AlertTriangle size={10} style={{ color: '#E6B450' }} /> Algum produto sem custo no catálogo — lucro não calculado.</div>}
+                  </> : <div className="text-xs text-faint">A Shopee ainda não liberou o repasse (escrow) deste pedido — normalmente fica disponível após o envio/conclusão.</div>}
+                </div>
+
+                {/* Produtos */}
+                <div>
+                  <div className="text-xs font-semibold mb-1.5 flex items-center gap-1.5"><ShoppingBag size={13} style={{ color: LARANJA }} /> Produtos</div>
+                  <div className="space-y-1.5">
+                    {d.itens.map((it, i) => (
+                      <div key={i} className="flex items-center gap-2 rounded-lg px-2 py-1.5" style={{ background: 'var(--glass-hover)' }}>
+                        {it.imagem ? <img src={it.imagem} className="h-10 w-10 rounded-md object-cover shrink-0" alt="" /> : <div className="h-10 w-10 rounded-md grid place-items-center shrink-0" style={{ background: 'var(--glass)' }}><ImageIcon size={14} className="text-faint" /></div>}
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs truncate">{it.qtd}× {it.nome}</div>
+                          {it.variacao && <div className="text-[10px] text-faint truncate">{it.variacao}</div>}
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            {it.sku && <span className="text-[10px] text-faint num">{it.sku}</span>}
+                            <span className="text-[11px] font-semibold num" style={{ color: LARANJA }}>{brl(it.preco_pago)}</span>
+                            {it.taxas_mkt != null && <span className="text-[9px] text-faint num">−{brl(it.taxas_mkt)} taxas</span>}
+                            {it.margem_real != null && <span className="text-[9px] px-1 rounded num" style={{ background: `color-mix(in srgb, ${corMargemReal(it.margem_real, alvo)} 16%, transparent)`, color: corMargemReal(it.margem_real, alvo) }}>{it.margem_real}%{it.lucro_real != null ? ` · ${brl(it.lucro_real)}` : ''}</span>}
+                            {!it.tem_cadastro && <span className="text-[9px] text-faint">sem custo</span>}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Comprador + logística */}
+                <div className="grid sm:grid-cols-2 gap-2">
+                  <div className="rounded-xl p-3" style={{ background: 'var(--glass-hover)' }}>
+                    <div className="text-[10px] text-faint uppercase tracking-wide mb-1 flex items-center gap-1"><MapPin size={11} /> Entrega</div>
+                    <div className="text-xs">{d.endereco?.nome || d.comprador}</div>
+                    {d.endereco?.completo && <div className="text-[11px] text-faint mt-0.5">{d.endereco.completo}</div>}
+                    <div className="text-[11px] text-faint">{[d.endereco?.cidade, d.endereco?.uf].filter(Boolean).join('/')} {d.endereco?.cep || ''}</div>
+                  </div>
+                  <div className="rounded-xl p-3" style={{ background: 'var(--glass-hover)' }}>
+                    <div className="text-[10px] text-faint uppercase tracking-wide mb-1 flex items-center gap-1"><Truck size={11} /> Logística</div>
+                    <div className="text-xs">{d.logistica?.transportadora || '—'}</div>
+                    {d.logistica?.rastreio && <div className="text-[11px] num text-faint mt-0.5">rastreio {d.logistica.rastreio}</div>}
+                    {d.ship_by && <div className="text-[11px] text-faint">enviar até {fmtDataHora(d.ship_by)}</div>}
+                  </div>
+                </div>
+              </>}
+        </div>
       </div>
     </div>
   )
@@ -1723,6 +1861,7 @@ function PedidosPainel({ conectado }) {
   const [busca, setBusca] = useState('')
   const [sel, setSel] = useState(() => new Set())
   const [imprimindo, setImprimindo] = useState(false)
+  const [aberto, setAberto] = useState(null)
 
   const carregar = (st = status, dd = dias) => {
     setD(null); setSel(new Set())
@@ -1795,9 +1934,9 @@ function PedidosPainel({ conectado }) {
       {res && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
           <FinMetric icon={Package} rotulo="Pedidos" valor={res.total} />
-          <FinMetric icon={ShoppingBag} rotulo="Unidades" valor={res.unidades} />
-          <FinMetric icon={Wallet} rotulo="Receita" valor={brl(res.receita)} cor="#2DD4BF" />
-          <FinMetric icon={AlertTriangle} rotulo="Abaixo da tabela" valor={res.abaixo_preco} cor={res.abaixo_preco > 0 ? '#E6B450' : '#2DD4BF'} />
+          <FinMetric icon={Wallet} rotulo="Receita" valor={brl(res.receita)} />
+          <FinMetric icon={TrendingUp} rotulo="Lucro real" valor={res.lucro_real != null ? brl(res.lucro_real) : '—'} cor="#2DD4BF" sub={res.lucro_real != null ? `${res.cobertura_lucro} c/ custo` : 'cadastre custos'} />
+          <FinMetric icon={AlertTriangle} rotulo="Abaixo da meta" valor={res.abaixo_meta} cor={res.abaixo_meta > 0 ? '#E6B450' : '#2DD4BF'} sub={res.prejuizo > 0 ? `${res.prejuizo} em prejuízo` : (res.margem_alvo ? `meta ${res.margem_alvo}%` : null)} />
         </div>
       )}
 
@@ -1816,7 +1955,9 @@ function PedidosPainel({ conectado }) {
       {d === null ? <div className="py-10 text-center text-faint flex items-center justify-center gap-2"><Loader2 size={16} className="animate-spin" /> carregando pedidos…</div>
         : d?.erro ? <div className="py-6 text-center text-sm" style={{ color: '#FF6F6F' }}>{typeof d.erro === 'string' ? d.erro : 'Falha ao carregar pedidos.'}</div>
         : visiveis.length === 0 ? <div className="py-8 text-center text-sm text-faint">{filtro ? 'Nenhum pedido bate com a busca.' : `Nenhum pedido ${ROTULO_STATUS[status].toLowerCase()} no período.`}</div>
-        : <div className="space-y-2">{visiveis.map((p) => <PedidoCard key={p.order_sn} p={p} agora={agora} sel={sel.has(p.order_sn)} onSel={toggleSel} />)}</div>}
+        : <div className="space-y-2">{visiveis.map((p) => <PedidoCard key={p.order_sn} p={p} agora={agora} alvo={d?.margem_alvo} sel={sel.has(p.order_sn)} onSel={toggleSel} onAbrir={setAberto} />)}</div>}
+
+      {aberto && <PedidoDetalhe orderSn={aberto} alvo={d?.margem_alvo} onClose={() => setAberto(null)} />}
 
       <div className="text-[10px] text-faint mt-3 flex items-start gap-1.5">
         <FileText size={11} className="mt-0.5 shrink-0" />
