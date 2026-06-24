@@ -21,7 +21,14 @@ async function req(path, { method = 'GET', body, auth = true } = {}) {
     throw new Error('Sem resposta do servidor (rede ou timeout). Tente de novo em instantes.')
   }
   const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data.detail || data.erro || `Erro ${res.status}`)
+  if (!res.ok) {
+    // sessão expirada/Inválida: limpa o token e avisa o app pra voltar ao login (em qualquer tela)
+    if (res.status === 401 && auth && getToken()) {
+      setToken(null)
+      try { window.dispatchEvent(new CustomEvent('sessao-expirada')) } catch (_) {}
+    }
+    throw new Error(data.detail || data.erro || `Erro ${res.status}`)
+  }
   return data
 }
 

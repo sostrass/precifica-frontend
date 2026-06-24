@@ -10,7 +10,7 @@ import {
   Wallet, Receipt, Coins, Truck, BadgePercent, Target,
   Printer, MapPin, FileText, ClipboardList, User as UserIcon,
 } from 'lucide-react'
-import { api } from './api'
+import { api, setToken } from './api'
 import { useToast } from './toast.jsx'
 import { CampaignCard, fmtDur, useAgora, cicloInfo, TIPO_META, fmtDataHora } from './CampaignCard'
 
@@ -71,7 +71,12 @@ export default function Shopee() {
   const [carregando, setCarregando] = useState(true)
 
   useEffect(() => {
-    api.shopeeStatus().then(setStatus).catch(() => setStatus({ configurada: false }))
+    api.shopeeStatus().then(setStatus)
+      .catch((e) => {
+        const msg = String(e?.message || e || '')
+        const authErro = /token|sess|401|expirad|autoriz|credenci|unauthor/i.test(msg)
+        setStatus({ erro: true, authErro, msgErro: msg })
+      })
       .finally(() => setCarregando(false))
   }, [])
 
@@ -128,6 +133,7 @@ export default function Shopee() {
 function ConexaoChip({ status, carregando }) {
   if (carregando) return <span className="text-xs text-faint flex items-center gap-1"><Loader2 size={11} className="animate-spin" /> verificando…</span>
   if (status?.ok) return <span className="text-xs flex items-center gap-1" style={{ color: 'var(--accent2)' }}><CheckCircle2 size={12} /> {status?.nome_loja || `loja ${status?.shop_id}`} conectada</span>
+  if (status?.authErro) return <span className="text-xs flex items-center gap-1" style={{ color: 'var(--warn)' }}><AlertTriangle size={12} /> sessão expirada — entre de novo</span>
   if (status?.app) return <span className="text-xs flex items-center gap-1" style={{ color: 'var(--warn)' }}><AlertTriangle size={12} /> app pronto, loja não autorizada</span>
   return <span className="text-xs flex items-center gap-1" style={{ color: 'var(--faint)' }}><Plug size={12} /> não configurada</span>
 }
@@ -168,7 +174,21 @@ function ConectarShopee({ status, onSaved }) {
 
   return (
     <div className="glass rounded-2xl p-4 space-y-3" style={{ border: `1px solid ${LARANJA}` }}>
-      {!status?.app ? (
+      {status?.authErro ? (
+        <div className="space-y-2">
+          <div className="text-sm flex items-center gap-2" style={{ color: 'var(--warn)' }}>
+            <AlertTriangle size={15} /> Sua sessão expirou (token inválido).
+          </div>
+          <div className="text-xs text-dim">
+            Não é problema de configuração — o servidor, o banco e a conexão da loja estão OK. É só o login que venceu.
+            Saia e entre de novo no app para continuar.
+          </div>
+          <button onClick={() => { setToken(null); location.reload() }}
+                  className="rounded-xl px-4 py-2.5 text-sm font-semibold text-white flex items-center gap-2 w-full justify-center" style={{ background: LARANJA }}>
+            Sair e entrar de novo
+          </button>
+        </div>
+      ) : !status?.app ? (
         <div className="text-sm" style={{ color: 'var(--warn)' }}>
           Faltam <b>SHOPEE_PARTNER_ID</b> e <b>SHOPEE_PARTNER_KEY</b> no servidor (Railway). Defina e reinicie o backend.
         </div>

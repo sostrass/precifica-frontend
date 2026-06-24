@@ -64,6 +64,12 @@ export default function App() {
     if (authed) api.shopeeStatus().then(setShopee).catch(() => setShopee({ ok: false }))
   }, [authed, view])
 
+  useEffect(() => {
+    const onExpirou = () => { setAuthed(false); notify('Sua sessão expirou. Entre de novo.', 'warn') }
+    window.addEventListener('sessao-expirada', onExpirou)
+    return () => window.removeEventListener('sessao-expirada', onExpirou)
+  }, [])
+
   if (!authed) return <Login onAuth={() => setAuthed(true)} />
 
   const conectarBling = async () => {
