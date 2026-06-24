@@ -6,9 +6,12 @@ import {
   HelpCircle, GitCompareArrows, Undo2, TrendingUp, TrendingDown, Trash2, Calendar,
   Stethoscope, XCircle, ShieldAlert, CircleDot, Bot, Search,
   Send, Sparkles, SlidersHorizontal, MessageSquare, ImageIcon, Settings2, Smile, ThumbsUp,
+  Percent, Ticket, RotateCcw, ChevronDown, PlusCircle, Layers, Hourglass, Infinity as InfinityIcon,
+  Wallet, Receipt, Coins, Truck, BadgePercent,
 } from 'lucide-react'
 import { api } from './api'
 import { useToast } from './toast.jsx'
+import { CampaignCard, fmtDur } from './CampaignCard'
 
 const LARANJA = '#EE4D2D'
 
@@ -1498,22 +1501,149 @@ function Pedidos({ conectado }) {
   const [d, setD] = useState(null)
   useEffect(() => { if (conectado) api.shopeePedidos(7).then(setD).catch(() => setD({ erro: true })) }, [conectado])
   if (!conectado) return <div className="text-sm text-faint py-6 text-center glass rounded-2xl">Conecte a loja Shopee para ver os pedidos.</div>
-  if (d === null) return <div className="py-10 text-center text-faint flex items-center justify-center gap-2"><Loader2 size={16} className="animate-spin" /> carregando pedidos…</div>
   const lista = d?.response?.order_list || []
   return (
-    <div className="glass rounded-2xl p-4">
-      <div className="text-sm font-medium mb-1">Pedidos (7 dias)</div>
-      <div className="text-xs text-dim mb-3">Com o <b>escrow</b> de cada pedido a gente calcula a <b>margem líquida real</b> (preço − comissão − taxas) e compara com o que você precificou.</div>
-      {lista.length === 0
-        ? <div className="text-sm text-faint py-4 text-center">Nenhum pedido no período (ou loja recém-conectada).</div>
-        : <div className="space-y-1.5">
-            {lista.slice(0, 20).map((o) => (
-              <div key={o.order_sn} className="flex items-center justify-between rounded-lg px-3 py-2 text-sm" style={{ background: 'var(--glass-hover)' }}>
-                <span className="num">#{o.order_sn}</span>
-                <span className="text-xs text-faint">{o.order_status}</span>
-              </div>
-            ))}
-          </div>}
+    <div className="space-y-3">
+      <MargemReal conectado={conectado} />
+      <div className="glass rounded-2xl p-4">
+        <div className="text-sm font-medium mb-1">Últimos pedidos (7 dias)</div>
+        <div className="text-xs text-dim mb-3">Lista rápida dos pedidos recentes. A análise de lucro de verdade está no painel acima.</div>
+        {d === null ? <div className="py-6 text-center text-faint flex items-center justify-center gap-2"><Loader2 size={15} className="animate-spin" /> carregando pedidos…</div>
+          : lista.length === 0 ? <div className="text-sm text-faint py-4 text-center">Nenhum pedido no período (ou loja recém-conectada).</div>
+          : <div className="space-y-1.5">
+              {lista.slice(0, 20).map((o) => (
+                <div key={o.order_sn} className="flex items-center justify-between rounded-lg px-3 py-2 text-sm" style={{ background: 'var(--glass-hover)' }}>
+                  <span className="num">#{o.order_sn}</span>
+                  <span className="text-xs text-faint">{o.order_status}</span>
+                </div>
+              ))}
+            </div>}
+      </div>
+    </div>
+  )
+}
+
+const corMrg = (m) => m < 0 ? '#FF6F6F' : m < 8 ? '#E6B450' : '#2DD4BF'
+const brlM = (v) => 'R$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+function FinMetric({ icon: Icon, valor, rotulo, cor, sub }) {
+  return (
+    <div className="rounded-xl px-3 py-3" style={{ background: 'var(--glass-hover)' }}>
+      <div className="flex items-center gap-1.5 mb-1"><Icon size={13} style={{ color: cor || 'var(--text-dim)' }} /><span className="text-[10px] text-faint uppercase tracking-wide">{rotulo}</span></div>
+      <div className="text-base font-bold num leading-none" style={{ color: cor || 'var(--text)' }}>{valor}</div>
+      {sub && <div className="text-[10px] text-faint mt-1">{sub}</div>}
+    </div>
+  )
+}
+
+function MargemReal({ conectado }) {
+  const notify = useToast()
+  const [dias, setDias] = useState(7)
+  const [d, setD] = useState(null)
+  const [carregando, setCarregando] = useState(false)
+  const [aberto, setAberto] = useState(null)  // order_sn expandido
+
+  const calcular = async (dd) => {
+    setCarregando(true); setD(null)
+    try { setD(await api.shopeeMargemReal(dd, 40)) }
+    catch (e) { setD({ erro: e.message || true }); notify(e.message || 'Falha ao calcular', 'danger') }
+    setCarregando(false)
+  }
+
+  const r = d && !d.erro ? d.resumo : null
+  return (
+    <div className="glass rounded-2xl p-4" style={{ borderTop: `2px solid ${LARANJA}` }}>
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold flex items-center gap-1.5"><Wallet size={15} style={{ color: LARANJA }} /> Margem líquida real</div>
+          <div className="text-xs text-dim mt-0.5 max-w-md">O lucro de verdade de cada venda: pega o <b>repasse</b> da Shopee (já com comissão, taxas e frete) e desconta o <b>custo</b> do produto no catálogo.</div>
+        </div>
+        <div className="flex items-center gap-1.5">
+          {[7, 15, 30].map((dd) => (
+            <button key={dd} onClick={() => { setDias(dd); if (d || carregando) calcular(dd) }} className="text-xs px-2.5 py-1 rounded-lg font-medium"
+                    style={dias === dd ? { background: LARANJA, color: '#fff' } : { background: 'var(--glass)', color: 'var(--text-dim)', border: '1px solid var(--glass-border)' }}>{dd}d</button>
+          ))}
+        </div>
+      </div>
+
+      {!d && !carregando && (
+        <button onClick={() => calcular(dias)} className="w-full mt-3 py-2.5 rounded-xl text-sm font-medium text-white flex items-center justify-center gap-2" style={{ background: LARANJA }}>
+          <BadgePercent size={15} /> Calcular lucro real dos últimos {dias} dias
+        </button>
+      )}
+      {!d && !carregando && <div className="text-[11px] text-faint mt-2 text-center">Busca o repasse de cada pedido — leva alguns segundos e fica em cache.</div>}
+
+      {carregando && <div className="py-8 text-center text-faint flex items-center justify-center gap-2"><Loader2 size={16} className="animate-spin" /> buscando o repasse de cada pedido… isso leva alguns segundos</div>}
+
+      {d?.erro && <div className="py-4 text-center text-sm" style={{ color: '#FF6F6F' }}>{typeof d.erro === 'string' ? d.erro : 'Não consegui calcular a margem real.'}</div>}
+
+      {r && (
+        <div className="mt-3 space-y-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            <FinMetric icon={TrendingUp} rotulo="Lucro líquido" valor={brlM(r.lucro_liquido_total)} cor={corMrg(r.margem_media_pct)} sub={`${r.pedidos} pedido(s)`} />
+            <FinMetric icon={Percent} rotulo="Margem média" valor={`${r.margem_media_pct}%`} cor={corMrg(r.margem_media_pct)} />
+            <FinMetric icon={ShoppingBag} rotulo="Receita" valor={brlM(r.receita_total)} />
+            <FinMetric icon={Receipt} rotulo="Taxas Shopee" valor={brlM(r.taxas_total)} cor="#E6B450" sub={`${r.pct_taxas}% da receita`} />
+            <FinMetric icon={Coins} rotulo="Custo produtos" valor={brlM(r.custo_total)} />
+            <FinMetric icon={AlertTriangle} rotulo="Em prejuízo" valor={r.pedidos_prejuizo} cor={r.pedidos_prejuizo > 0 ? '#FF6F6F' : '#2DD4BF'} sub={r.pedidos_prejuizo > 0 ? 'revisar preço!' : 'tudo no azul'} />
+          </div>
+
+          {r.sem_custo > 0 && (
+            <div className="text-[11px] rounded-lg px-3 py-2 flex items-start gap-1.5" style={{ background: 'rgba(230,180,80,.1)', color: '#E6B450' }}>
+              <AlertTriangle size={12} className="mt-0.5 shrink-0" /> {r.sem_custo} pedido(s) têm produtos <b>sem custo cadastrado</b> no catálogo — o lucro deles fica subestimado (custo conta como zero). Preencha o preço de custo no Bling pra ficar exato.
+            </div>
+          )}
+
+          <div>
+            <div className="text-xs text-faint mb-1.5 flex items-center justify-between">
+              <span>Pedidos · <b>piores margens primeiro</b></span>
+              {d.parcial && <span className="text-[10px]">amostra dos últimos 40</span>}
+            </div>
+            <div className="space-y-1.5">
+              {d.pedidos.map((p) => (
+                <div key={p.order_sn} className="rounded-xl overflow-hidden" style={{ background: 'var(--glass-hover)' }}>
+                  <button onClick={() => setAberto(aberto === p.order_sn ? null : p.order_sn)} className="w-full px-3 py-2 flex items-center gap-2 text-left">
+                    <span className="num text-xs text-faint shrink-0">#{String(p.order_sn).slice(-8)}</span>
+                    <div className="flex-1 min-w-0 flex items-center gap-2">
+                      <span className="text-[11px] text-faint num hidden sm:inline">{brlM(p.receita)}</span>
+                      <ChevronRight size={11} className="text-faint hidden sm:inline" />
+                      <span className="text-sm font-semibold num" style={{ color: corMrg(p.margem_pct) }}>{brlM(p.lucro)}</span>
+                    </div>
+                    {p.sem_custo && <span title="produto sem custo no catálogo"><AlertTriangle size={12} style={{ color: '#E6B450' }} /></span>}
+                    {p.prejuizo && <span className="text-[9px] px-1.5 py-0.5 rounded font-bold uppercase" style={{ background: 'rgba(255,111,111,.16)', color: '#FF6F6F' }}>prejuízo</span>}
+                    <span className="text-[11px] font-bold num px-1.5 py-0.5 rounded shrink-0" style={{ background: `color-mix(in srgb, ${corMrg(p.margem_pct)} 16%, transparent)`, color: corMrg(p.margem_pct) }}>{p.margem_pct}%</span>
+                    <ChevronDown size={13} className="text-faint shrink-0" style={{ transform: aberto === p.order_sn ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }} />
+                  </button>
+                  {aberto === p.order_sn && (
+                    <div className="px-3 pb-3 pt-1 border-t" style={{ borderColor: 'var(--glass-border)' }}>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 mb-2 mt-1">
+                        <div className="text-center"><div className="text-[9px] text-faint uppercase">Receita</div><div className="text-xs num font-medium">{brlM(p.receita)}</div></div>
+                        <div className="text-center"><div className="text-[9px] text-faint uppercase">Líquido Shopee</div><div className="text-xs num font-medium">{brlM(p.liquido_shopee)}</div></div>
+                        <div className="text-center"><div className="text-[9px] text-faint uppercase">Custo</div><div className="text-xs num font-medium">{brlM(p.custo)}</div></div>
+                        <div className="text-center"><div className="text-[9px] text-faint uppercase">Lucro</div><div className="text-xs num font-bold" style={{ color: corMrg(p.margem_pct) }}>{brlM(p.lucro)}</div></div>
+                      </div>
+                      <div className="flex flex-wrap gap-2 text-[10px] text-faint mb-2">
+                        <span className="flex items-center gap-1"><Receipt size={10} /> comissão {brlM(p.comissao)}</span>
+                        <span className="flex items-center gap-1"><Receipt size={10} /> serviço {brlM(p.servico)}</span>
+                        {p.frete !== 0 && <span className="flex items-center gap-1"><Truck size={10} /> frete {brlM(p.frete)}</span>}
+                      </div>
+                      <div className="space-y-1">
+                        {p.itens.map((it, i) => (
+                          <div key={i} className="flex items-center justify-between text-[11px] rounded px-2 py-1" style={{ background: 'var(--glass)' }}>
+                            <span className="truncate flex-1">{it.qtd}× {it.nome} {it.sku && <span className="text-faint num">· {it.sku}</span>}</span>
+                            <span className="num shrink-0 ml-2" style={{ color: it.tem_custo ? 'var(--text-dim)' : '#E6B450' }}>{it.tem_custo ? `custo ${brlM(it.custo_unit)}` : 'sem custo'}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="text-[10px] text-faint mt-2">Considera os últimos pedidos <b>concluídos</b> do período. O líquido vem do repasse oficial da Shopee; o custo, do preço de custo no catálogo.</div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -1609,9 +1739,31 @@ function Promocoes({ conectado, notify }) {
 function Cupons({ notify }) {
   const [lista, setLista] = useState(null)
   const [form, setForm] = useState(false)
+  const [rep, setRep] = useState(null)
+  const [enc, setEnc] = useState(null)
   const carregar = () => { setLista(null); api.shopeeCupons('ongoing').then(setLista).catch(() => setLista({ erro: true })) }
   useEffect(carregar, [])
   const cupons = lista?.response?.voucher_list || []
+  const encerrar = async (id) => {
+    setEnc(id)
+    try { await api.shopeeEncerrarCupom(id); notify('Cupom encerrado', 'ok'); carregar() }
+    catch (e) { notify(e.message, 'danger') }
+    setEnc(null)
+  }
+  const repetir = async (c) => {
+    setRep(c.voucher_id)
+    try {
+      const inicio = Math.floor(Date.now() / 1000) + 300
+      const fim = inicio + Math.max(3600, (c.end_time - c.start_time) || 7 * 86400)
+      const codigo = (c.voucher_code || 'CUPOM').replace(/\s/g, '').slice(0, 10) + String(inicio).slice(-4)
+      await api.shopeeCriarCupom({ nome: (c.voucher_name || 'Cupom').slice(0, 20) + ' (rep.)', codigo,
+        tipo_desconto: c.reward_type, valor: c.reward_type === 2 ? c.percentage : c.discount_amount,
+        compra_minima: c.min_basket_price || 0, quantidade: c.usage_quantity || 100,
+        inicio, fim, escopo: c.voucher_type_id || 1 })
+      notify(`Cupom repetido como ${codigo} — começa em ~5 min`, 'ok'); carregar()
+    } catch (e) { notify(e.message, 'danger') }
+    setRep(null)
+  }
   return (
     <div className="space-y-3">
       <div className="flex justify-between items-center">
@@ -1620,17 +1772,18 @@ function Cupons({ notify }) {
       </div>
       {lista === null ? <Carregando txt="carregando cupons…" />
         : cupons.length === 0 ? <Vazio txt="Nenhum cupom ativo. Crie um para incentivar a compra." />
-        : <div className="space-y-1.5">{cupons.map((c) => (
-            <div key={c.voucher_id} className="glass rounded-xl px-4 py-2.5 flex items-center gap-3">
-              <Tag size={16} style={{ color: LARANJA }} />
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium">{c.voucher_name} <span className="num text-faint">({c.voucher_code})</span></div>
-                <div className="text-[11px] text-faint">{c.reward_type === 2 ? `${c.percentage}% off` : brl(c.discount_amount)} • mín {brl(c.min_basket_price)}</div>
-              </div>
-              <button onClick={async () => { try { await api.shopeeEncerrarCupom(c.voucher_id); notify('Cupom encerrado', 'ok'); carregar() } catch (e) { notify(e.message, 'danger') } }}
-                      className="text-faint hover:text-danger p-1"><Trash2 size={15} /></button>
-            </div>
-          ))}</div>}
+        : <div className="space-y-2.5">{cupons.map((c) => {
+            const flags = [{ icon: Ticket, texto: c.voucher_code, cor: '#8B5CF6' },
+              { texto: c.reward_type === 2 ? `${c.percentage}% OFF` : brl(c.discount_amount), cor: LARANJA }]
+            if (c.min_basket_price) flags.push({ texto: `mín ${brl(c.min_basket_price)}` })
+            flags.push({ texto: (c.voucher_type_id === 1 || !c.voucher_type_id) ? 'loja inteira' : 'produtos específicos' })
+            return (
+              <CampaignCard key={c.voucher_id} tipo="cupom" id={c.voucher_id} nome={c.voucher_name}
+                inicio={c.start_time} fim={c.end_time} flags={flags} temProdutos={false}
+                podeEncerrar onEncerrar={encerrar} encerrando={enc === c.voucher_id}
+                onRepetir={() => repetir(c)} repetindo={rep === c.voucher_id} />
+            )
+          })}</div>}
       {form && <CupomForm onClose={() => setForm(false)} onSaved={() => { setForm(false); carregar() }} notify={notify} />}
     </div>
   )
@@ -1678,9 +1831,23 @@ function CupomForm({ onClose, onSaved, notify }) {
 function Descontos({ notify }) {
   const [lista, setLista] = useState(null)
   const [stat, setStat] = useState('ongoing')
+  const [rep, setRep] = useState(null)
+  const [enc, setEnc] = useState(null)
   const carregar = () => { setLista(null); api.shopeeDescontos(stat).then(setLista).catch(() => setLista({ erro: true })) }
   useEffect(carregar, [stat])
   const ds = lista?.response?.discount_list || []
+  const repetir = async (c) => {
+    setRep(c.id)
+    try { const r = await api.shopeeCampanhaRepetir('desconto', c.id); notify(`Desconto repetido com ${r.itens || 0} produto(s) — começa em ~5 min`, 'ok'); setStat('upcoming') }
+    catch (e) { notify(e.message, 'danger') }
+    setRep(null)
+  }
+  const encerrar = async (id) => {
+    setEnc(id)
+    try { await api.shopeeEncerrarDesconto(id); notify('Desconto encerrado', 'ok'); carregar() }
+    catch (e) { notify(e.message, 'danger') }
+    setEnc(null)
+  }
   return (
     <div className="space-y-3">
       <div className="flex gap-1.5">
@@ -1690,16 +1857,13 @@ function Descontos({ notify }) {
         ))}
       </div>
       {lista === null ? <Carregando txt="carregando descontos…" />
-        : ds.length === 0 ? <Vazio txt="Nenhuma campanha de desconto aqui. Crie pelo Seller Center ou via API com início/fim agendados." />
-        : <div className="space-y-1.5">{ds.map((c) => (
-            <div key={c.discount_id} className="glass rounded-xl px-4 py-2.5 flex items-center gap-3">
-              <Calendar size={16} style={{ color: LARANJA }} />
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium truncate">{c.discount_name}</div>
-                <div className="text-[11px] text-faint">{new Date(c.start_time * 1000).toLocaleDateString('pt-BR')} → {new Date(c.end_time * 1000).toLocaleDateString('pt-BR')}</div>
-              </div>
-              {stat === 'ongoing' && <button onClick={async () => { try { await api.shopeeEncerrarDesconto(c.discount_id); notify('Desconto encerrado', 'ok'); carregar() } catch (e) { notify(e.message, 'danger') } }} className="text-faint hover:text-danger p-1"><Trash2 size={15} /></button>}
-            </div>
+        : ds.length === 0 ? <Vazio txt="Nenhuma campanha de desconto aqui. Crie pelo Motor (Promoções IA) ou pelo Seller Center com início/fim agendados." />
+        : <div className="space-y-2.5">{ds.map((c) => (
+            <CampaignCard key={c.discount_id} tipo="desconto" id={c.discount_id} nome={c.discount_name}
+              inicio={c.start_time} fim={c.end_time}
+              flags={c.source != null ? [{ icon: c.source === 1 ? Bot : Settings2, texto: c.source === 1 ? 'criado pelo app' : 'Seller Center', cor: c.source === 1 ? '#14B8A6' : '#8B5CF6' }] : []}
+              podeEncerrar={stat === 'ongoing'} onEncerrar={encerrar} encerrando={enc === c.discount_id}
+              onRepetir={repetir} repetindo={rep === c.discount_id} />
           ))}</div>}
     </div>
   )
@@ -1908,9 +2072,23 @@ function SeletorItens({ titulo, comPreco, onConfirmar, onClose }) {
 function Bundles({ notify }) {
   const [lista, setLista] = useState(null)
   const [form, setForm] = useState(false)
+  const [rep, setRep] = useState(null)
+  const [enc, setEnc] = useState(null)
   const carregar = () => { setLista(null); api.shopeeBundles('ongoing').then(setLista).catch(() => setLista({ erro: true })) }
   useEffect(carregar, [])
   const bs = lista?.response?.bundle_deal_list || []
+  const repetir = async (c) => {
+    setRep(c.id)
+    try { const r = await api.shopeeCampanhaRepetir('bundle', c.id); notify(`Combo repetido com ${r.itens || 0} produto(s) — começa em ~5 min`, 'ok'); carregar() }
+    catch (e) { notify(e.message, 'danger') }
+    setRep(null)
+  }
+  const encerrar = async (id) => {
+    setEnc(id)
+    try { await api.shopeeEncerrarBundle(id); notify('Combo encerrado', 'ok'); carregar() }
+    catch (e) { notify(e.message, 'danger') }
+    setEnc(null)
+  }
   return (
     <div className="space-y-3">
       <div className="flex justify-between items-center">
@@ -1918,15 +2096,21 @@ function Bundles({ notify }) {
         <button onClick={() => setForm(true)} className="rounded-lg px-3 py-1.5 text-sm font-medium text-white flex items-center gap-1.5" style={{ background: LARANJA }}><Plus size={14} /> Novo bundle</button>
       </div>
       {lista === null ? <Carregando txt="carregando bundles…" />
-        : bs.length === 0 ? <Vazio txt="Nenhum bundle ativo." />
-        : <div className="space-y-1.5">{bs.map((b) => (
-            <div key={b.bundle_deal_id} className="glass rounded-xl px-4 py-2.5 flex items-center gap-3">
-              <Package size={16} style={{ color: LARANJA }} />
-              <div className="flex-1 min-w-0"><div className="text-sm font-medium truncate">{b.name}</div>
-                <div className="text-[11px] text-faint">{new Date(b.start_time * 1000).toLocaleDateString('pt-BR')} → {new Date(b.end_time * 1000).toLocaleDateString('pt-BR')}</div></div>
-              <button onClick={async () => { try { await api.shopeeEncerrarBundle(b.bundle_deal_id); notify('Bundle encerrado', 'ok'); carregar() } catch (e) { notify(e.message, 'danger') } }} className="text-faint hover:text-danger p-1"><Trash2 size={15} /></button>
-            </div>
-          ))}</div>}
+        : bs.length === 0 ? <Vazio txt="Nenhum combo ativo. Crie um na aba acima — leve 2+ por um preço melhor." />
+        : <div className="space-y-2.5">{bs.map((b) => {
+            const reg = b.bundle_deal_rule || {}
+            const flags = []
+            if (reg.min_amount) flags.push({ icon: Layers, texto: `leve ${reg.min_amount}+`, cor: '#14B8A6' })
+            if (reg.rule_type === 2 && reg.discount_value) flags.push({ icon: Percent, texto: `-${reg.discount_value}%`, cor: LARANJA })
+            else if (reg.rule_type === 3 && reg.discount_value) flags.push({ texto: `-R$ ${reg.discount_value}`, cor: LARANJA })
+            else if (reg.rule_type === 1 && reg.discount_value) flags.push({ texto: `combo R$ ${reg.discount_value}`, cor: LARANJA })
+            return (
+              <CampaignCard key={b.bundle_deal_id} tipo="bundle" id={b.bundle_deal_id} nome={b.name}
+                inicio={b.start_time} fim={b.end_time} flags={flags}
+                podeEncerrar onEncerrar={encerrar} encerrando={enc === b.bundle_deal_id}
+                onRepetir={repetir} repetindo={rep === b.bundle_deal_id} />
+            )
+          })}</div>}
       {form && <BundleForm onClose={() => setForm(false)} onSaved={() => { setForm(false); carregar() }} notify={notify} />}
     </div>
   )
@@ -1976,9 +2160,23 @@ function BundleForm({ onClose, onSaved, notify }) {
 function Addons({ notify }) {
   const [lista, setLista] = useState(null)
   const [form, setForm] = useState(false)
+  const [rep, setRep] = useState(null)
+  const [enc, setEnc] = useState(null)
   const carregar = () => { setLista(null); api.shopeeAddons('ongoing').then(setLista).catch(() => setLista({ erro: true })) }
   useEffect(carregar, [])
   const as = lista?.response?.add_on_deal_list || []
+  const repetir = async (c) => {
+    setRep(c.id)
+    try { const r = await api.shopeeCampanhaRepetir('addon', c.id); notify('Add-on repetido — começa em ~5 min', 'ok'); carregar() }
+    catch (e) { notify(e.message, 'danger') }
+    setRep(null)
+  }
+  const encerrar = async (id) => {
+    setEnc(id)
+    try { await api.shopeeEncerrarAddon(id); notify('Add-on encerrado', 'ok'); carregar() }
+    catch (e) { notify(e.message, 'danger') }
+    setEnc(null)
+  }
   return (
     <div className="space-y-3">
       <div className="flex justify-between items-center">
@@ -1986,14 +2184,12 @@ function Addons({ notify }) {
         <button onClick={() => setForm(true)} className="rounded-lg px-3 py-1.5 text-sm font-medium text-white flex items-center gap-1.5" style={{ background: LARANJA }}><Plus size={14} /> Novo add-on</button>
       </div>
       {lista === null ? <Carregando txt="carregando add-ons…" />
-        : as.length === 0 ? <Vazio txt="Nenhum add-on ativo." />
-        : <div className="space-y-1.5">{as.map((a) => (
-            <div key={a.add_on_deal_id} className="glass rounded-xl px-4 py-2.5 flex items-center gap-3">
-              <Plus size={16} style={{ color: LARANJA }} />
-              <div className="flex-1 min-w-0"><div className="text-sm font-medium truncate">{a.add_on_deal_name}</div>
-                <div className="text-[11px] text-faint">{new Date(a.start_time * 1000).toLocaleDateString('pt-BR')} → {new Date(a.end_time * 1000).toLocaleDateString('pt-BR')}</div></div>
-              <button onClick={async () => { try { await api.shopeeEncerrarAddon(a.add_on_deal_id); notify('Add-on encerrado', 'ok'); carregar() } catch (e) { notify(e.message, 'danger') } }} className="text-faint hover:text-danger p-1"><Trash2 size={15} /></button>
-            </div>
+        : as.length === 0 ? <Vazio txt="Nenhum add-on ativo. Crie um na aba acima — adicional com desconto junto do principal." />
+        : <div className="space-y-2.5">{as.map((a) => (
+            <CampaignCard key={a.add_on_deal_id} tipo="addon" id={a.add_on_deal_id} nome={a.add_on_deal_name}
+              inicio={a.start_time} fim={a.end_time}
+              podeEncerrar onEncerrar={encerrar} encerrando={enc === a.add_on_deal_id}
+              onRepetir={repetir} repetindo={rep === a.add_on_deal_id} />
           ))}</div>}
       {form && <AddonForm onClose={() => setForm(false)} onSaved={() => { setForm(false); carregar() }} notify={notify} />}
     </div>
@@ -2041,10 +2237,17 @@ function AddonForm({ onClose, onSaved, notify }) {
 function FlashSale({ notify }) {
   const [lista, setLista] = useState(null)
   const [form, setForm] = useState(false)
+  const [enc, setEnc] = useState(null)
   const carregar = () => { setLista(null); api.shopeeFlash(2).then(setLista).catch(() => setLista({ erro: true })) }
   useEffect(carregar, [])
   const fs = lista?.response?.flash_sale_list || lista?.response || []
   const arr = Array.isArray(fs) ? fs : []
+  const encerrar = async (id) => {
+    setEnc(id)
+    try { await api.shopeeEncerrarFlash(id); notify('Flash sale removida', 'ok'); carregar() }
+    catch (e) { notify(e.message, 'danger') }
+    setEnc(null)
+  }
   return (
     <div className="space-y-3">
       <div className="flex justify-between items-center">
@@ -2052,14 +2255,12 @@ function FlashSale({ notify }) {
         <button onClick={() => setForm(true)} className="rounded-lg px-3 py-1.5 text-sm font-medium text-white flex items-center gap-1.5" style={{ background: LARANJA }}><Flame size={14} /> Nova flash sale</button>
       </div>
       {lista === null ? <Carregando txt="carregando flash sales…" />
-        : arr.length === 0 ? <Vazio txt="Nenhuma flash sale ativa ou agendada." />
-        : <div className="space-y-1.5">{arr.map((s) => (
-            <div key={s.flash_sale_id} className="glass rounded-xl px-4 py-2.5 flex items-center gap-3">
-              <Flame size={16} style={{ color: LARANJA }} />
-              <div className="flex-1 min-w-0"><div className="text-sm font-medium">Flash #{s.flash_sale_id}</div>
-                <div className="text-[11px] text-faint">{s.start_time ? new Date(s.start_time * 1000).toLocaleString('pt-BR') : ''} • {s.status === 1 ? 'agendada' : s.status === 2 ? 'ativa' : ''}</div></div>
-              <button onClick={async () => { try { await api.shopeeEncerrarFlash(s.flash_sale_id); notify('Flash sale removida', 'ok'); carregar() } catch (e) { notify(e.message, 'danger') } }} className="text-faint hover:text-danger p-1"><Trash2 size={15} /></button>
-            </div>
+        : arr.length === 0 ? <Vazio txt="Nenhuma flash sale ativa ou agendada. A Shopee libera slots por elegibilidade da loja." />
+        : <div className="space-y-2.5">{arr.map((s) => (
+            <CampaignCard key={s.flash_sale_id} tipo="flash" id={s.flash_sale_id} nome={`Flash #${s.flash_sale_id}`}
+              inicio={s.start_time} fim={s.end_time}
+              flags={[{ icon: Zap, texto: 'oferta relâmpago', cor: '#F59E0B' }]}
+              podeEncerrar onEncerrar={encerrar} encerrando={enc === s.flash_sale_id} />
           ))}</div>}
       {form && <FlashForm onClose={() => setForm(false)} onSaved={() => { setForm(false); carregar() }} notify={notify} />}
     </div>
