@@ -25,7 +25,7 @@ export function fmtDur(ms) {
   if (m > 0) return `${m}m ${seg}s`
   return `${seg}s`
 }
-function cicloInfo(inicio, fim, agora) {
+export function cicloInfo(inicio, fim, agora) {
   const ini = (inicio || 0) * 1000, end = (fim || 0) * 1000
   if (!ini || !end) return { fase: 'desconhecida', pctDecorrido: 0, pctRestante: 0, restante: 0, paraInicio: 0, dur: 0 }
   const dur = Math.max(1, end - ini)
@@ -96,7 +96,7 @@ function CampaignProdutos({ tipo, detalhe, carregando }) {
   return <div className="grid sm:grid-cols-2 gap-1.5">{itens.map((p, i) => chip(p, i))}</div>
 }
 
-const TIPO_META = {
+export const TIPO_META = {
   desconto: { rotulo: 'Desconto', icon: Percent, cor: '#EE4D2D' },
   cupom: { rotulo: 'Cupom', icon: Ticket, cor: '#8B5CF6' },
   bundle: { rotulo: 'Combo', icon: Layers, cor: '#14B8A6' },

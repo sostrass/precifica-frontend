@@ -7,11 +7,11 @@ import {
   Stethoscope, XCircle, ShieldAlert, CircleDot, Bot, Search,
   Send, Sparkles, SlidersHorizontal, MessageSquare, ImageIcon, Settings2, Smile, ThumbsUp,
   Percent, Ticket, RotateCcw, ChevronDown, PlusCircle, Layers, Hourglass, Infinity as InfinityIcon,
-  Wallet, Receipt, Coins, Truck, BadgePercent,
+  Wallet, Receipt, Coins, Truck, BadgePercent, Target,
 } from 'lucide-react'
 import { api } from './api'
 import { useToast } from './toast.jsx'
-import { CampaignCard, fmtDur } from './CampaignCard'
+import { CampaignCard, fmtDur, useAgora, cicloInfo, TIPO_META } from './CampaignCard'
 
 const LARANJA = '#EE4D2D'
 
@@ -211,6 +211,91 @@ const CRITERIOS = [
   { id: 'giro', t: 'Maior estoque' },
 ]
 
+function BoostCondicional({ conectado, notify }) {
+  const [d, setD] = useState(null)
+  const [aplicando, setAplicando] = useState(false)
+  const carregar = () => api.shopeeBoostCondGet().then(setD).catch(() => setD({ erro: true }))
+  useEffect(() => { if (conectado) carregar() }, [conectado])
+
+  const cfg = d?.config
+  const setCfg = async (patch) => {
+    setD((x) => ({ ...x, config: { ...x.config, ...patch } }))
+    try { await api.shopeeBoostCondSalvar(patch) } catch (e) { notify('Não salvou: ' + e.message, 'danger') }
+  }
+  const aplicar = async () => {
+    setAplicando(true)
+    try { const r = await api.shopeeBoostCondAplicar(); notify(r.msg || 'Aplicado', 'ok'); carregar() }
+    catch (e) { notify(e.message, 'danger') }
+    setAplicando(false)
+  }
+
+  if (!conectado) return null
+  const ativo = cfg?.cond_ativo
+  const ameacados = d?.ameacados || []
+  const diag = d?.diagnostico
+  const erro = d?.erro
+
+  return (
+    <div className="glass rounded-2xl p-4 space-y-3" style={{ border: ativo ? '1px solid #FF6F6F' : '1px solid var(--glass-border)' }}>
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
+          <div className="text-sm font-medium flex items-center gap-2"><ShieldAlert size={15} style={{ color: '#FF6F6F' }} /> Boost condicional pelo Radar</div>
+          <div className="text-xs text-faint mt-0.5" style={{ maxWidth: '34rem' }}>Quando um concorrente que você monitora <b>fura o seu preço</b>, o produto entra em boost prioritário sozinho. Quando a ameaça passa, ele sai.</div>
+        </div>
+        <button onClick={() => setCfg({ cond_ativo: !ativo })} className="relative h-7 w-12 rounded-full transition-colors shrink-0" style={{ background: ativo ? '#FF6F6F' : 'var(--glass-hover)' }}>
+          <span className="absolute top-1 h-5 w-5 rounded-full bg-white transition-all" style={{ left: ativo ? '26px' : '4px' }} />
+        </button>
+      </div>
+
+      {ativo && cfg && (
+        <div className="grid sm:grid-cols-2 gap-3">
+          <SliderRegra label="Gatilho — quanto o concorrente precisa estar abaixo" valor={cfg.cond_gatilho_pct} min={0} max={30} sufixo="%"
+                       onChange={(v) => setCfg({ cond_gatilho_pct: v })} dica="0% = qualquer preço menor dispara · 5% = só quando ele está 5%+ mais barato" />
+          <SliderRegra label="Máximo em boost condicional ao mesmo tempo" valor={cfg.cond_max} min={1} max={5}
+                       onChange={(v) => setCfg({ cond_max: v })} dica="Reserva slots (de 5) pra esses; o resto fica pro rodízio normal" />
+        </div>
+      )}
+
+      {/* diagnóstico ao vivo */}
+      <div className="rounded-xl p-3" style={{ background: 'var(--glass-hover)' }}>
+        {erro ? <div className="text-xs" style={{ color: '#FF6F6F' }}>{String(erro) === 'true' ? 'Não consegui avaliar agora.' : erro}</div>
+          : d === null ? <div className="text-xs text-faint flex items-center gap-2"><Loader2 size={12} className="animate-spin" /> avaliando o Radar…</div>
+          : <>
+              <div className="flex items-center gap-3 flex-wrap text-[11px] mb-2">
+                <span className="flex items-center gap-1 text-faint"><Target size={12} /> {diag?.skus_monitorados ?? 0} SKU(s) monitorados</span>
+                <span className="flex items-center gap-1" style={{ color: ameacados.length ? '#FF6F6F' : 'var(--text-faint)' }}><TrendingDown size={12} /> {diag?.ameacados ?? 0} sob ameaça</span>
+                {diag?.com_anuncio != null && <span className="flex items-center gap-1 text-faint"><Zap size={12} /> {diag.com_anuncio} com anúncio casado</span>}
+              </div>
+              {ameacados.length === 0
+                ? <div className="text-xs text-faint">Nenhum concorrente furando seu preço agora. {(!diag?.skus_monitorados) && 'Adicione concorrentes na aba Radar pra ativar isso.'}</div>
+                : <div className="space-y-1.5">
+                    {ameacados.slice(0, 8).map((a) => (
+                      <div key={a.sku} className="flex items-center gap-2 rounded-lg px-2.5 py-1.5" style={{ background: 'var(--glass)' }}>
+                        <TrendingDown size={13} style={{ color: '#FF6F6F' }} className="shrink-0" />
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs truncate">{a.nome}</div>
+                          <div className="text-[10px] text-faint num">seu R$ {a.meu_preco?.toFixed(2)} · concorrente R$ {a.concorrente?.toFixed(2)}</div>
+                        </div>
+                        {!a.tem_anuncio && <span className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: 'rgba(230,180,80,.14)', color: '#E6B450' }} title="SKU sem anúncio Shopee casado — não dá pra impulsionar">sem anúncio</span>}
+                        <span className="text-[11px] font-bold num px-1.5 py-0.5 rounded shrink-0" style={{ background: 'rgba(255,111,111,.16)', color: '#FF6F6F' }}>-{a.diferenca_pct}%</span>
+                      </div>
+                    ))}
+                    {ameacados.length > 8 && <div className="text-[10px] text-faint text-center">+{ameacados.length - 8} outros</div>}
+                  </div>}
+            </>}
+      </div>
+
+      <div className="flex items-center gap-2">
+        <button onClick={aplicar} disabled={aplicando} className="flex-1 py-2 rounded-xl text-sm font-medium text-white flex items-center justify-center gap-2 disabled:opacity-60" style={{ background: '#FF6F6F' }}>
+          {aplicando ? <Loader2 size={15} className="animate-spin" /> : <ShieldAlert size={15} />} Verificar e impulsionar agora
+        </button>
+        <button onClick={carregar} className="h-9 w-9 grid place-items-center rounded-xl glass text-dim hover:text-fg" title="Reavaliar"><RefreshCw size={15} /></button>
+      </div>
+      <div className="text-[10px] text-faint">Pra o impulso sair de fato, o <b>motor de boost precisa estar ligado</b> (acima). O agente também roda sozinho a cada poucos minutos quando o Radar tem preços novos.</div>
+    </div>
+  )
+}
+
 function BoostCenter({ conectado, notify }) {
   const [bs, setBs] = useState(null)
   const [rodando, setRodando] = useState(false)
@@ -318,6 +403,9 @@ function BoostCenter({ conectado, notify }) {
             </div>
           : <div className="text-xs mt-3 flex items-center gap-1.5 text-faint"><AlertTriangle size={13} /> Motor desligado — nenhum boost automático está acontecendo.</div>}
       </div>
+
+      {/* Boost condicional pelo Radar */}
+      <BoostCondicional conectado={conectado} notify={notify} />
 
       {/* Auto-seleção pelos agentes */}
       <div className="glass rounded-2xl p-4 space-y-3" style={{ border: bs?.auto_selecao ? `1px solid ${LARANJA}` : '1px solid var(--glass-border)' }}>
@@ -1717,21 +1805,188 @@ function Divergencia({ conectado }) {
 const toEpoch = (s) => (s ? Math.floor(new Date(s).getTime() / 1000) : 0)
 
 function Promocoes({ conectado, notify }) {
-  const [sub, setSub] = useState('cupons')
+  const [sub, setSub] = useState('visao')
   if (!conectado) return <Vazio txt="Conecte a loja Shopee para gerenciar promoções." />
   return (
     <div className="space-y-3">
       <div className="flex gap-1.5 flex-wrap">
-        {[['cupons', 'Cupons'], ['descontos', 'Descontos'], ['bundle', 'Bundle'], ['addon', 'Add-on'], ['flash', 'Flash Sale']].map(([id, t]) => (
+        {[['visao', 'Visão geral'], ['cupons', 'Cupons'], ['descontos', 'Descontos'], ['bundle', 'Bundle'], ['addon', 'Add-on'], ['flash', 'Flash Sale']].map(([id, t]) => (
           <button key={id} onClick={() => setSub(id)} className="text-xs px-3 py-1.5 rounded-lg font-medium"
                   style={sub === id ? { background: LARANJA, color: '#fff' } : { background: 'var(--glass)', color: 'var(--text-dim)', border: '1px solid var(--glass-border)' }}>{t}</button>
         ))}
       </div>
+      {sub === 'visao' && <DashboardPromo notify={notify} />}
       {sub === 'cupons' && <Cupons notify={notify} />}
       {sub === 'descontos' && <Descontos notify={notify} />}
       {sub === 'bundle' && <Bundles notify={notify} />}
       {sub === 'addon' && <Addons notify={notify} />}
       {sub === 'flash' && <FlashSale notify={notify} />}
+    </div>
+  )
+}
+
+/* ===================== DASHBOARD CONSOLIDADO DE CAMPANHAS ===================== */
+function OverviewCard({ n, label, cor, icon: Icon, pulse }) {
+  return (
+    <div className="glass rounded-xl px-3 py-3 relative overflow-hidden">
+      {pulse && <span className="absolute top-2 right-2 flex h-2 w-2"><span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-70" style={{ background: cor }} /><span className="relative inline-flex rounded-full h-2 w-2" style={{ background: cor }} /></span>}
+      <Icon size={15} style={{ color: cor }} className="mb-1.5" />
+      <div className="text-2xl font-bold num leading-none" style={{ color: cor }}>{n}</div>
+      <div className="text-[10px] text-faint mt-1 uppercase tracking-wide">{label}</div>
+    </div>
+  )
+}
+
+function AgendaRow({ c }) {
+  const meta = TIPO_META[c.tipo] || TIPO_META.desconto
+  const Icon = meta.icon
+  const cic = c.ciclo
+  const urgente = cic.fase === 'ativa' && cic.restante < 2 * 3600 * 1000
+  const cor = cic.fase === 'agendada' ? '#60A5FA' : urgente ? '#FF6F6F' : meta.cor
+  return (
+    <div className="flex items-center gap-2.5 rounded-lg px-3 py-2" style={{ background: 'var(--glass-hover)', borderLeft: `2px solid ${meta.cor}` }}>
+      <div className="h-7 w-7 rounded-lg grid place-items-center shrink-0" style={{ background: `color-mix(in srgb, ${meta.cor} 16%, transparent)` }}><Icon size={13} style={{ color: meta.cor }} /></div>
+      <div className="min-w-0 flex-1">
+        <div className="text-xs font-medium truncate">{c.nome || meta.rotulo}</div>
+        <div className="text-[10px] text-faint">{meta.rotulo}</div>
+      </div>
+      {cic.fase === 'ativa' && (
+        <div className="text-right shrink-0">
+          <div className="text-[11px] font-semibold num flex items-center gap-1" style={{ color: cor }}><Clock size={10} /> {fmtDur(cic.restante)}</div>
+          <div className="h-1 w-16 rounded-full mt-1 overflow-hidden" style={{ background: 'var(--glass)' }}><div className="h-full rounded-full" style={{ width: `${cic.pctDecorrido}%`, background: cor }} /></div>
+        </div>
+      )}
+      {cic.fase === 'agendada' && <div className="text-[11px] num shrink-0 flex items-center gap-1" style={{ color: cor }}><Hourglass size={10} /> {fmtDur(cic.paraInicio)}</div>}
+    </div>
+  )
+}
+
+function DashboardPromo({ notify }) {
+  const agora = useAgora(1000)
+  const [agenda, setAgenda] = useState(null)
+  const [dias, setDias] = useState(30)
+  const [receita, setReceita] = useState(null)
+  const [carregR, setCarregR] = useState(false)
+  useEffect(() => { api.shopeeCampanhasAgenda().then(setAgenda).catch(() => setAgenda({ erro: true })) }, [])
+
+  const calcReceita = async (dd) => {
+    setCarregR(true); setReceita(null)
+    try { setReceita(await api.shopeeCampanhasDashboard(dd)) }
+    catch (e) { setReceita({ erro: e.message || true }); notify(e.message || 'Falha ao calcular', 'danger') }
+    setCarregR(false)
+  }
+
+  const camps = (agenda?.campanhas || []).map((c) => ({ ...c, ciclo: cicloInfo(c.inicio, c.fim, agora) }))
+  const ativas = camps.filter((c) => c.ciclo.fase === 'ativa').sort((a, b) => a.ciclo.restante - b.ciclo.restante)
+  const agendadas = camps.filter((c) => c.ciclo.fase === 'agendada').sort((a, b) => a.ciclo.paraInicio - b.ciclo.paraInicio)
+  const r = receita && !receita.erro ? receita : null
+  const maxTipo = r ? Math.max(...r.por_tipo.map((t) => t.receita), 1) : 1
+
+  return (
+    <div className="space-y-3">
+      {agenda === null ? <Carregando txt="carregando campanhas…" />
+        : agenda?.erro ? <Vazio txt="Não consegui carregar as campanhas." />
+        : <>
+            <div className="grid grid-cols-3 gap-2">
+              <OverviewCard n={ativas.length} label="ativas agora" cor="#2DD4BF" icon={Activity} pulse={ativas.length > 0} />
+              <OverviewCard n={agendadas.length} label="agendadas" cor="#60A5FA" icon={Clock} />
+              <OverviewCard n={camps.length} label="no total" cor={LARANJA} icon={Layers} />
+            </div>
+
+            {(ativas.length > 0 || agendadas.length > 0) ? (
+              <div className="glass rounded-2xl p-4">
+                <div className="text-sm font-semibold mb-2 flex items-center gap-1.5"><Calendar size={15} style={{ color: LARANJA }} /> Linha do tempo</div>
+                {ativas.length > 0 && <>
+                  <div className="text-[10px] text-faint uppercase tracking-wide mb-1.5 flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full" style={{ background: '#2DD4BF' }} /> rodando agora</div>
+                  <div className="space-y-1.5 mb-3">{ativas.map((c) => <AgendaRow key={c.tipo + c.id} c={c} />)}</div>
+                </>}
+                {agendadas.length > 0 && <>
+                  <div className="text-[10px] text-faint uppercase tracking-wide mb-1.5">próximas</div>
+                  <div className="space-y-1.5">{agendadas.map((c) => <AgendaRow key={c.tipo + c.id} c={c} />)}</div>
+                </>}
+              </div>
+            ) : <Vazio txt="Nenhuma campanha ativa ou agendada. Crie nas abas ao lado ou pelo Motor de promoções." />}
+
+            {/* receita gerada */}
+            <div className="glass rounded-2xl p-4" style={{ borderTop: `2px solid ${LARANJA}` }}>
+              <div className="flex items-start justify-between gap-3 flex-wrap">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold flex items-center gap-1.5"><TrendingUp size={15} style={{ color: LARANJA }} /> Receita gerada por promoções</div>
+                  <div className="text-xs text-dim mt-0.5 max-w-md">Quanto suas promoções venderam no período — atribuído pedido a pedido pela promoção que cada item carrega.</div>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  {[7, 30, 90].map((dd) => (
+                    <button key={dd} onClick={() => { setDias(dd); if (r || carregR) calcReceita(dd) }} className="text-xs px-2.5 py-1 rounded-lg font-medium"
+                            style={dias === dd ? { background: LARANJA, color: '#fff' } : { background: 'var(--glass)', color: 'var(--text-dim)', border: '1px solid var(--glass-border)' }}>{dd}d</button>
+                  ))}
+                </div>
+              </div>
+
+              {!receita && !carregR && (
+                <button onClick={() => calcReceita(dias)} className="w-full mt-3 py-2.5 rounded-xl text-sm font-medium text-white flex items-center justify-center gap-2" style={{ background: LARANJA }}>
+                  <BadgePercent size={15} /> Calcular receita dos últimos {dias} dias
+                </button>
+              )}
+              {!receita && !carregR && <div className="text-[11px] text-faint mt-2 text-center">Varre os pedidos do período — leva alguns segundos e fica em cache.</div>}
+              {carregR && <div className="py-8 text-center text-faint flex items-center justify-center gap-2"><Loader2 size={16} className="animate-spin" /> varrendo os pedidos e atribuindo às promoções…</div>}
+              {receita?.erro && <div className="py-4 text-center text-sm" style={{ color: '#FF6F6F' }}>{typeof receita.erro === 'string' ? receita.erro : 'Não consegui calcular a receita.'}</div>}
+
+              {r && (
+                <div className="mt-3 space-y-3">
+                  <div className="grid grid-cols-3 gap-2">
+                    <FinMetric icon={TrendingUp} rotulo="Receita em promo" valor={brl(r.total.receita)} cor="#2DD4BF" />
+                    <FinMetric icon={ShoppingBag} rotulo="Unidades" valor={r.total.unidades} />
+                    <FinMetric icon={Package} rotulo="Pedidos" valor={r.total.pedidos} sub={`de ${r.pedidos_no_periodo} no período`} />
+                  </div>
+
+                  {r.por_tipo.length > 0 && (
+                    <div>
+                      <div className="text-xs text-faint mb-1.5">Por tipo de promoção</div>
+                      <div className="space-y-1.5">
+                        {r.por_tipo.map((t) => {
+                          const meta = TIPO_META[t.tipo] || { rotulo: t.tipo, cor: '#888' }
+                          return (
+                            <div key={t.tipo} className="flex items-center gap-2">
+                              <span className="text-[11px] w-16 shrink-0" style={{ color: meta.cor }}>{meta.rotulo}</span>
+                              <div className="flex-1 h-5 rounded-md overflow-hidden relative" style={{ background: 'var(--glass-hover)' }}>
+                                <div className="h-full rounded-md flex items-center px-2" style={{ width: `${Math.max(8, (t.receita / maxTipo) * 100)}%`, background: `color-mix(in srgb, ${meta.cor} 35%, transparent)` }}>
+                                  <span className="text-[10px] font-semibold num whitespace-nowrap" style={{ color: meta.cor }}>{brl(t.receita)}</span>
+                                </div>
+                              </div>
+                              <span className="text-[10px] text-faint num w-12 text-right shrink-0">{t.unidades} un</span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {r.top_campanhas.length > 0 && (
+                    <div>
+                      <div className="text-xs text-faint mb-1.5">Campanhas que mais venderam</div>
+                      <div className="space-y-1.5">
+                        {r.top_campanhas.map((c, i) => {
+                          const meta = TIPO_META[c.tipo] || { rotulo: c.tipo, cor: '#888' }
+                          return (
+                            <div key={c.id} className="flex items-center gap-2 rounded-lg px-3 py-2" style={{ background: 'var(--glass-hover)' }}>
+                              <span className="text-[11px] num text-faint w-4 shrink-0">{i + 1}</span>
+                              <span className="text-[9px] px-1.5 py-0.5 rounded font-bold uppercase shrink-0" style={{ background: `color-mix(in srgb, ${meta.cor} 16%, transparent)`, color: meta.cor }}>{meta.rotulo}</span>
+                              <span className="text-xs flex-1 min-w-0 truncate">{c.nome || `#${c.id}`}</span>
+                              <span className="text-[10px] text-faint num shrink-0">{c.unidades} un</span>
+                              <span className="text-sm font-bold num shrink-0" style={{ color: '#2DD4BF' }}>{brl(c.receita)}</span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {r.total.receita === 0 && <div className="text-xs text-faint text-center py-2">Nenhuma venda atribuída a promoções no período. Ou não houve vendas com promoção ativa, ou os pedidos ainda não têm a marcação de promoção.</div>}
+                  {r.parcial && <div className="text-[10px] text-faint text-center">Período grande — amostra parcial dos pedidos mais recentes.</div>}
+                </div>
+              )}
+            </div>
+          </>}
     </div>
   )
 }
