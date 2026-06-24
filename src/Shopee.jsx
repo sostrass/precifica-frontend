@@ -8,6 +8,7 @@ import {
   Send, Sparkles, SlidersHorizontal, MessageSquare, ImageIcon, Settings2, Smile, ThumbsUp,
   Percent, Ticket, RotateCcw, ChevronDown, PlusCircle, Layers, Hourglass, Infinity as InfinityIcon,
   Wallet, Receipt, Coins, Truck, BadgePercent, Target,
+  Printer, MapPin, FileText, ClipboardList, User as UserIcon,
 } from 'lucide-react'
 import { api } from './api'
 import { useToast } from './toast.jsx'
@@ -1276,6 +1277,58 @@ function DiagnosticoPromo({ msg, diag }) {
   )
 }
 
+const HIST_TIPO_LABEL = { desconto: 'Desconto', flash: 'Flash', bundle: 'Combo', addon: 'Add-on', cupom: 'Cupom' }
+const HIST_MOTIVO_LABEL = { agendado: 'automática', queda: 'por queda nas vendas', manual: 'manual' }
+
+function HistMotorItem({ h }) {
+  const [aberto, setAberto] = useState(false)
+  const [det, setDet] = useState(null)
+  const [carregando, setCarregando] = useState(false)
+  const podeExpandir = h.ref_id && (h.tipo === 'desconto' || h.tipo === 'flash')
+  const cor = h.tipo === 'flash' ? '#F59E0B' : LARANJA
+  const Icon = h.tipo === 'flash' ? Flame : Percent
+  const dt = h.criado_em ? new Date(h.criado_em) : null
+  const abrir = async () => {
+    if (!podeExpandir) return
+    if (aberto) { setAberto(false); return }
+    setAberto(true)
+    if (det) return
+    setCarregando(true)
+    try { setDet(await api.shopeeCampanhaDetalhe(h.tipo, h.ref_id)) } catch { setDet({ erro: true }) }
+    setCarregando(false)
+  }
+  return (
+    <div className="rounded-lg overflow-hidden" style={{ background: 'var(--glass-hover)' }}>
+      <button onClick={abrir} className="w-full px-3 py-2 flex items-center gap-2 text-left" style={{ cursor: podeExpandir ? 'pointer' : 'default' }}>
+        <div className="h-6 w-6 rounded grid place-items-center shrink-0" style={{ background: `color-mix(in srgb, ${cor} 16%, transparent)` }}><Icon size={12} style={{ color: cor }} /></div>
+        <span className="text-[10px] uppercase font-bold tracking-wide shrink-0" style={{ color: cor }}>{HIST_TIPO_LABEL[h.tipo] || h.tipo}</span>
+        <span className="text-xs text-dim flex-1 min-w-0 truncate">{h.qtd_itens} {h.qtd_itens === 1 ? 'produto' : 'produtos'} · -{h.desconto_pct}%</span>
+        <span className="text-[9px] px-1.5 py-0.5 rounded shrink-0 font-medium" style={{ background: h.motivo === 'manual' ? 'var(--glass)' : 'rgba(20,184,166,.14)', color: h.motivo === 'manual' ? 'var(--text-faint)' : '#2DD4BF' }}>{HIST_MOTIVO_LABEL[h.motivo] || h.motivo}</span>
+        <span className="text-[10px] text-faint shrink-0 hidden sm:inline">{dt ? dt.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}</span>
+        {podeExpandir && <ChevronDown size={12} className="text-faint shrink-0" style={{ transform: aberto ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }} />}
+      </button>
+      {aberto && podeExpandir && (
+        <div className="px-3 pb-2.5 pt-1 border-t" style={{ borderColor: 'var(--glass-border)' }}>
+          {carregando ? <div className="text-[11px] text-faint flex items-center gap-1.5 py-1"><Loader2 size={11} className="animate-spin" /> carregando produtos…</div>
+            : det?.erro ? <div className="text-[11px] text-faint py-1">Não consegui carregar os produtos (a campanha pode ter expirado).</div>
+            : (det?.itens || []).length === 0 ? <div className="text-[11px] text-faint py-1">Sem produtos para mostrar.</div>
+            : <div className="space-y-1 mt-1">
+                {det.itens.map((p, i) => (
+                  <div key={i} className="flex items-center gap-2 text-[11px]">
+                    {p.imagem ? <img src={p.imagem} className="h-7 w-7 rounded object-cover shrink-0" alt="" /> : <div className="h-7 w-7 rounded shrink-0" style={{ background: 'var(--glass)' }} />}
+                    <span className="truncate flex-1">{p.nome}</span>
+                    {p.preco_original && <span className="text-faint line-through num">{brl(p.preco_original)}</span>}
+                    {p.preco_promo && <span className="num font-semibold" style={{ color: cor }}>{brl(p.preco_promo)}</span>}
+                    {p.desconto_pct != null && <span className="text-[9px] px-1 rounded num" style={{ background: `color-mix(in srgb, ${cor} 14%, transparent)`, color: cor }}>-{p.desconto_pct}%</span>}
+                  </div>
+                ))}
+              </div>}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function MotorPromocoes({ conectado, notify }) {
   const [cfg, setCfg] = useState(null)
   const [propostas, setPropostas] = useState(null)
@@ -1298,8 +1351,15 @@ function MotorPromocoes({ conectado, notify }) {
 
   const salvar = async (patch) => {
     setCfg((c) => ({ ...c, ...patch }))
-    try { const r = await api.shopeePromoConfigSalvar(patch); setCfg(r) }
-    catch (e) { notify(e.message, 'danger') }
+    try {
+      const r = await api.shopeePromoConfigSalvar(patch)
+      setCfg(r)
+      if (r.disparo_imediato) {
+        notify('Modo automático ligado — o agente está criando as promoções agora…', 'ok')
+        setTimeout(recarregarMeta, 4000)
+        setTimeout(recarregarMeta, 9000)
+      }
+    } catch (e) { notify(e.message, 'danger') }
   }
   const gerar = async () => {
     setGerando(true); setPropostas(null)
@@ -1546,16 +1606,12 @@ function MotorPromocoes({ conectado, notify }) {
       {/* Histórico */}
       {hist.length > 0 && (
         <div className="glass rounded-2xl p-4">
-          <div className="text-sm font-medium mb-2 flex items-center gap-2"><Clock size={14} className="text-dim" /> Promoções criadas pelo motor</div>
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-sm font-medium flex items-center gap-2"><Clock size={14} className="text-dim" /> Promoções criadas pelo motor</div>
+            <span className="text-[10px] text-faint">toque pra ver os produtos</span>
+          </div>
           <div className="space-y-1.5">
-            {hist.map((h, i) => (
-              <div key={i} className="flex items-center gap-2 text-xs rounded-lg px-3 py-2" style={{ background: 'var(--glass-hover)' }}>
-                {h.tipo === 'flash' ? <Flame size={13} style={{ color: LARANJA }} /> : <Tag size={13} style={{ color: LARANJA }} />}
-                <span className="flex-1 truncate text-dim">{h.nome || h.tipo} · {h.qtd_itens} itens · -{h.desconto_pct}%</span>
-                <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'var(--glass)', color: 'var(--faint)' }}>{h.motivo}</span>
-                <span className="text-[10px] text-faint">{h.criado_em ? new Date(h.criado_em).toLocaleDateString('pt-BR') : ''}</span>
-              </div>
-            ))}
+            {hist.map((h, i) => <HistMotorItem key={i} h={h} />)}
           </div>
         </div>
       )}
@@ -1585,28 +1641,197 @@ function SaudeLoja({ conectado }) {
 }
 
 /* ----------------------------- PEDIDOS ----------------------------------- */
-function Pedidos({ conectado }) {
+/* ===================== CENTRAL OPERACIONAL DE PEDIDOS ===================== */
+const ROTULO_STATUS = { A_ENVIAR: 'A enviar', ENVIADO: 'Enviado', CONCLUIDO: 'Concluído', CANCELADO: 'Cancelado' }
+
+function imprimirDoc(titulo, corpoHtml) {
+  const w = window.open('', '_blank')
+  if (!w) { alert('Permita pop-ups para imprimir.'); return }
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${titulo}</title>
+    <style>
+      *{box-sizing:border-box} body{font-family:system-ui,-apple-system,Arial,sans-serif;color:#111;padding:24px;margin:0}
+      h1{font-size:18px;margin:0 0 2px} .sub{color:#666;font-size:12px;margin-bottom:16px}
+      table{width:100%;border-collapse:collapse;font-size:13px}
+      th,td{text-align:left;padding:7px 9px;border-bottom:1px solid #e2e2e2;vertical-align:top}
+      th{background:#f4f4f4;text-transform:uppercase;font-size:10px;letter-spacing:.05em;color:#555}
+      .q{font-weight:700;text-align:center;white-space:nowrap} .c{text-align:center}
+      .chk{width:26px;color:#999;font-size:15px} .sku{color:#888;font-family:ui-monospace,monospace;font-size:11px}
+      tr{page-break-inside:avoid}
+      @media print{@page{margin:12mm}}
+    </style></head><body>${corpoHtml}
+    <script>window.onload=function(){window.print()}<\/script></body></html>`)
+  w.document.close()
+}
+
+function prazoInfo(shipBy, agora) {
+  if (!shipBy) return null
+  const ms = shipBy * 1000 - agora
+  return { ms, atrasado: ms < 0, urgente: ms >= 0 && ms < 12 * 3600 * 1000 }
+}
+
+function PedidoCard({ p, agora, sel, onSel }) {
+  const prazo = prazoInfo(p.ship_by, agora)
+  const corPrazo = !prazo ? 'var(--text-faint)' : prazo.atrasado ? '#FF6F6F' : prazo.urgente ? '#E6B450' : '#2DD4BF'
+  return (
+    <div className="glass rounded-xl p-3" style={{ borderLeft: p.abaixo_preco ? '3px solid #E6B450' : '3px solid transparent' }}>
+      <div className="flex items-center gap-2 mb-2">
+        <button onClick={() => onSel(p.order_sn)} className="h-4 w-4 rounded border grid place-items-center shrink-0" style={{ borderColor: sel ? LARANJA : 'var(--glass-border)', background: sel ? LARANJA : 'transparent' }}>
+          {sel && <CheckCircle2 size={12} className="text-white" />}
+        </button>
+        <UserIcon size={13} className="text-faint shrink-0" />
+        <span className="text-xs font-medium truncate flex-1">{p.comprador}</span>
+        {p.cidade && <span className="text-[10px] text-faint flex items-center gap-0.5 shrink-0"><MapPin size={9} />{p.cidade}/{p.uf}</span>}
+        <span className="num text-[10px] text-faint shrink-0">#{String(p.order_sn).slice(-8)}</span>
+      </div>
+      <div className="space-y-1.5">
+        {p.itens.map((it, i) => (
+          <div key={i} className="flex items-center gap-2">
+            {it.imagem ? <img src={it.imagem} alt="" className="h-9 w-9 rounded-md object-cover shrink-0" />
+              : <div className="h-9 w-9 rounded-md grid place-items-center shrink-0" style={{ background: 'var(--glass-hover)' }}><ImageIcon size={13} className="text-faint" /></div>}
+            <div className="min-w-0 flex-1">
+              <div className="text-xs truncate">{it.qtd}× {it.nome}</div>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                {it.sku && <span className="text-[10px] text-faint num">{it.sku}</span>}
+                <span className="text-[11px] font-semibold num" style={{ color: LARANJA }}>{brl(it.preco_pago)}</span>
+                {it.preco_tabela != null && it.dif != null && Math.abs(it.dif) >= 0.01 && (
+                  <span className="text-[9px] px-1 py-0.5 rounded num" style={{ background: it.dif < 0 ? 'rgba(230,180,80,.14)' : 'rgba(20,184,166,.14)', color: it.dif < 0 ? '#E6B450' : '#2DD4BF' }}>
+                    {it.dif < 0 ? '' : '+'}{brl(it.dif)} vs tabela
+                  </span>
+                )}
+                {!it.tem_cadastro && <span className="text-[9px] text-faint">sem cadastro</span>}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="flex items-center justify-between mt-2 pt-2 border-t" style={{ borderColor: 'var(--glass-border)' }}>
+        {prazo ? <span className="text-[11px] font-medium flex items-center gap-1" style={{ color: corPrazo }}>
+          <Clock size={11} />{prazo.atrasado ? 'envio atrasado' : `enviar em ${fmtDur(prazo.ms)}`}</span>
+          : <span className="text-[11px] text-faint">{p.status}</span>}
+        <span className="text-xs font-semibold num">{brl(p.total_pago)}</span>
+      </div>
+    </div>
+  )
+}
+
+function PedidosPainel({ conectado }) {
+  const notify = useToast()
+  const agora = useAgora(1000)
+  const [status, setStatus] = useState('A_ENVIAR')
+  const [dias, setDias] = useState(15)
   const [d, setD] = useState(null)
-  useEffect(() => { if (conectado) api.shopeePedidos(7).then(setD).catch(() => setD({ erro: true })) }, [conectado])
+  const [busca, setBusca] = useState('')
+  const [sel, setSel] = useState(() => new Set())
+  const [imprimindo, setImprimindo] = useState(false)
+
+  const carregar = (st = status, dd = dias) => {
+    setD(null); setSel(new Set())
+    api.shopeePedidosPainel(st, dd).then(setD).catch((e) => setD({ erro: e.message || true }))
+  }
+  useEffect(() => { if (conectado) carregar() }, [conectado])
+
+  const pedidos = d?.pedidos || []
+  const filtro = busca.trim().toLowerCase()
+  const visiveis = filtro ? pedidos.filter((p) =>
+    String(p.order_sn).toLowerCase().includes(filtro) ||
+    (p.comprador || '').toLowerCase().includes(filtro) ||
+    p.itens.some((i) => (i.nome || '').toLowerCase().includes(filtro) || (i.sku || '').toLowerCase().includes(filtro))) : pedidos
+  const res = d?.resumo
+
+  const toggleSel = (sn) => setSel((s) => { const n = new Set(s); n.has(sn) ? n.delete(sn) : n.add(sn); return n })
+  const selTodos = () => setSel((s) => s.size === visiveis.length ? new Set() : new Set(visiveis.map((p) => p.order_sn)))
+
+  const imprimirSeparacao = async () => {
+    setImprimindo(true)
+    try {
+      const sep = await api.shopeePedidosSeparacao(status, dias)
+      const linhas = (sep.itens || []).map((l) =>
+        `<tr><td class="chk">☐</td><td>${l.nome || ''}</td><td class="sku">${l.sku || ''}</td><td class="q">${l.qtd}</td><td class="c">${l.pedidos}</td></tr>`).join('')
+      imprimirDoc('Lista de separação', `<h1>Lista de separação — ${ROTULO_STATUS[status]}</h1>
+        <div class="sub">${sep.skus} produtos · ${sep.total_unidades} unidades · ${sep.pedidos} pedidos · ${new Date().toLocaleString('pt-BR')}</div>
+        <table><thead><tr><th class="chk"></th><th>Produto</th><th>SKU</th><th class="q">Qtd</th><th class="c">Pedidos</th></tr></thead><tbody>${linhas}</tbody></table>`)
+    } catch (e) { notify(e.message || 'Falha ao gerar', 'danger') }
+    setImprimindo(false)
+  }
+
+  const imprimirPedidos = () => {
+    const base = sel.size ? pedidos.filter((p) => sel.has(p.order_sn)) : visiveis
+    const linhas = [...base].sort((a, b) => (a.comprador || '').localeCompare(b.comprador || '', 'pt'))
+      .map((p) => {
+        const prods = p.itens.map((i) => `${i.qtd}× ${i.nome}${i.sku ? ` <span class="sku">(${i.sku})</span>` : ''}`).join('<br>')
+        return `<tr><td class="chk">☐</td><td>${p.comprador || ''}<div class="sku">#${p.order_sn}</div></td><td>${prods}</td><td class="q">${brl(p.total_pago)}</td></tr>`
+      }).join('')
+    imprimirDoc('Pedidos', `<h1>Pedidos — ${ROTULO_STATUS[status]}</h1>
+      <div class="sub">${base.length} pedidos · ${new Date().toLocaleString('pt-BR')} · em ordem alfabética por comprador</div>
+      <table><thead><tr><th class="chk"></th><th>Comprador / Pedido</th><th>Produtos</th><th class="q">Total</th></tr></thead><tbody>${linhas}</tbody></table>`)
+  }
+
+  return (
+    <div className="glass rounded-2xl p-4">
+      <div className="flex items-center justify-between gap-2 flex-wrap mb-3">
+        <div className="text-sm font-semibold flex items-center gap-1.5"><Package size={15} style={{ color: LARANJA }} /> Central de pedidos</div>
+        <div className="flex items-center gap-1.5">
+          <button onClick={imprimirSeparacao} disabled={imprimindo || !pedidos.length} className="text-xs px-2.5 py-1.5 rounded-lg glass text-dim hover:text-fg flex items-center gap-1.5 disabled:opacity-40" title="Lista de separação (produtos A→Z)">
+            {imprimindo ? <Loader2 size={13} className="animate-spin" /> : <ClipboardList size={13} />} Separação
+          </button>
+          <button onClick={imprimirPedidos} disabled={!pedidos.length} className="text-xs px-2.5 py-1.5 rounded-lg glass text-dim hover:text-fg flex items-center gap-1.5 disabled:opacity-40" title="Imprimir pedidos (A→Z)">
+            <Printer size={13} /> Pedidos
+          </button>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-1.5 flex-wrap mb-3">
+        {Object.entries(ROTULO_STATUS).map(([id, t]) => (
+          <button key={id} onClick={() => { setStatus(id); carregar(id, dias) }} className="text-xs px-3 py-1.5 rounded-lg font-medium"
+                  style={status === id ? { background: LARANJA, color: '#fff' } : { background: 'var(--glass)', color: 'var(--text-dim)', border: '1px solid var(--glass-border)' }}>{t}</button>
+        ))}
+        <div className="flex-1" />
+        {[7, 15, 30].map((dd) => (
+          <button key={dd} onClick={() => { setDias(dd); carregar(status, dd) }} className="text-xs px-2 py-1.5 rounded-lg"
+                  style={dias === dd ? { background: 'var(--glass-hover)', color: 'var(--text)' } : { color: 'var(--text-faint)' }}>{dd}d</button>
+        ))}
+      </div>
+
+      {res && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+          <FinMetric icon={Package} rotulo="Pedidos" valor={res.total} />
+          <FinMetric icon={ShoppingBag} rotulo="Unidades" valor={res.unidades} />
+          <FinMetric icon={Wallet} rotulo="Receita" valor={brl(res.receita)} cor="#2DD4BF" />
+          <FinMetric icon={AlertTriangle} rotulo="Abaixo da tabela" valor={res.abaixo_preco} cor={res.abaixo_preco > 0 ? '#E6B450' : '#2DD4BF'} />
+        </div>
+      )}
+
+      {pedidos.length > 0 && (
+        <div className="flex items-center gap-2 mb-2">
+          <div className="flex-1 flex items-center gap-1.5 rounded-lg px-2.5 py-1.5" style={{ background: 'var(--glass-hover)' }}>
+            <Search size={13} className="text-faint" />
+            <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="buscar por comprador, produto, SKU ou #pedido" className="bg-transparent text-xs flex-1 outline-none" />
+          </div>
+          <button onClick={selTodos} className="text-[11px] px-2 py-1.5 rounded-lg glass text-dim hover:text-fg">
+            {sel.size === visiveis.length && visiveis.length ? 'limpar' : 'todos'}{sel.size ? ` (${sel.size})` : ''}
+          </button>
+        </div>
+      )}
+
+      {d === null ? <div className="py-10 text-center text-faint flex items-center justify-center gap-2"><Loader2 size={16} className="animate-spin" /> carregando pedidos…</div>
+        : d?.erro ? <div className="py-6 text-center text-sm" style={{ color: '#FF6F6F' }}>{typeof d.erro === 'string' ? d.erro : 'Falha ao carregar pedidos.'}</div>
+        : visiveis.length === 0 ? <div className="py-8 text-center text-sm text-faint">{filtro ? 'Nenhum pedido bate com a busca.' : `Nenhum pedido ${ROTULO_STATUS[status].toLowerCase()} no período.`}</div>
+        : <div className="space-y-2">{visiveis.map((p) => <PedidoCard key={p.order_sn} p={p} agora={agora} sel={sel.has(p.order_sn)} onSel={toggleSel} />)}</div>}
+
+      <div className="text-[10px] text-faint mt-3 flex items-start gap-1.5">
+        <FileText size={11} className="mt-0.5 shrink-0" />
+        <span><b>Organizar envio</b>, <b>etiquetas Shopee</b> e <b>envio de NF-e</b> são a próxima etapa — escrevem em pedidos reais / puxam PDF da logística e precisam ser validados na sua conta antes de eu liberar.</span>
+      </div>
+    </div>
+  )
+}
+
+function Pedidos({ conectado }) {
   if (!conectado) return <div className="text-sm text-faint py-6 text-center glass rounded-2xl">Conecte a loja Shopee para ver os pedidos.</div>
-  const lista = d?.response?.order_list || []
   return (
     <div className="space-y-3">
+      <PedidosPainel conectado={conectado} />
       <MargemReal conectado={conectado} />
-      <div className="glass rounded-2xl p-4">
-        <div className="text-sm font-medium mb-1">Últimos pedidos (7 dias)</div>
-        <div className="text-xs text-dim mb-3">Lista rápida dos pedidos recentes. A análise de lucro de verdade está no painel acima.</div>
-        {d === null ? <div className="py-6 text-center text-faint flex items-center justify-center gap-2"><Loader2 size={15} className="animate-spin" /> carregando pedidos…</div>
-          : lista.length === 0 ? <div className="text-sm text-faint py-4 text-center">Nenhum pedido no período (ou loja recém-conectada).</div>
-          : <div className="space-y-1.5">
-              {lista.slice(0, 20).map((o) => (
-                <div key={o.order_sn} className="flex items-center justify-between rounded-lg px-3 py-2 text-sm" style={{ background: 'var(--glass-hover)' }}>
-                  <span className="num">#{o.order_sn}</span>
-                  <span className="text-xs text-faint">{o.order_status}</span>
-                </div>
-              ))}
-            </div>}
-      </div>
     </div>
   )
 }
