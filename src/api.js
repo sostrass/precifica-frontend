@@ -87,7 +87,7 @@ export const api = {
   shopeeReviewAuto: () => req('/api/shopee/avaliacoes/auto_responder', { method: 'POST' }),
   shopeeReviewAtividade: () => req('/api/shopee/avaliacoes/atividade'),
   shopeeReviewContar: (forcar = true) => req(`/api/shopee/avaliacoes/contar?forcar=${forcar ? 1 : 0}`, { method: 'POST' }),
-  shopeeReviewMutirao: () => req('/api/shopee/avaliacoes/mutirao', { method: 'POST' }),
+  shopeeReviewMutirao: (completo = false) => req('/api/shopee/avaliacoes/mutirao', { method: 'POST', body: { completo } }),
   shopeeReviewParar: () => req('/api/shopee/avaliacoes/parar', { method: 'POST' }),
   shopeePromoConfig: () => req('/api/shopee/promo/config'),
   shopeePromoConfigSalvar: (cfg) => req('/api/shopee/promo/config', { method: 'PUT', body: cfg }),

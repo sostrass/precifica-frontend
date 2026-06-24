@@ -728,9 +728,9 @@ function Avaliacoes({ conectado, notify }) {
   // conta sozinho ao abrir (usa cache no servidor; só pagina se não tiver contagem fresca)
   useEffect(() => { if (conectado) contar(false) }, [conectado])
 
-  const mutirao = async () => {
+  const mutirao = async (completo = false) => {
     try {
-      const r = await api.shopeeReviewMutirao()
+      const r = await api.shopeeReviewMutirao(completo)
       if (r.acao === 'ja_rodando') notify(r.msg || 'O agente já está respondendo.', 'warn')
       else notify(r.mensagem || 'Mutirão iniciado — respondendo a fila inteira…', 'ok')
       setTimeout(() => api.shopeeReviewAtividade().then(setAtiv).catch(() => {}), 1200)
@@ -874,7 +874,8 @@ function AgenteAtividade({ ativ, onContar, onMutirao, onParar, notasAlvo }) {
   const c = ativ?.contagem
   const log = ativ?.log || []
   const rodando = !!p.em_andamento
-  const descobrindo = rodando && p.fase === 'descobrindo'
+  const varrendo = rodando && p.fase === 'varrendo_produtos'
+  const descobrindo = rodando && (p.fase === 'descobrindo' || varrendo)
   const pct = p.alvo ? Math.round((p.processados / p.alvo) * 100) : 0
   const pend = c?.pendentes
 
@@ -902,12 +903,21 @@ function AgenteAtividade({ ativ, onContar, onMutirao, onParar, notasAlvo }) {
         </button>
       ) : (
         (pend == null || pend > 0) && (
-          <button onClick={onMutirao}
-                  className="w-full text-sm px-4 py-2.5 rounded-xl font-semibold text-white flex items-center justify-center gap-2"
-                  style={{ background: LARANJA }}>
-            <Sparkles size={15} /> Responder todas as pendentes{pend != null ? ` (${pend})` : ''}
-            {notasAlvo ? <span className="text-[11px] font-normal opacity-90">· notas {notasAlvo}★</span> : null}
-          </button>
+          <div className="space-y-2">
+            <button onClick={() => onMutirao(false)}
+                    className="w-full text-sm px-4 py-2.5 rounded-xl font-semibold text-white flex items-center justify-center gap-2"
+                    style={{ background: LARANJA }}>
+              <Sparkles size={15} /> Responder pendentes recentes{pend != null ? ` (${pend})` : ''}
+              {notasAlvo ? <span className="text-[11px] font-normal opacity-90">· notas {notasAlvo}★</span> : null}
+            </button>
+            <button onClick={() => onMutirao(true)}
+                    className="w-full text-xs px-4 py-2 rounded-xl font-medium flex items-center justify-center gap-2 glass text-dim hover:text-fg">
+              <Layers size={13} /> Buscar avaliações antigas (varredura completa de todos os produtos)
+            </button>
+            <div className="text-[10px] text-faint text-center">
+              A busca rápida da Shopee só alcança as ~1.000 mais recentes. Use a varredura completa para pegar a fila antiga (demora mais — percorre produto por produto).
+            </div>
+          </div>
         )
       )}
 
@@ -920,10 +930,11 @@ function AgenteAtividade({ ativ, onContar, onMutirao, onParar, notasAlvo }) {
               <span className="relative inline-flex rounded-full h-2.5 w-2.5" style={{ background: LARANJA }} />
             </span>
             <span className="text-xs font-semibold" style={{ color: LARANJA }}>
-              {descobrindo ? 'Mapeando a fila de avaliações…' : 'Agente respondendo agora…'}
+              {varrendo ? 'Varrendo produtos (avaliações antigas)…' : descobrindo ? 'Mapeando a fila de avaliações…' : 'Agente respondendo agora…'}
             </span>
             <span className="text-xs text-dim ml-auto num">
-              {descobrindo ? `${p.alvo || 0} encontradas` : `${p.processados} de ${p.alvo}`}
+              {varrendo ? `${p.prod_atual || 0}/${p.prod_total || 0} · ${p.alvo || 0} achadas`
+                : descobrindo ? `${p.alvo || 0} encontradas` : `${p.processados} de ${p.alvo}`}
             </span>
           </div>
           {!descobrindo && (
@@ -931,7 +942,12 @@ function AgenteAtividade({ ativ, onContar, onMutirao, onParar, notasAlvo }) {
               <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, background: LARANJA }} />
             </div>
           )}
-          {descobrindo && <div className="text-[11px] text-faint">Percorrendo as páginas pra montar a fila completa antes de começar a responder.</div>}
+          {varrendo && p.prod_total ? (
+            <div className="h-2 rounded-full overflow-hidden" style={{ background: 'var(--glass-hover)' }}>
+              <div className="h-full rounded-full transition-all duration-500" style={{ width: `${Math.round((p.prod_atual / p.prod_total) * 100)}%`, background: LARANJA }} />
+            </div>
+          ) : null}
+          {descobrindo && <div className="text-[11px] text-faint">{varrendo ? 'Percorrendo produto por produto para alcançar as avaliações antigas que a busca rápida não traz.' : 'Percorrendo as páginas pra montar a fila completa antes de começar a responder.'}</div>}
           {!descobrindo && p.ultimo && (
             <div className="text-[11px] text-dim mt-2 flex items-center gap-1.5">
               <CheckCircle2 size={12} style={{ color: 'var(--ok, #14B8A6)' }} />
@@ -1595,7 +1611,14 @@ function MotorPromocoes({ conectado, notify }) {
                   )}
                   <span className="min-w-0 flex-1">
                     <span className="text-sm truncate block">{p.nome}</span>
-                    <span className="text-[10px] text-faint num">SKU {p.sku} · {p.estoque} em estoque</span>
+                    <span className="text-[10px] text-faint num flex items-center gap-1.5">
+                      <span>SKU {p.sku} · {p.estoque} em estoque</span>
+                      {p.vendidos != null && (
+                        <span className="px-1 rounded" style={{ background: p.vendidos === 0 ? 'rgba(20,184,166,.14)' : 'var(--glass-hover)', color: p.vendidos === 0 ? '#2DD4BF' : 'var(--text-faint)' }}>
+                          {p.vendidos === 0 ? 'sem vendas (30d)' : `${p.vendidos} vendidos (30d)`}
+                        </span>
+                      )}
+                    </span>
                   </span>
                   <span className="text-right shrink-0">
                     <span className="text-xs num flex items-center gap-1.5 justify-end">
