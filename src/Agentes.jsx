@@ -8,7 +8,7 @@ import { useToast } from './toast.jsx'
 // metadados visuais por agente (ícone + cor + exemplos)
 const META = {
   conteudo: {
-    icon: PenLine, cor: '#6366f1',
+    icon: PenLine, cor: '#7b2a8c',
     exemplos: ['Escreva a descrição de um kit de 30 caixas organizadoras transparentes',
       'Avalie a qualidade deste cadastro: nome "Caixa", sem EAN, sem NCM, peso 0'],
   },

@@ -9,7 +9,7 @@ import {
 import { api } from './api.js'
 import { useToast } from './toast.jsx'
 
-const CORES = ['#6366f1', '#14b8a6', '#f59e0b', '#f43f5e', '#a855f7', '#38bdf8']
+const CORES = ['#7b2a8c', '#14b8a6', '#f59e0b', '#f43f5e', '#a855f7', '#38bdf8']
 
 // Marketplaces com rótulo bonito + dica de como pegar a URL do concorrente em cada um.
 const MARKETPLACES = [

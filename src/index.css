@@ -4,33 +4,36 @@
 @tailwind utilities;
 
 :root {
-  /* Tema escuro (padrão) — glassmorphism sobre base profunda, cara de grandes players */
-  --bg: #0A0C12;
-  --glass-bg: rgba(255, 255, 255, 0.055);
-  --glass-border: rgba(255, 255, 255, 0.10);
-  --glass-hover: rgba(255, 255, 255, 0.085);
-  --text: #EDEAE2;
-  --dim: #9C988E;
-  --faint: #66635C;
-  --accent: #E6B450;
-  --accent2: #4FE3C9;
-  --ok: #4FE3C9;
-  --warn: #E6B450;
-  --danger: #FF6F6F;
-  --shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  /* Paleta oficial da loja — roxo #3d1559 + rosa #d6007f + destaque #7b2a8c */
+  --bg: #0f0a14;
+  --glass-bg: rgba(255, 255, 255, 0.05);
+  --glass-border: rgba(214, 0, 127, 0.16);
+  --glass-hover: rgba(214, 0, 127, 0.10);
+  --text: #F6EEF6;
+  --dim: #9b8fa6;
+  --faint: #6a5f73;
+  --accent: #d6007f;
+  --accent2: #7b2a8c;
+  --ok: #2FD98D;
+  --warn: #E0A23C;
+  --danger: #FF7A7A;
+  --shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
 }
 
 .light {
-  --bg: #F4F1EA;
-  --glass-bg: rgba(255, 255, 255, 0.72);
-  --glass-border: rgba(40, 33, 22, 0.10);
-  --glass-hover: rgba(255, 255, 255, 0.95);
-  --text: #211D16;
-  --dim: #6B655B;
-  --faint: #A39C8E;
-  --accent: #B8860B;
-  --accent2: #0E9B86;
-  --shadow: 0 10px 30px rgba(40, 33, 22, 0.10);
+  --bg: #f4f1f6;
+  --glass-bg: rgba(255, 255, 255, 0.78);
+  --glass-border: rgba(61, 21, 89, 0.12);
+  --glass-hover: rgba(214, 0, 127, 0.06);
+  --text: #241a2b;
+  --dim: #7a7180;
+  --faint: #a89fad;
+  --accent: #d6007f;
+  --accent2: #7b2a8c;
+  --ok: #1d9e75;
+  --warn: #C77F1A;
+  --danger: #a32d2d;
+  --shadow: 0 10px 30px rgba(61, 21, 89, 0.12);
 }
 
 * { box-sizing: border-box; }
@@ -58,8 +61,8 @@ body::before, body::after {
   z-index: 0;
   pointer-events: none;
 }
-body::before { width: 480px; height: 480px; background: radial-gradient(circle, #E6B450, transparent 70%); opacity: 0.5; top: -120px; left: -60px; }
-body::after  { width: 520px; height: 520px; background: radial-gradient(circle, #4FE3C9, transparent 70%); opacity: 0.4; bottom: -160px; right: -80px; }
+body::before { width: 480px; height: 480px; background: radial-gradient(circle, #d6007f, transparent 70%); opacity: 0.42; top: -120px; left: -60px; }
+body::after  { width: 520px; height: 520px; background: radial-gradient(circle, #7b2a8c, transparent 70%); opacity: 0.40; bottom: -160px; right: -80px; }
 
 .glass {
   background: var(--glass-bg);
@@ -81,7 +84,7 @@ body::after  { width: 520px; height: 520px; background: radial-gradient(circle, 
   background-clip: text;
   color: transparent;
   -webkit-text-fill-color: transparent;
-  filter: drop-shadow(0 0 18px rgba(99, 102, 241, 0.28));
+  filter: drop-shadow(0 0 18px rgba(214, 0, 127, 0.30));
   animation: brand-shine 3.2s linear infinite;
 }
 @keyframes brand-shine {

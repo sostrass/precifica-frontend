@@ -137,7 +137,7 @@ export function CampaignCard({ tipo, id, nome, inicio, fim, flags = [], temProdu
   const terminaHoje = ciclo.fase === 'ativa' && ciclo.restante < 24 * 3600 * 1000
   const corTempo = ciclo.fase === 'encerrada' ? 'var(--text-faint)'
     : ciclo.fase === 'agendada' ? '#60A5FA'
-    : urgente ? '#FF6F6F' : terminaHoje ? '#E6B450' : meta.cor
+    : urgente ? '#FF6F6F' : terminaHoje ? '#d6007f' : meta.cor
 
   const ringPct = ciclo.fase === 'agendada' ? 100 : ciclo.pctRestante
   const ringCentro = ciclo.fase === 'encerrada' ? 'fim' : `${Math.round(ciclo.pctRestante)}%`

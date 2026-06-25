@@ -297,7 +297,7 @@ function BoostCondicional({ conectado, notify }) {
                           <div className="text-xs truncate">{a.nome}</div>
                           <div className="text-[10px] text-faint num">seu R$ {a.meu_preco?.toFixed(2)} · concorrente R$ {a.concorrente?.toFixed(2)}</div>
                         </div>
-                        {!a.tem_anuncio && <span className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: 'rgba(230,180,80,.14)', color: '#E6B450' }} title="SKU sem anúncio Shopee casado — não dá pra impulsionar">sem anúncio</span>}
+                        {!a.tem_anuncio && <span className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: 'rgba(230,180,80,.14)', color: '#d6007f' }} title="SKU sem anúncio Shopee casado — não dá pra impulsionar">sem anúncio</span>}
                         <span className="text-[11px] font-bold num px-1.5 py-0.5 rounded shrink-0" style={{ background: 'rgba(255,111,111,.16)', color: '#FF6F6F' }}>-{a.diferenca_pct}%</span>
                       </div>
                     ))}
@@ -649,7 +649,7 @@ const TONS_UI = [
   ['profissional', 'Profissional', '🤝'],
   ['descontraido', 'Descontraído', '😄'],
 ]
-const CORES_AVATAR = ['#EE4D2D', '#E6B450', '#4FE3C9', '#8B7FE8', '#F08AAE', '#5BA3F0', '#6BCB77']
+const CORES_AVATAR = ['#EE4D2D', '#d6007f', '#7b2a8c', '#8B7FE8', '#F08AAE', '#5BA3F0', '#6BCB77']
 function corAvatar(nome) {
   let h = 0; for (const ch of (nome || 'x')) h = (h * 31 + ch.charCodeAt(0)) >>> 0
   return CORES_AVATAR[h % CORES_AVATAR.length]
@@ -1238,7 +1238,7 @@ function ConfigReviewIA({ cfg, onSalvar, onClose }) {
 
 /* -------------------- MOTOR DE PROMOÇÕES AUTOMÁTICAS --------------------- */
 const money = (x) => 'R$ ' + Number(x || 0).toFixed(2).replace('.', ',')
-function corMargem(m) { return m >= 20 ? 'var(--ok, #14B8A6)' : m >= 10 ? '#E6B450' : 'var(--danger, #FF6F6F)' }
+function corMargem(m) { return m >= 20 ? 'var(--ok, #14B8A6)' : m >= 10 ? '#d6007f' : 'var(--danger, #FF6F6F)' }
 
 function MiniToggle({ on, onClick, disabled }) {
   return (
@@ -1276,7 +1276,7 @@ function DiagDescontoRaw({ d, onClose }) {
   const erros = d.error_list || []
   const ok = d.ok
   return (
-    <div className="glass rounded-2xl p-4 space-y-3" style={{ borderLeft: `3px solid ${ok ? '#2DD4BF' : '#E6B450'}` }}>
+    <div className="glass rounded-2xl p-4 space-y-3" style={{ borderLeft: `3px solid ${ok ? '#2DD4BF' : '#d6007f'}` }}>
       <div className="flex items-center justify-between">
         <div className="text-sm font-medium flex items-center gap-2"><Stethoscope size={15} style={{ color: LARANJA }} /> Diagnóstico do desconto</div>
         <button onClick={onClose} className="text-faint hover:text-fg"><X size={14} /></button>
@@ -1296,8 +1296,8 @@ function DiagDescontoRaw({ d, onClose }) {
               <CheckCircle2 size={15} /> Funcionou — o produto entrou no desconto de teste. Pode aplicar normalmente.
             </div>
           ) : (
-            <div className="rounded-xl p-3" style={{ background: 'color-mix(in srgb, #E6B450 10%, transparent)' }}>
-              <div className="text-xs font-semibold mb-1.5" style={{ color: '#E6B450' }}>A Shopee recusou o produto. Motivo exato:</div>
+            <div className="rounded-xl p-3" style={{ background: 'color-mix(in srgb, #d6007f 10%, transparent)' }}>
+              <div className="text-xs font-semibold mb-1.5" style={{ color: '#d6007f' }}>A Shopee recusou o produto. Motivo exato:</div>
               {erros.length ? (
                 <ul className="space-y-1">
                   {erros.map((e, i) => (
@@ -1543,7 +1543,7 @@ function MotorPromocoes({ conectado, notify }) {
           </div>
         </div>
         {auto && !cfg.ativo && (
-          <div className="mt-2 text-[11px] text-faint flex items-center gap-1.5"><AlertTriangle size={12} style={{ color: '#E6B450' }} /> Ligue a chave acima pra o agente começar a criar promoções sozinho.</div>
+          <div className="mt-2 text-[11px] text-faint flex items-center gap-1.5"><AlertTriangle size={12} style={{ color: '#d6007f' }} /> Ligue a chave acima pra o agente começar a criar promoções sozinho.</div>
         )}
 
         {auto && (
@@ -1691,7 +1691,7 @@ function MotorPromocoes({ conectado, notify }) {
                 <span className="text-[10px] px-1.5 py-0.5 rounded num text-dim" style={{ background: 'var(--glass)' }}>vendas dos últimos {propostas.diagnostico.dias_analise} dias</span>
               )}
               {propostas.diagnostico?.em_campanha > 0 && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded num flex items-center gap-1" style={{ background: 'color-mix(in srgb, #E6B450 14%, transparent)', color: '#E6B450' }}>
+                <span className="text-[10px] px-1.5 py-0.5 rounded num flex items-center gap-1" style={{ background: 'color-mix(in srgb, #d6007f 14%, transparent)', color: '#d6007f' }}>
                   <Layers size={9} /> {propostas.diagnostico.em_campanha} já em campanha (ignorados)
                 </span>
               )}
@@ -1755,9 +1755,9 @@ function MotorPromocoes({ conectado, notify }) {
       )}
 
       {resultado && (resultado.erros?.length > 0 || (resultado.criadas || []).some(c => (c.itens || 0) === 0)) && (
-        <div className="glass rounded-2xl p-4" style={{ borderLeft: '3px solid #E6B450' }}>
+        <div className="glass rounded-2xl p-4" style={{ borderLeft: '3px solid #d6007f' }}>
           <div className="flex items-center justify-between mb-2">
-            <div className="text-sm font-medium flex items-center gap-2"><AlertTriangle size={15} style={{ color: '#E6B450' }} /> Resultado da aplicação</div>
+            <div className="text-sm font-medium flex items-center gap-2"><AlertTriangle size={15} style={{ color: '#d6007f' }} /> Resultado da aplicação</div>
             <button onClick={() => setResultado(null)} className="text-faint hover:text-fg"><X size={14} /></button>
           </div>
           {(resultado.criadas || []).map((c, i) => (
@@ -1772,7 +1772,7 @@ function MotorPromocoes({ conectado, notify }) {
             <ul className="mt-2 space-y-1">
               {resultado.erros.map((e, i) => (
                 <li key={i} className="text-[11px] text-dim flex items-start gap-1.5">
-                  <span style={{ color: '#E6B450' }}>•</span><span>{e}</span>
+                  <span style={{ color: '#d6007f' }}>•</span><span>{e}</span>
                 </li>
               ))}
             </ul>
@@ -1849,12 +1849,12 @@ function prazoInfo(shipBy, agora) {
   return { ms, atrasado: ms < 0, urgente: ms >= 0 && ms < 12 * 3600 * 1000 }
 }
 
-const corMargemReal = (m, alvo) => m == null ? 'var(--text-faint)' : m < 0 ? '#FF6F6F' : (alvo && m < alvo - 0.5) ? '#E6B450' : '#2DD4BF'
+const corMargemReal = (m, alvo) => m == null ? 'var(--text-faint)' : m < 0 ? '#FF6F6F' : (alvo && m < alvo - 0.5) ? '#d6007f' : '#2DD4BF'
 
 function PedidoCard({ p, agora, alvo, sel, onSel, onAbrir }) {
   const prazo = prazoInfo(p.ship_by, agora)
-  const corPrazo = !prazo ? 'var(--text-faint)' : prazo.atrasado ? '#FF6F6F' : prazo.urgente ? '#E6B450' : '#2DD4BF'
-  const corBorda = p.prejuizo ? '#FF6F6F' : p.abaixo_meta ? '#E6B450' : 'transparent'
+  const corPrazo = !prazo ? 'var(--text-faint)' : prazo.atrasado ? '#FF6F6F' : prazo.urgente ? '#d6007f' : '#2DD4BF'
+  const corBorda = p.prejuizo ? '#FF6F6F' : p.abaixo_meta ? '#d6007f' : 'transparent'
   return (
     <div onClick={() => onAbrir && onAbrir(p.order_sn)} className="glass rounded-xl p-3 transition-colors hover:bg-[var(--glass-hover)]"
          style={{ borderLeft: `3px solid ${corBorda}`, cursor: 'pointer' }}>
@@ -1946,7 +1946,7 @@ function PedidoDetalhe({ orderSn, alvo, onClose }) {
                         <span className="text-sm font-semibold">Lucro real</span>
                         <span className="num text-base font-bold" style={{ color: corMargemReal(f.margem_pct, alvo) }}>{brl(f.lucro)} <span className="text-xs">({f.margem_pct}%)</span></span>
                       </div>
-                    </> : <div className="text-[10px] text-faint mt-1 flex items-center gap-1"><AlertTriangle size={10} style={{ color: '#E6B450' }} /> Algum produto sem custo no catálogo — lucro não calculado.</div>}
+                    </> : <div className="text-[10px] text-faint mt-1 flex items-center gap-1"><AlertTriangle size={10} style={{ color: '#d6007f' }} /> Algum produto sem custo no catálogo — lucro não calculado.</div>}
                   </> : <div className="text-xs text-faint">A Shopee ainda não liberou o repasse (escrow) deste pedido — normalmente fica disponível após o envio/conclusão.</div>}
                 </div>
 
@@ -2079,7 +2079,7 @@ function PedidosPainel({ conectado }) {
           <FinMetric icon={Package} rotulo="Pedidos" valor={res.total} />
           <FinMetric icon={Wallet} rotulo="Receita" valor={brl(res.receita)} />
           <FinMetric icon={TrendingUp} rotulo="Lucro real" valor={res.lucro_real != null ? brl(res.lucro_real) : '—'} cor="#2DD4BF" sub={res.lucro_real != null ? `${res.cobertura_lucro} c/ custo` : 'cadastre custos'} />
-          <FinMetric icon={AlertTriangle} rotulo="Abaixo da meta" valor={res.abaixo_meta} cor={res.abaixo_meta > 0 ? '#E6B450' : '#2DD4BF'} sub={res.prejuizo > 0 ? `${res.prejuizo} em prejuízo` : (res.margem_alvo ? `meta ${res.margem_alvo}%` : null)} />
+          <FinMetric icon={AlertTriangle} rotulo="Abaixo da meta" valor={res.abaixo_meta} cor={res.abaixo_meta > 0 ? '#d6007f' : '#2DD4BF'} sub={res.prejuizo > 0 ? `${res.prejuizo} em prejuízo` : (res.margem_alvo ? `meta ${res.margem_alvo}%` : null)} />
         </div>
       )}
 
@@ -2120,7 +2120,7 @@ function Pedidos({ conectado }) {
   )
 }
 
-const corMrg = (m) => m < 0 ? '#FF6F6F' : m < 8 ? '#E6B450' : '#2DD4BF'
+const corMrg = (m) => m < 0 ? '#FF6F6F' : m < 8 ? '#d6007f' : '#2DD4BF'
 const brlM = (v) => 'R$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 function FinMetric({ icon: Icon, valor, rotulo, cor, sub }) {
@@ -2180,13 +2180,13 @@ function MargemReal({ conectado }) {
             <FinMetric icon={TrendingUp} rotulo="Lucro líquido" valor={brlM(r.lucro_liquido_total)} cor={corMrg(r.margem_media_pct)} sub={`${r.pedidos} pedido(s)`} />
             <FinMetric icon={Percent} rotulo="Margem média" valor={`${r.margem_media_pct}%`} cor={corMrg(r.margem_media_pct)} />
             <FinMetric icon={ShoppingBag} rotulo="Receita" valor={brlM(r.receita_total)} />
-            <FinMetric icon={Receipt} rotulo="Taxas Shopee" valor={brlM(r.taxas_total)} cor="#E6B450" sub={`${r.pct_taxas}% da receita`} />
+            <FinMetric icon={Receipt} rotulo="Taxas Shopee" valor={brlM(r.taxas_total)} cor="#d6007f" sub={`${r.pct_taxas}% da receita`} />
             <FinMetric icon={Coins} rotulo="Custo produtos" valor={brlM(r.custo_total)} />
             <FinMetric icon={AlertTriangle} rotulo="Em prejuízo" valor={r.pedidos_prejuizo} cor={r.pedidos_prejuizo > 0 ? '#FF6F6F' : '#2DD4BF'} sub={r.pedidos_prejuizo > 0 ? 'revisar preço!' : 'tudo no azul'} />
           </div>
 
           {r.sem_custo > 0 && (
-            <div className="text-[11px] rounded-lg px-3 py-2 flex items-start gap-1.5" style={{ background: 'rgba(230,180,80,.1)', color: '#E6B450' }}>
+            <div className="text-[11px] rounded-lg px-3 py-2 flex items-start gap-1.5" style={{ background: 'rgba(230,180,80,.1)', color: '#d6007f' }}>
               <AlertTriangle size={12} className="mt-0.5 shrink-0" /> {r.sem_custo} pedido(s) têm produtos <b>sem custo cadastrado</b> no catálogo — o lucro deles fica subestimado (custo conta como zero). Preencha o preço de custo no Bling pra ficar exato.
             </div>
           )}
@@ -2206,7 +2206,7 @@ function MargemReal({ conectado }) {
                       <ChevronRight size={11} className="text-faint hidden sm:inline" />
                       <span className="text-sm font-semibold num" style={{ color: corMrg(p.margem_pct) }}>{brlM(p.lucro)}</span>
                     </div>
-                    {p.sem_custo && <span title="produto sem custo no catálogo"><AlertTriangle size={12} style={{ color: '#E6B450' }} /></span>}
+                    {p.sem_custo && <span title="produto sem custo no catálogo"><AlertTriangle size={12} style={{ color: '#d6007f' }} /></span>}
                     {p.prejuizo && <span className="text-[9px] px-1.5 py-0.5 rounded font-bold uppercase" style={{ background: 'rgba(255,111,111,.16)', color: '#FF6F6F' }}>prejuízo</span>}
                     <span className="text-[11px] font-bold num px-1.5 py-0.5 rounded shrink-0" style={{ background: `color-mix(in srgb, ${corMrg(p.margem_pct)} 16%, transparent)`, color: corMrg(p.margem_pct) }}>{p.margem_pct}%</span>
                     <ChevronDown size={13} className="text-faint shrink-0" style={{ transform: aberto === p.order_sn ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }} />
@@ -2228,7 +2228,7 @@ function MargemReal({ conectado }) {
                         {p.itens.map((it, i) => (
                           <div key={i} className="flex items-center justify-between text-[11px] rounded px-2 py-1" style={{ background: 'var(--glass)' }}>
                             <span className="truncate flex-1">{it.qtd}× {it.nome} {it.sku && <span className="text-faint num">· {it.sku}</span>}</span>
-                            <span className="num shrink-0 ml-2" style={{ color: it.tem_custo ? 'var(--text-dim)' : '#E6B450' }}>{it.tem_custo ? `custo ${brlM(it.custo_unit)}` : 'sem custo'}</span>
+                            <span className="num shrink-0 ml-2" style={{ color: it.tem_custo ? 'var(--text-dim)' : '#d6007f' }}>{it.tem_custo ? `custo ${brlM(it.custo_unit)}` : 'sem custo'}</span>
                           </div>
                         ))}
                       </div>

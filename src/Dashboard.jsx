@@ -41,7 +41,7 @@ const CANAL_COR = (n = '') => {
   if (s.includes('amazon')) return '#FF9900'
   if (s.includes('magalu') || s.includes('magazine')) return '#0086FF'
   if (s.includes('tiktok')) return '#69C9D0'
-  if (s.includes('nuvem')) return '#4FE3C9'
+  if (s.includes('nuvem')) return '#7b2a8c'
   if (s.includes('americ')) return '#E60014'
   if (s.includes('direta') || s.includes('sem')) return '#9AA0A6'
   return GOLD

@@ -11,10 +11,10 @@ const ICON_DIRETOR = { dollar: DollarSign, shield: ShieldCheck, image: ImageIcon
 const STATUS = {
   ok: { cor: 'var(--ok, #14B8A6)', Icon: CheckCircle2 },
   info: { cor: 'var(--faint, #8A8A8A)', Icon: Info },
-  alerta: { cor: 'var(--warn, #E6B450)', Icon: AlertTriangle },
+  alerta: { cor: 'var(--warn, #d6007f)', Icon: AlertTriangle },
   acao: { cor: 'var(--danger, #FF6F6F)', Icon: AlertCircle },
 }
-const corSaude = (s) => (s >= 80 ? 'var(--ok, #14B8A6)' : s >= 50 ? 'var(--warn, #E6B450)' : 'var(--danger, #FF6F6F)')
+const corSaude = (s) => (s >= 80 ? 'var(--ok, #14B8A6)' : s >= 50 ? 'var(--warn, #d6007f)' : 'var(--danger, #FF6F6F)')
 const money = (x) => 'R$ ' + Number(x || 0).toFixed(2).replace('.', ',')
 
 function AnelSaude({ score }) {
@@ -256,7 +256,7 @@ export default function Conselho() {
               ['sem_navegador', 'vazio', 'sem_descoberta'].includes(pos.modo)
                 ? <div className="mt-3 rounded-xl p-3" style={{ background: 'var(--glass-hover)' }}>
                     <div className="text-xs text-dim flex items-start gap-2">
-                      <Info size={14} className="mt-0.5 shrink-0" style={{ color: pos.modo === 'vazio' ? 'var(--warn, #E6B450)' : 'var(--warn, #E6B450)' }} />
+                      <Info size={14} className="mt-0.5 shrink-0" style={{ color: pos.modo === 'vazio' ? 'var(--warn, #d6007f)' : 'var(--warn, #d6007f)' }} />
                       <div>
                         <div className="font-medium mb-1">{pos.nome_canal}: {pos.modo === 'vazio' ? 'sem resultados agora' : 'descoberta por termo ainda não está pronta no deploy'}</div>
                         <div className="text-faint">{pos.motivo}</div>

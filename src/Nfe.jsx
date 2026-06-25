@@ -551,6 +551,16 @@ function Editor({ nota, cfg, onAplicado, onVerCompleta }) {
   const [porItem, setPorItem] = useState({})
   const [resumo, setResumo] = useState(null)
   const [aplicando, setAplicando] = useState(false)
+  const [diag, setDiag] = useState(null)
+  const [diagLoad, setDiagLoad] = useState(false)
+
+  const diagnosticar = async () => {
+    if (nota._manual) return
+    setDiagLoad(true); setDiag(null)
+    try { setDiag(await api.nfeDiagEdicao(nota.id)) }
+    catch (e) { notify(e.message, 'danger') }
+    setDiagLoad(false)
+  }
 
   // Simulação ao vivo (com debounce)
   useEffect(() => {
@@ -665,13 +675,52 @@ function Editor({ nota, cfg, onAplicado, onVerCompleta }) {
       <Resumo resumo={resumo} />
 
       {!nota._manual && (
-        <button
-          onClick={aplicar} disabled={aplicando}
-          className="mt-4 rounded-xl py-2.5 text-sm font-medium text-white disabled:opacity-60 flex items-center justify-center gap-2"
-          style={{ background: 'var(--accent)' }}
-        >
-          <Send size={15} /> {aplicando ? 'Aplicando…' : 'Aplicar no Bling'}
-        </button>
+        <>
+          <button
+            onClick={aplicar} disabled={aplicando}
+            className="mt-4 rounded-xl py-2.5 text-sm font-medium text-white disabled:opacity-60 flex items-center justify-center gap-2"
+            style={{ background: 'var(--accent)' }}
+          >
+            <Send size={15} /> {aplicando ? 'Aplicando…' : 'Aplicar no Bling'}
+          </button>
+          <button
+            onClick={diagnosticar} disabled={diagLoad}
+            className="mt-2 rounded-xl py-2 text-xs text-dim hover:text-fg disabled:opacity-60 flex items-center justify-center gap-2 border border-glassb"
+          >
+            <Activity size={13} /> {diagLoad ? 'Analisando…' : 'Diagnosticar envio (não envia)'}
+          </button>
+          {diag && <DiagEdicao diag={diag} onFechar={() => setDiag(null)} />}
+        </>
+      )}
+    </div>
+  )
+}
+
+function DiagEdicao({ diag, onFechar }) {
+  const ok = diag.bate
+  return (
+    <div className="mt-3 rounded-xl border p-3 text-[11px]"
+         style={{ borderColor: ok ? 'var(--ok)' : 'var(--danger)', background: 'var(--glass-hover)' }}>
+      <div className="flex items-center gap-2 mb-2">
+        {ok ? <CheckCircle2 size={14} style={{ color: 'var(--ok)' }} /> : <AlertTriangle size={14} style={{ color: 'var(--danger)' }} />}
+        <span className="font-semibold" style={{ color: ok ? 'var(--ok)' : 'var(--danger)' }}>
+          {ok ? 'Parcelas batem com o total — envio deve passar' : 'Parcelas NÃO batem — Bling recusaria'}
+        </span>
+        <button onClick={onFechar} className="ml-auto text-faint hover:text-fg"><X size={14} /></button>
+      </div>
+      <div className="grid grid-cols-2 gap-2 num">
+        <div>valorNota (Bling): <b className="text-fg">{diag.raw?.valorNota ?? '—'}</b></div>
+        <div>total calculado: <b className="text-fg">{diag.total_calculado}</b></div>
+        <div>soma parcelas (envio): <b className="text-fg">{diag.soma_parcelas_payload}</b></div>
+        <div>nota tem parcelas: <b className="text-fg">{diag.raw?.tem_parcelas ? 'sim' : 'não'}</b></div>
+      </div>
+      {Array.isArray(diag.payload?.parcelas) && diag.payload.parcelas.length > 0 && (
+        <div className="mt-2 text-faint">parcelas no envio: <span className="num text-dim">{diag.payload.parcelas.map((p) => p.valor ?? p.valorParcela ?? 0).join(' · ')}</span></div>
+      )}
+      {!diag.raw?.tem_parcelas && (
+        <div className="mt-2" style={{ color: 'var(--warn)' }}>
+          ⚠️ A nota não tem o campo <b>parcelas</b> no payload do Bling — o pagamento pode estar em outro campo. Me manda esse diagnóstico que eu ajusto.
+        </div>
       )}
     </div>
   )
@@ -761,6 +810,9 @@ function NfeDetalhe({ nota, onClose }) {
             <div className="font-display font-semibold">NF-e nº {n.numero} <span className="text-faint font-normal">· série {n.serie}</span></div>
             <div className="flex items-center gap-2 mt-1 flex-wrap">
               <span className="text-[11px] px-2 py-0.5 rounded-full" style={{ background: corSit + '26', color: corSit }}>{n.situacao_label}</span>
+              {n.modelo_label && <span className="text-[11px] px-2 py-0.5 rounded-full font-medium" style={{ background: 'color-mix(in srgb, var(--accent) 16%, transparent)', color: 'var(--accent)' }}>{n.modelo_label}</span>}
+              {n.tipo_label && <span className="text-[11px] px-2 py-0.5 rounded-full" style={{ background: 'var(--glass-hover)', color: 'var(--text-dim)' }}>{n.tipo_label}</span>}
+              {n.finalidade_label && <span className="text-[11px] px-2 py-0.5 rounded-full" style={{ background: 'var(--glass-hover)', color: 'var(--text-dim)' }}>{n.finalidade_label}</span>}
               {n.data_emissao && <span className="text-[11px] text-faint num">{n.data_emissao}</span>}
               {n.simples_nacional && <span className="text-[11px] px-2 py-0.5 rounded-full flex items-center gap-1" style={{ background: 'var(--glass-hover)', color: 'var(--accent2)' }}><ShieldCheck size={11} /> Simples Nacional</span>}
               {n.pedido_loja && <span className="text-[11px] text-faint num flex items-center gap-1"><Hash size={10} /> pedido {n.pedido_loja}</span>}

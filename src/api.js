@@ -157,6 +157,7 @@ export const api = {
   nfePendentes: (situacao) => req('/api/nfe/pendentes' + (situacao != null ? `?situacao=${situacao}` : '')),
   nfeObter: (id) => req(`/api/nfe/${id}`),
   nfeCompleta: (id) => req(`/api/nfe/${id}/completa`),
+  nfeDiagEdicao: (id) => req(`/api/nfe/${id}/diagnostico-edicao`),
   nfeSimular: (b) => req('/api/nfe/simular', { method: 'POST', body: b }),
   nfeAplicar: (id, b) => req(`/api/nfe/${id}/aplicar`, { method: 'POST', body: b }),
   nfeAutoProcessar: () => req('/api/nfe/auto/processar', { method: 'POST' }),

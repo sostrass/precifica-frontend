@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import {
   Bell, FileText, Package, ShoppingBag, Layers, User, CheckCircle2, AlertTriangle,
   X, RefreshCw, Eye, Clock, HelpCircle, PauseCircle, Sparkles, Inbox,
@@ -88,19 +89,22 @@ export default function NotificacoesGlobais({ ativo, onIrParaNfe }) {
         )}
       </button>
 
-      {/* Card de push (canto superior direito, fixo) */}
-      {push && (
-        <div className="fixed top-4 right-4 z-[60] w-[min(92vw,360px)]">
+      {/* Card de push (portal no body — escapa do stacking context do header) */}
+      {push && createPortal(
+        <div className="fixed top-4 right-4 z-[100] w-[min(92vw,360px)]">
           <PushCard n={push} onVer={() => verNota(push)} onFechar={() => setPush(null)} />
-        </div>
+        </div>,
+        document.body,
       )}
 
-      {/* Modal central de notificações */}
-      {aberto && (
-        <div className="fixed inset-0 z-[55] flex items-start justify-center p-4 sm:p-8 overflow-y-auto"
-             style={{ background: 'rgba(0,0,0,.6)', backdropFilter: 'blur(3px)' }} onClick={() => setAberto(false)}>
-          <div className="glass rounded-2xl w-full max-w-lg my-auto" onClick={(e) => e.stopPropagation()} style={{ background: 'var(--bg)' }}>
-            <div className="flex items-center gap-3 p-5 border-b" style={{ borderColor: 'var(--glass-border)' }}>
+      {/* Drawer lateral de notificações (portal no body) */}
+      {aberto && createPortal(
+        <div className="fixed inset-0 z-[95]" onClick={() => setAberto(false)}>
+          <div className="absolute inset-0" style={{ background: 'rgba(0,0,0,.5)', backdropFilter: 'blur(2px)' }} />
+          <div className="absolute top-0 right-0 h-full w-[min(94vw,420px)] flex flex-col animate-[slideIn_.22s_ease]"
+               onClick={(e) => e.stopPropagation()}
+               style={{ background: 'var(--bg)', borderLeft: '1px solid var(--glass-border)', boxShadow: '-16px 0 48px rgba(0,0,0,.4)' }}>
+            <div className="flex items-center gap-3 p-5 border-b shrink-0" style={{ borderColor: 'var(--glass-border)' }}>
               <div className="h-10 w-10 rounded-xl grid place-items-center shrink-0" style={{ background: 'linear-gradient(135deg, var(--accent), var(--accent2))' }}>
                 <Bell size={18} className="text-white" />
               </div>
@@ -111,23 +115,24 @@ export default function NotificacoesGlobais({ ativo, onIrParaNfe }) {
               <button onClick={carregar} className="text-faint hover:text-fg p-1" title="Atualizar"><RefreshCw size={15} /></button>
               <button onClick={() => setAberto(false)} className="text-dim hover:text-fg p-1"><X size={20} /></button>
             </div>
-            <div className="p-4">
+            <div className="p-4 overflow-y-auto flex-1">
               {itens === null ? (
                 <div className="text-xs text-dim py-6 text-center">Carregando…</div>
               ) : itens.length === 0 ? (
-                <div className="text-center py-10">
+                <div className="text-center py-12">
                   <div className="h-12 w-12 rounded-2xl grid place-items-center mx-auto mb-3" style={{ background: 'var(--glass-hover)' }}><Inbox size={20} className="text-faint" /></div>
                   <div className="text-sm font-medium">Nenhuma notificação ainda</div>
                   <div className="text-xs text-dim mt-1">Quando o Bling enviar eventos (notas, produtos, pedidos…), eles aparecem aqui.</div>
                 </div>
               ) : (
-                <div className="space-y-2 max-h-[62vh] overflow-y-auto pr-1">
+                <div className="space-y-2">
                   {itens.map((n) => <NotifCard key={n.id} n={n} onVer={() => verNota(n)} />)}
                 </div>
               )}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   )
