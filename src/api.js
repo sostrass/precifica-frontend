@@ -160,4 +160,5 @@ export const api = {
   nfeSimular: (b) => req('/api/nfe/simular', { method: 'POST', body: b }),
   nfeAplicar: (id, b) => req(`/api/nfe/${id}/aplicar`, { method: 'POST', body: b }),
   nfeAutoProcessar: () => req('/api/nfe/auto/processar', { method: 'POST' }),
+  nfeEventos: (limite = 25) => req(`/api/nfe/eventos?limite=${limite}`),
 }
