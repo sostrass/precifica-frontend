@@ -1263,6 +1263,65 @@ function SliderRegra({ label, valor, min, max, step = 1, sufixo = '', onChange, 
   )
 }
 
+function DiagDescontoRaw({ d, onClose }) {
+  if (d?.erro) return (
+    <div className="glass rounded-2xl p-4" style={{ borderLeft: '3px solid #FF6F6F' }}>
+      <div className="flex items-center justify-between mb-1">
+        <div className="text-sm font-medium flex items-center gap-2" style={{ color: '#FF6F6F' }}><AlertTriangle size={15} /> Diagnóstico falhou</div>
+        <button onClick={onClose} className="text-faint hover:text-fg"><X size={14} /></button>
+      </div>
+      <div className="text-xs text-dim">{d.erro}</div>
+    </div>
+  )
+  const erros = d.error_list || []
+  const ok = d.ok
+  return (
+    <div className="glass rounded-2xl p-4 space-y-3" style={{ borderLeft: `3px solid ${ok ? '#2DD4BF' : '#E6B450'}` }}>
+      <div className="flex items-center justify-between">
+        <div className="text-sm font-medium flex items-center gap-2"><Stethoscope size={15} style={{ color: LARANJA }} /> Diagnóstico do desconto</div>
+        <button onClick={onClose} className="text-faint hover:text-fg"><X size={14} /></button>
+      </div>
+      {!d.produto ? (
+        <div className="text-xs text-dim">{d.motivo || 'Nenhum produto elegível para testar.'}</div>
+      ) : (
+        <>
+          <div className="text-xs flex items-center gap-1.5 flex-wrap">
+            <span>Produto testado:</span><b>{d.produto.nome}</b>
+            <span className="text-[10px] px-1.5 py-0.5 rounded num text-faint" style={{ background: 'var(--glass-hover)' }}>SKU {d.produto.sku}</span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded num" style={{ background: 'var(--glass-hover)', color: 'var(--text-dim)' }}>#{d.produto.item_id}</span>
+            <span className="num text-dim">{brl(d.produto.preco_atual)} → <b style={{ color: LARANJA }}>{brl(d.produto.preco_promo)}</b> (−{d.produto.desconto_pct}%)</span>
+          </div>
+          {ok ? (
+            <div className="text-sm flex items-center gap-2" style={{ color: '#2DD4BF' }}>
+              <CheckCircle2 size={15} /> Funcionou — o produto entrou no desconto de teste. Pode aplicar normalmente.
+            </div>
+          ) : (
+            <div className="rounded-xl p-3" style={{ background: 'color-mix(in srgb, #E6B450 10%, transparent)' }}>
+              <div className="text-xs font-semibold mb-1.5" style={{ color: '#E6B450' }}>A Shopee recusou o produto. Motivo exato:</div>
+              {erros.length ? (
+                <ul className="space-y-1">
+                  {erros.map((e, i) => (
+                    <li key={i} className="text-[11px] num text-dim">
+                      anúncio {e.item_id}{e.model_id != null ? ` · var ${e.model_id}` : ''}: <b style={{ color: '#FF6F6F' }}>{e.fail_message || e.fail_error || e.error || JSON.stringify(e)}</b>
+                    </li>
+                  ))}
+                </ul>
+              ) : <div className="text-[11px] text-dim">A Shopee não retornou um motivo na error_list — confira as respostas cruas abaixo (provável recusa já na criação).</div>}
+            </div>
+          )}
+          <details className="text-[11px]">
+            <summary className="cursor-pointer text-faint hover:text-fg">ver respostas cruas da Shopee (payload + cada etapa)</summary>
+            <pre className="mt-2 p-2 rounded-lg overflow-auto num" style={{ background: 'var(--glass-hover)', maxHeight: 320, fontSize: 10 }}>
+{JSON.stringify({ payload_enviado: d.payload_enviado, etapas: d.etapas }, null, 2)}
+            </pre>
+          </details>
+          {d.aviso && <div className="text-[10px] text-faint">{d.aviso}</div>}
+        </>
+      )}
+    </div>
+  )
+}
+
 function DiagnosticoPromo({ msg, diag }) {
   // funil: cada etapa com a contagem; a 1ª que zera é o ponto de quebra
   const etapas = diag ? [
@@ -1369,6 +1428,8 @@ function MotorPromocoes({ conectado, notify }) {
   const [cfg, setCfg] = useState(null)
   const [propostas, setPropostas] = useState(null)
   const [resultado, setResultado] = useState(null)
+  const [diagRaw, setDiagRaw] = useState(null)
+  const [diagLoad, setDiagLoad] = useState(false)
   const [sel, setSel] = useState(() => new Set())
   const [gerando, setGerando] = useState(false)
   const [aplicando, setAplicando] = useState(false)
@@ -1602,6 +1663,19 @@ function MotorPromocoes({ conectado, notify }) {
           {gerando ? <Loader2 size={17} className="animate-spin" /> : <Wand2 size={17} />} {gerando ? 'O agente está analisando…' : 'Gerar propostas de promoção'}
         </button>
       )}
+
+      <button onClick={async () => {
+                setDiagLoad(true); setDiagRaw(null)
+                try { setDiagRaw(await api.shopeePromoDiagnosticar()) }
+                catch (e) { setDiagRaw({ erro: e.message }) }
+                finally { setDiagLoad(false) }
+              }} disabled={diagLoad}
+              className="w-full text-xs px-4 py-2 rounded-xl font-medium flex items-center justify-center gap-2 glass text-dim hover:text-fg disabled:opacity-60">
+        {diagLoad ? <Loader2 size={13} className="animate-spin" /> : <Stethoscope size={13} />}
+        {diagLoad ? 'Testando 1 produto na Shopee…' : 'Diagnosticar desconto (testa 1 produto e mostra o erro real da Shopee)'}
+      </button>
+
+      {diagRaw && <DiagDescontoRaw d={diagRaw} onClose={() => setDiagRaw(null)} />}
 
       {/* Tabela de propostas */}
       {propostas?.acao === 'ok' && propostas.propostas.length > 0 && (

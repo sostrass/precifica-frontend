@@ -92,6 +92,7 @@ export const api = {
   shopeePromoConfig: () => req('/api/shopee/promo/config'),
   shopeePromoConfigSalvar: (cfg) => req('/api/shopee/promo/config', { method: 'PUT', body: cfg }),
   shopeePromoPropor: () => req('/api/shopee/promo/propor', { method: 'POST' }),
+  shopeePromoDiagnosticar: () => req('/api/shopee/promo/diagnosticar', { method: 'POST' }),
   shopeePromoAplicar: (b) => req('/api/shopee/promo/aplicar', { method: 'POST', body: b }),
   shopeePromoRodar: () => req('/api/shopee/promo/rodar', { method: 'POST' }),
   shopeePromoQueda: () => req('/api/shopee/promo/queda'),
