@@ -1562,6 +1562,19 @@ function MotorPromocoes({ conectado, notify }) {
                         style={cfg.estrategia === id ? { background: LARANJA, color: '#fff' } : { background: 'var(--glass-hover)', color: 'var(--text-dim)' }}>{t}</button>
               ))}
             </div>
+            {cfg.estrategia === 'estoque_parado' && (
+              <div className="mt-2">
+                <div className="text-[10px] text-faint mb-1">Considerar "parado" pelas vendas dos últimos</div>
+                <div className="flex gap-1">
+                  {[7, 15, 30, 60].map((d) => (
+                    <button key={d} onClick={() => salvar({ dias_analise: d })} className="flex-1 text-[11px] px-1.5 py-1.5 rounded-md font-medium transition num"
+                            style={(cfg.dias_analise || 30) === d
+                              ? { background: `color-mix(in srgb, ${LARANJA} 16%, transparent)`, color: LARANJA, border: `1px solid ${LARANJA}` }
+                              : { background: 'var(--glass-hover)', color: 'var(--text-dim)', border: '1px solid transparent' }}>{d} dias</button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
           <div>
             <div className="text-xs text-dim mb-1.5 font-medium">Tipo de promoção</div>
@@ -1598,38 +1611,51 @@ function MotorPromocoes({ conectado, notify }) {
             <button onClick={() => setSel(nSel === propostas.propostas.length ? new Set() : new Set(propostas.propostas.map((p) => p.item_id)))}
                     className="text-xs text-dim hover:text-fg">{nSel === propostas.propostas.length ? 'desmarcar todos' : 'marcar todos'}</button>
           </div>
+          {(propostas.diagnostico?.em_campanha > 0 || propostas.diagnostico?.dias_analise) && (
+            <div className="flex items-center gap-2 px-4 py-2 flex-wrap" style={{ background: 'var(--glass-hover)' }}>
+              {propostas.diagnostico?.dias_analise && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded num text-dim" style={{ background: 'var(--glass)' }}>vendas dos últimos {propostas.diagnostico.dias_analise} dias</span>
+              )}
+              {propostas.diagnostico?.em_campanha > 0 && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded num flex items-center gap-1" style={{ background: 'color-mix(in srgb, #E6B450 14%, transparent)', color: '#E6B450' }}>
+                  <Layers size={9} /> {propostas.diagnostico.em_campanha} já em campanha (ignorados)
+                </span>
+              )}
+            </div>
+          )}
           <div className="max-h-[420px] overflow-y-auto divide-y" style={{ borderColor: 'var(--glass-border)' }}>
             {propostas.propostas.map((p) => {
               const on = sel.has(p.item_id)
               return (
-                <button key={p.item_id} onClick={() => !auto && toggleSel(p.item_id)} className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-[var(--glass-hover)]"
+                <button key={p.item_id} onClick={() => !auto && toggleSel(p.item_id)} className="w-full px-4 py-3 text-left hover:bg-[var(--glass-hover)] transition-colors"
                         style={{ background: on && !auto ? 'rgba(238,77,45,.06)' : undefined, cursor: auto ? 'default' : 'pointer' }}>
-                  {!auto && (
-                    <span className="h-4 w-4 rounded grid place-items-center shrink-0" style={{ background: on ? LARANJA : 'transparent', border: `1px solid ${on ? LARANJA : 'var(--glass-border)'}` }}>
-                      {on && <CheckCircle2 size={11} className="text-white" />}
-                    </span>
-                  )}
-                  <span className="min-w-0 flex-1">
-                    <span className="text-sm truncate block">{p.nome}</span>
-                    <span className="text-[10px] text-faint num flex items-center gap-1.5">
-                      <span>SKU {p.sku} · {p.estoque} em estoque</span>
-                      {p.vendidos != null && (
-                        <span className="px-1 rounded" style={{ background: p.vendidos === 0 ? 'rgba(20,184,166,.14)' : 'var(--glass-hover)', color: p.vendidos === 0 ? '#2DD4BF' : 'var(--text-faint)' }}>
-                          {p.vendidos === 0 ? 'sem vendas (30d)' : `${p.vendidos} vendidos (30d)`}
+                  <div className="flex items-start gap-3">
+                    {!auto && (
+                      <span className="h-4 w-4 rounded grid place-items-center shrink-0 mt-0.5" style={{ background: on ? LARANJA : 'transparent', border: `1px solid ${on ? LARANJA : 'var(--glass-border)'}` }}>
+                        {on && <CheckCircle2 size={11} className="text-white" />}
+                      </span>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-medium truncate">{p.nome}</span>
+                        <span className="num shrink-0 flex items-baseline gap-1.5">
+                          <span className="text-[11px] text-faint line-through">{money(p.preco_atual)}</span>
+                          <span className="text-sm font-bold" style={{ color: LARANJA }}>{money(p.preco_promo)}</span>
                         </span>
-                      )}
-                    </span>
-                  </span>
-                  <span className="text-right shrink-0">
-                    <span className="text-xs num flex items-center gap-1.5 justify-end">
-                      <span className="text-faint line-through">{money(p.preco_atual)}</span>
-                      <span className="font-semibold">{money(p.preco_promo)}</span>
-                    </span>
-                    <span className="flex items-center gap-1.5 justify-end mt-0.5">
-                      <span className="text-[10px] px-1.5 py-0.5 rounded font-medium" style={{ background: 'rgba(238,77,45,.12)', color: LARANJA }}>-{p.desconto_pct}%</span>
-                      <span className="text-[10px] num" style={{ color: corMargem(p.margem_promo) }}>margem {p.margem_promo}%</span>
-                    </span>
-                  </span>
+                      </div>
+                      <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded num" style={{ background: LARANJA, color: '#fff' }}>−{p.desconto_pct}%</span>
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded num" style={{ background: `color-mix(in srgb, ${corMargem(p.margem_promo)} 16%, transparent)`, color: corMargem(p.margem_promo) }}>margem {p.margem_promo}%</span>
+                        {p.vendidos != null && (
+                          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded num" style={{ background: p.vendidos === 0 ? 'color-mix(in srgb, #2DD4BF 16%, transparent)' : 'var(--glass-hover)', color: p.vendidos === 0 ? '#2DD4BF' : 'var(--text-dim)' }}>
+                            {p.vendidos === 0 ? 'parado' : `${p.vendidos} vendas`}
+                          </span>
+                        )}
+                        <span className="text-[10px] px-1.5 py-0.5 rounded num" style={{ background: 'var(--glass-hover)', color: 'var(--text-dim)' }}>{p.estoque} estoque</span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded num text-faint" style={{ background: 'var(--glass-hover)' }}>SKU {p.sku}</span>
+                      </div>
+                    </div>
+                  </div>
                 </button>
               )
             })}
