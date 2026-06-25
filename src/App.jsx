@@ -2,6 +2,7 @@ import { useEffect, useState, lazy, Suspense } from 'react'
 import { LayoutDashboard, Boxes, Calculator, SatelliteDish, FileText, Sparkles, Aperture, Bot, Settings, Sun, Moon, LogOut, Plug, ShoppingBag, CalendarDays, Crown } from 'lucide-react'
 import { api, getToken, setToken } from './api.js'
 import { useToast } from './toast.jsx'
+import NotificacoesGlobais from './Notificacoes.jsx'
 import Login from './Login.jsx'
 
 const Dashboard = lazy(() => import('./Dashboard.jsx'))
@@ -157,6 +158,7 @@ export default function App() {
             <span className="hidden md:flex text-xs text-faint items-center gap-1.5 px-3 py-1.5 rounded-full glass">
               <CalendarDays size={13} /> {new Date().toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: 'short' })}
             </span>
+            <NotificacoesGlobais ativo={authed && blingOk} onIrParaNfe={() => setView('nfe')} />
           </div>
         </header>
 

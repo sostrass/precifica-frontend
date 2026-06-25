@@ -154,12 +154,13 @@ export const api = {
   // NF-e
   nfeConfig: () => req('/api/nfe/config'),
   salvarNfeConfig: (b) => req('/api/nfe/config', { method: 'PUT', body: b }),
-  nfePendentes: () => req('/api/nfe/pendentes'),
+  nfePendentes: (situacao) => req('/api/nfe/pendentes' + (situacao != null ? `?situacao=${situacao}` : '')),
   nfeObter: (id) => req(`/api/nfe/${id}`),
   nfeCompleta: (id) => req(`/api/nfe/${id}/completa`),
   nfeSimular: (b) => req('/api/nfe/simular', { method: 'POST', body: b }),
   nfeAplicar: (id, b) => req(`/api/nfe/${id}/aplicar`, { method: 'POST', body: b }),
   nfeAutoProcessar: () => req('/api/nfe/auto/processar', { method: 'POST' }),
   nfeEventos: (limite = 25) => req(`/api/nfe/eventos?limite=${limite}`),
+  notificacoes: (limite = 40) => req(`/api/notificacoes?limite=${limite}`),
   nfeAplicarTodas: () => req('/api/nfe/aplicar-todas', { method: 'POST' }),
 }

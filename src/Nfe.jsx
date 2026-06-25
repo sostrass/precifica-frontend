@@ -3,19 +3,12 @@ import {
   FileText, Settings2, Plug, RefreshCw, Plus, Trash2, Send, Percent, DollarSign,
   Truck, Lock, ChevronRight, Zap, Info, X, Download, ExternalLink, User, Receipt, MapPin,
   CheckCircle2, AlertTriangle, Clock, HelpCircle, PauseCircle, Activity, Hash, CreditCard,
-  Eye, Landmark, ShieldCheck, Bell, Sparkles,
+  Eye, Landmark, ShieldCheck, Bell, Sparkles, TrendingDown, Search, ToggleRight, Users, Inbox,
 } from 'lucide-react'
 import { api } from './api.js'
 import { useToast } from './toast.jsx'
 
 const brl = (v) => 'R$ ' + Number(v ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-const fmtQuando = (iso) => {
-  if (!iso) return ''
-  try {
-    const d = new Date(iso)
-    return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
-  } catch { return '' }
-}
 
 export default function Nfe() {
   const notify = useToast()
@@ -27,94 +20,43 @@ export default function Nfe() {
   const [completa, setCompleta] = useState(null)
   const [consultaId, setConsultaId] = useState('')
   const [eventos, setEventos] = useState(null)
-  const [notifAberto, setNotifAberto] = useState(false)
-  const [novoEvento, setNovoEvento] = useState(null)
-  const [ultimoVistoId, setUltimoVistoId] = useState(0)
-  const maxIdRef = useRef(0)
-  const primeiraRef = useRef(true)
-
-  // Detecta eventos novos (push) ao atualizar a lista
-  useEffect(() => {
-    if (!Array.isArray(eventos) || eventos.length === 0) return
-    const maxId = Math.max(...eventos.map((e) => e.id))
-    if (primeiraRef.current) {
-      primeiraRef.current = false
-      maxIdRef.current = maxId
-      setUltimoVistoId(maxId)
-      return
-    }
-    if (maxId > maxIdRef.current) {
-      const novos = eventos.filter((e) => e.id > maxIdRef.current)
-      maxIdRef.current = maxId
-      if (novos[0]) setNovoEvento(novos[0])
-    }
-  }, [eventos])
-
-  // Polling leve: busca eventos novos a cada 30s
-  useEffect(() => {
-    const t = setInterval(() => { carregarEventos() }, 30000)
-    return () => clearInterval(t)
-  }, [])
-
-  const naoVistos = Array.isArray(eventos) ? eventos.filter((e) => e.id > ultimoVistoId).length : 0
-  const abrirNotificacoes = () => { setNotifAberto(true); setUltimoVistoId(maxIdRef.current) }
   const [loteRodando, setLoteRodando] = useState(false)
   const [loteReport, setLoteReport] = useState(null)
-
-  const aplicarTodas = async () => {
-    const n = Array.isArray(pendentes) ? pendentes.length : 0
-    if (!n) { notify('Não há notas pendentes para aplicar.', 'danger'); return }
-    const tipo = cfg?.desconto_tipo === 'valor' ? `R$ ${cfg?.desconto_valor}` : `${cfg?.desconto_valor}%`
-    if (!window.confirm(`Aplicar o desconto padrão (${tipo}${cfg?.remover_frete ? ' + zerar frete' : ''}) em TODAS as ${n} notas pendentes e salvar no Bling?\n\nA autorização na Sefaz continua manual, no Bling.`)) return
-    setLoteRodando(true); setLoteReport(null)
-    try {
-      const r = await api.nfeAplicarTodas()
-      setLoteReport(r)
-      carregarPendentes(); carregarEventos()
-    } catch (e) {
-      setLoteReport({ erro: e.message })
-    } finally {
-      setLoteRodando(false)
-    }
-  }
+  // filtros / toggles
+  const [situacao, setSituacao] = useState(1)        // 1 = pendentes (editáveis)
+  const [busca, setBusca] = useState('')
+  const [ordem, setOrdem] = useState('valor_desc')
+  const [soEditaveis, setSoEditaveis] = useState(false)
 
   useEffect(() => {
     api.nfeConfig().then(setCfg).catch(() => {})
-    carregarPendentes()
     carregarEventos()
   }, [])
+  useEffect(() => { carregarNotas() /* eslint-disable-next-line */ }, [situacao])
 
   const carregarEventos = async () => {
     try { setEventos(await api.nfeEventos()) } catch { setEventos([]) }
   }
 
-  const carregarPendentes = async () => {
-    setBlingErro(false)
-    setPendentes(null)
+  const carregarNotas = async () => {
+    setBlingErro(false); setPendentes(null)
     try {
-      const r = await api.nfePendentes()
-      const lista = Array.isArray(r) ? r : r?.data || r?.notas || []
-      setPendentes(lista)
+      const r = await api.nfePendentes(situacao)
+      setPendentes(Array.isArray(r) ? r : (r?.notas || r?.data || []))
     } catch (e) {
-      setBlingErro(true)
-      setPendentes([])
+      setBlingErro(true); setPendentes([])
     }
   }
 
   const abrirNota = async (id) => {
-    try {
-      const n = await api.nfeObter(id)
-      setNota({ ...n, _manual: false })
-    } catch (e) {
-      notify(e.message, 'danger')
-    }
+    try { setNota({ ...(await api.nfeObter(id)), _manual: false }) }
+    catch (e) { notify(e.message, 'danger') }
   }
 
   const verCompleta = async (id) => {
     if (!String(id || '').trim()) return
-    try {
-      setCompleta(await api.nfeCompleta(String(id).trim()))
-    } catch (e) { notify(e.message, 'danger') }
+    try { setCompleta(await api.nfeCompleta(String(id).trim())) }
+    catch (e) { notify(e.message, 'danger') }
   }
 
   const simularManual = () => {
@@ -125,10 +67,28 @@ export default function Nfe() {
     })
   }
 
+  const aplicarTodas = async () => {
+    const editaveis = (pendentes || []).filter((n) => n.editavel)
+    if (!editaveis.length) { notify('Não há notas pendentes (editáveis) para aplicar.', 'danger'); return }
+    const tipo = cfg?.desconto_tipo === 'valor' ? `R$ ${cfg?.desconto_valor}` : `${cfg?.desconto_valor}%`
+    if (!window.confirm(`Aplicar o desconto padrão (${tipo}${cfg?.remover_frete ? ' + zerar frete' : ''}) em TODAS as ${editaveis.length} notas pendentes e salvar no Bling?\n\nA autorização na Sefaz continua manual, no Bling.`)) return
+    setLoteRodando(true); setLoteReport(null)
+    try {
+      const r = await api.nfeAplicarTodas()
+      setLoteReport(r); carregarNotas(); carregarEventos()
+    } catch (e) {
+      setLoteReport({ erro: e.message })
+    } finally {
+      setLoteRodando(false)
+    }
+  }
+
+  const filtradas = filtrarNotas(pendentes, { busca, ordem, soEditaveis })
+
   return (
     <div className="space-y-4 max-w-6xl">
-      {/* Cabeçalho + config */}
-      <div className="glass rounded-2xl px-5 py-3 flex items-center gap-3">
+      {/* Top bar */}
+      <div className="glass rounded-2xl px-5 py-3 flex items-center gap-3 flex-wrap">
         <div className="flex items-center gap-2 text-sm font-semibold">
           <FileText size={18} className="text-accent" /> Notas fiscais (NF-e)
         </div>
@@ -136,28 +96,16 @@ export default function Nfe() {
           <div className="glass rounded-xl flex items-center gap-2 px-2 py-1.5">
             <input value={consultaId} onChange={(e) => setConsultaId(e.target.value)}
                    onKeyDown={(e) => e.key === 'Enter' && verCompleta(consultaId)}
-                   placeholder="ID da nota…"
-                   className="bg-transparent outline-none text-sm w-28 text-fg num" />
-            <button onClick={() => verCompleta(consultaId)} className="text-xs text-accent hover:underline shrink-0">Ver nota</button>
+                   placeholder="abrir por ID…"
+                   className="bg-transparent outline-none text-sm w-24 text-fg num" />
+            <button onClick={() => verCompleta(consultaId)} className="text-xs text-accent hover:underline shrink-0">ver</button>
           </div>
-          <button onClick={abrirNotificacoes}
-                  className="glass rounded-xl px-3 py-2 text-sm text-dim hover:text-fg flex items-center gap-2 relative" title="Notificações">
-            <Bell size={15} />
-            {naoVistos > 0 && (
-              <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full text-[9px] font-bold grid place-items-center text-white"
-                    style={{ background: 'var(--accent)' }}>{naoVistos > 9 ? '9+' : naoVistos}</span>
-            )}
-          </button>
-          <button
-            onClick={() => setShowCfg((v) => !v)}
-            className="glass rounded-xl px-3 py-2 text-sm text-dim hover:text-fg flex items-center gap-2"
-          >
+          <button onClick={() => setShowCfg((v) => !v)}
+                  className="glass rounded-xl px-3 py-2 text-sm text-dim hover:text-fg flex items-center gap-2">
             <Settings2 size={15} /> Regras
           </button>
-          <button
-            onClick={() => { carregarPendentes(); carregarEventos() }}
-            className="glass rounded-xl px-3 py-2 text-sm text-dim hover:text-fg flex items-center gap-2"
-          >
+          <button onClick={() => { carregarNotas(); carregarEventos() }}
+                  className="glass rounded-xl px-3 py-2 text-sm text-dim hover:text-fg flex items-center gap-2">
             <RefreshCw size={15} /> Atualizar
           </button>
         </div>
@@ -165,43 +113,264 @@ export default function Nfe() {
 
       {showCfg && cfg && <ConfigCard cfg={cfg} setCfg={setCfg} />}
 
-      {/* Card intuitivo quando chega um push novo */}
-      {novoEvento && <PushCard e={novoEvento} onVer={(id) => { verCompleta(id); setNovoEvento(null) }} onFechar={() => setNovoEvento(null)} />}
+      {/* Simulação de receita */}
+      <RevenueSim notas={pendentes} cfg={cfg} situacao={situacao} />
 
-      {/* Automação por webhook — status + atalho pro centro de notificações */}
-      <AutomacaoPanel cfg={cfg} eventos={eventos} onAbrir={abrirNotificacoes} />
+      {/* Status da automação (notificações ficam no sino global, no topo) */}
+      <AutomacaoPanel cfg={cfg} eventos={eventos} />
 
-      {/* Aviso da regra fiscal */}
-      <div className="rounded-2xl px-4 py-3 text-xs flex items-start gap-2 border border-glassb"
+      {/* Aviso fiscal compacto */}
+      <div className="rounded-xl px-4 py-2.5 text-[11px] flex items-start gap-2 border border-glassb"
            style={{ background: 'var(--glass-hover)' }}>
-        <Info size={14} className="text-accent2 mt-0.5 shrink-0" />
+        <Info size={13} className="text-accent2 mt-0.5 shrink-0" />
         <span className="text-dim">
-          O Bling só permite editar notas em situação <b className="text-fg">Pendente</b> ou
-          <b className="text-fg"> Rejeitada</b>. Notas já autorizadas, com DANFE emitida ou canceladas não podem ser alteradas.
-          A transmissão à Sefaz acontece dentro do Bling.
+          O Bling só permite editar notas <b className="text-fg">Pendentes</b> ou <b className="text-fg">Rejeitadas</b>.
+          Autorizadas, com DANFE ou canceladas são imutáveis. A transmissão à Sefaz acontece no Bling.
         </span>
       </div>
 
-      {/* Aplicar em lote — resolve o "editar nota por nota no Bling" */}
-      <LoteBar
-        qtd={Array.isArray(pendentes) ? pendentes.length : 0}
-        cfg={cfg} rodando={loteRodando} onAplicar={aplicarTodas}
-        report={loteReport} onFechar={() => setLoteReport(null)} onVerNota={verCompleta}
-      />
-
-      <div className="grid gap-4" style={{ gridTemplateColumns: 'minmax(0, 0.9fr) minmax(0, 1.4fr)' }}>
-        <PendentesPanel
-          pendentes={pendentes} blingErro={blingErro}
-          notaId={nota?.id} onAbrir={abrirNota} onSimular={simularManual} onVerCompleta={verCompleta}
+      {/* Aplicar em lote — só na visão de pendentes */}
+      {situacao === 1 && (
+        <LoteBar
+          qtd={(pendentes || []).filter((n) => n.editavel).length}
+          cfg={cfg} rodando={loteRodando} onAplicar={aplicarTodas}
+          report={loteReport} onFechar={() => setLoteReport(null)} onVerNota={verCompleta}
         />
+      )}
+
+      {/* Filtros + lista + editor */}
+      <div className="grid gap-4" style={{ gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.3fr)' }}>
+        <div className="space-y-3">
+          <FiltrosBar
+            situacao={situacao} setSituacao={setSituacao}
+            busca={busca} setBusca={setBusca}
+            ordem={ordem} setOrdem={setOrdem}
+            soEditaveis={soEditaveis} setSoEditaveis={setSoEditaveis}
+            total={(pendentes || []).length} mostrando={filtradas.length}
+          />
+          <NotasList
+            notas={filtradas} blingErro={blingErro} carregando={pendentes === null}
+            notaId={nota?.id} onAbrir={abrirNota} onVerCompleta={verCompleta} onSimular={simularManual}
+          />
+        </div>
         {nota
-          ? <Editor key={nota.id || 'manual'} nota={nota} cfg={cfg} onAplicado={() => { carregarPendentes(); carregarEventos() }} onVerCompleta={verCompleta} />
+          ? <Editor key={nota.id || 'manual'} nota={nota} cfg={cfg} onAplicado={() => { carregarNotas(); carregarEventos() }} onVerCompleta={verCompleta} />
           : <VazioEditor />}
       </div>
 
       {completa && <NfeDetalhe nota={completa} onClose={() => setCompleta(null)} />}
-      {notifAberto && <NotificacoesModal eventos={eventos} cfg={cfg} onClose={() => setNotifAberto(false)} onVerNota={(id) => { setNotifAberto(false); verCompleta(id) }} onAtualizar={carregarEventos} />}
     </div>
+  )
+}
+
+/* ----------------------- Filtros / helpers de nota --------------------- */
+function filtrarNotas(notas, { busca, ordem, soEditaveis }) {
+  let arr = Array.isArray(notas) ? [...notas] : []
+  if (soEditaveis) arr = arr.filter((n) => n.editavel)
+  const q = (busca || '').trim().toLowerCase()
+  if (q) {
+    arr = arr.filter((n) =>
+      String(n.numero ?? '').toLowerCase().includes(q) ||
+      String(n.id ?? '').includes(q) ||
+      (n.cliente || '').toLowerCase().includes(q) ||
+      (n.documento || '').toLowerCase().includes(q))
+  }
+  const [campo, dir] = (ordem || 'valor_desc').split('_')
+  arr.sort((a, b) => {
+    const va = campo === 'numero' ? Number(a.numero || 0) : (a.valor || 0)
+    const vb = campo === 'numero' ? Number(b.numero || 0) : (b.valor || 0)
+    return dir === 'asc' ? va - vb : vb - va
+  })
+  return arr
+}
+
+function corSituacao(cod) {
+  const c = Number(cod)
+  if (c === 1) return 'var(--warn)'                 // pendente
+  if (c === 4) return 'var(--danger)'               // rejeitada
+  if (c === 2 || c === 9 || c === 11) return 'var(--faint)' // cancelada/denegada/bloqueada
+  return 'var(--ok)'                                // autorizada/danfe/registrada
+}
+
+const SIT_CHIPS = [
+  { cod: 1, label: 'Pendentes' },
+  { cod: 4, label: 'Rejeitadas' },
+  { cod: 6, label: 'Autorizadas' },
+  { cod: 2, label: 'Canceladas' },
+]
+
+/* --------------------------- Simulação de receita ----------------------- */
+function RevenueSim({ notas, cfg, situacao }) {
+  const editaveis = (notas || []).filter((n) => n.editavel)
+  const bruto = editaveis.reduce((s, n) => s + (n.valor || 0), 0)
+  const pct = cfg?.desconto_tipo !== 'valor'
+  const descPct = Number(cfg?.desconto_valor || 0)
+  const desconto = pct ? bruto * descPct / 100 : null
+  const liquido = desconto != null ? bruto - desconto : null
+  const pLiq = bruto > 0 && liquido != null ? Math.max(2, Math.min(100, (liquido / bruto) * 100)) : 100
+
+  return (
+    <div className="glass rounded-2xl p-5">
+      <div className="flex items-center gap-2 mb-4">
+        <div className="h-9 w-9 rounded-xl grid place-items-center shrink-0" style={{ background: 'linear-gradient(135deg, var(--accent), var(--accent2))' }}>
+          <TrendingDown size={17} className="text-white" />
+        </div>
+        <div className="min-w-0">
+          <div className="text-sm font-semibold">Simulação de receita</div>
+          <div className="text-[11px] text-dim">Impacto do desconto padrão nas {editaveis.length} nota(s) editável(is) do filtro atual</div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <SimMini label="Notas editáveis" valor={String(editaveis.length)} />
+        <SimMini label="Receita bruta" valor={brl(bruto)} />
+        <SimMini label={pct ? `Desconto (${descPct}%)` : 'Desconto (R$/item)'} valor={desconto != null ? '− ' + brl(desconto) : 'por item'} cor="var(--accent)" />
+        <SimMini label="Receita líquida" valor={liquido != null ? brl(liquido) : '—'} cor="var(--ok)" forte />
+      </div>
+
+      {desconto != null && bruto > 0 && (
+        <div className="mt-4">
+          <div className="h-2.5 rounded-full overflow-hidden flex" style={{ background: 'var(--glass-hover)' }}>
+            <div style={{ width: pLiq + '%', background: 'var(--ok)' }} />
+            <div style={{ width: (100 - pLiq) + '%', background: 'var(--accent)' }} />
+          </div>
+          <div className="flex justify-between text-[10px] text-faint mt-1 num">
+            <span>líquido {brl(liquido)}</span>
+            <span>desconto {brl(desconto)}</span>
+          </div>
+        </div>
+      )}
+
+      {!pct && (
+        <div className="mt-3 text-[11px] text-dim flex items-start gap-1.5">
+          <Info size={12} className="mt-0.5 shrink-0" /> Desconto em R$ é aplicado por item — a simulação exata depende da quantidade de itens de cada nota.
+        </div>
+      )}
+      {situacao !== 1 && (
+        <div className="mt-3 text-[11px] text-faint flex items-center gap-1.5">
+          <Lock size={11} /> Você está vendo notas não pendentes; a simulação considera apenas as editáveis.
+        </div>
+      )}
+    </div>
+  )
+}
+
+function SimMini({ label, valor, cor = 'var(--fg)', forte = false }) {
+  return (
+    <div className="rounded-xl px-3 py-2.5" style={{ background: 'var(--glass-hover)' }}>
+      <div className="text-[10px] text-dim uppercase tracking-wide">{label}</div>
+      <div className={`num ${forte ? 'text-lg font-bold' : 'text-base font-semibold'} mt-0.5 truncate`} style={{ color: cor }}>{valor}</div>
+    </div>
+  )
+}
+
+/* ------------------------------- Filtros bar ---------------------------- */
+function FiltrosBar({ situacao, setSituacao, busca, setBusca, ordem, setOrdem, soEditaveis, setSoEditaveis, total, mostrando }) {
+  return (
+    <div className="glass rounded-2xl p-4 space-y-3">
+      <div className="flex items-center gap-1.5 flex-wrap">
+        {SIT_CHIPS.map((c) => (
+          <button key={c.cod} onClick={() => setSituacao(c.cod)}
+                  className="text-xs px-3 py-1.5 rounded-full font-medium transition"
+                  style={situacao === c.cod
+                    ? { background: 'var(--accent)', color: '#fff' }
+                    : { background: 'var(--glass-hover)', color: 'var(--text-dim)' }}>
+            {c.label}
+          </button>
+        ))}
+      </div>
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="glass rounded-xl flex items-center gap-2 px-3 py-2 flex-1 min-w-[150px]">
+          <Search size={14} className="text-faint shrink-0" />
+          <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="buscar nº ou cliente…"
+                 className="bg-transparent outline-none text-sm w-full text-fg" />
+        </div>
+        <select value={ordem} onChange={(e) => setOrdem(e.target.value)}
+                className="glass rounded-xl px-3 py-2 text-sm text-dim bg-transparent outline-none cursor-pointer">
+          <option value="valor_desc">Maior valor</option>
+          <option value="valor_asc">Menor valor</option>
+          <option value="numero_desc">Nº ↓</option>
+          <option value="numero_asc">Nº ↑</option>
+        </select>
+        <button onClick={() => setSoEditaveis((v) => !v)}
+                className="text-xs px-3 py-2 rounded-xl font-medium flex items-center gap-1.5 shrink-0"
+                style={soEditaveis
+                  ? { background: 'color-mix(in srgb, var(--ok) 18%, transparent)', color: 'var(--ok)' }
+                  : { background: 'var(--glass-hover)', color: 'var(--text-dim)' }}>
+          <ToggleRight size={14} /> só editáveis
+        </button>
+      </div>
+      <div className="text-[11px] text-faint num">{mostrando} de {total} nota(s)</div>
+    </div>
+  )
+}
+
+/* -------------------------------- Lista --------------------------------- */
+function NotasList({ notas, blingErro, carregando, notaId, onAbrir, onVerCompleta, onSimular }) {
+  return (
+    <div className="glass rounded-2xl p-4">
+      {blingErro ? (
+        <div className="text-center py-8">
+          <Plug size={22} className="text-faint mx-auto mb-2" />
+          <div className="text-sm font-medium">Não foi possível listar as notas</div>
+          <div className="text-xs text-dim mt-1">Conecte o Bling no topo e tente Atualizar.</div>
+        </div>
+      ) : carregando ? (
+        <div className="text-xs text-dim py-6 text-center">Carregando notas…</div>
+      ) : notas.length === 0 ? (
+        <div className="text-center py-8">
+          <Inbox size={22} className="text-faint mx-auto mb-2" />
+          <div className="text-sm font-medium">Nenhuma nota neste filtro</div>
+          <div className="text-xs text-dim mt-1">Ajuste a situação ou a busca acima.</div>
+        </div>
+      ) : (
+        <div className="space-y-2 max-h-[58vh] overflow-y-auto pr-1">
+          {notas.map((n) => (
+            <NotaCard key={n.id || n.numero} n={n} ativo={n.id === notaId} onAbrir={onAbrir} onVer={onVerCompleta} />
+          ))}
+        </div>
+      )}
+      <div className="mt-3 pt-3 border-t border-glassb">
+        <button onClick={onSimular} className="w-full glass rounded-xl py-2 text-sm text-dim hover:text-accent flex items-center justify-center gap-2">
+          <Zap size={15} /> Simular manualmente
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function NotaCard({ n, ativo, onAbrir, onVer }) {
+  const cor = corSituacao(n.situacao)
+  const acao = () => (n.editavel ? onAbrir(n.id) : onVer(n.id))
+  return (
+    <div className={`rounded-xl border px-3 py-2.5 flex items-center gap-3 transition ${ativo ? 'border-accent' : 'border-glassb hover:bg-[var(--glass-hover)]'}`}>
+      <button onClick={acao} className="min-w-0 flex-1 text-left">
+        <div className="text-sm font-medium truncate">{n.cliente || `Nota ${n.numero ?? ''}`}</div>
+        <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+          <Badge>{`nº ${n.numero ?? '—'}`}</Badge>
+          <Badge cor={cor}>{n.situacao_label}</Badge>
+          {n.editavel && <Badge cor="var(--ok)">editável</Badge>}
+        </div>
+      </button>
+      <div className="text-right shrink-0">
+        <div className="num text-sm font-semibold">{brl(n.valor)}</div>
+        <div className="flex items-center gap-1 justify-end mt-1">
+          <button onClick={() => onVer(n.id)} title="Ver nota completa" className="text-faint hover:text-accent p-0.5"><Eye size={14} /></button>
+          <button onClick={acao} title={n.editavel ? 'Editar desconto' : 'Ver nota'} className="text-faint hover:text-fg p-0.5"><ChevronRight size={15} /></button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function Badge({ children, cor }) {
+  return (
+    <span className="text-[10px] px-1.5 py-0.5 rounded num font-medium"
+          style={cor
+            ? { background: 'color-mix(in srgb, ' + cor + ' 16%, transparent)', color: cor }
+            : { background: 'var(--glass-hover)', color: 'var(--text-dim)' }}>
+      {children}
+    </span>
   )
 }
 
@@ -293,29 +462,7 @@ function LoteReport({ report, onFechar, onVerNota }) {
 }
 
 /* --------------------------- Automação (webhook) ------------------------ */
-const STATUS_NFE = {
-  aplicado:       { icon: CheckCircle2, cor: 'var(--ok)',     label: 'Desconto aplicado' },
-  nao_editavel:   { icon: Lock,         cor: 'var(--faint)',  label: 'Não editável' },
-  nao_encontrada: { icon: HelpCircle,   cor: 'var(--warn)',   label: 'Nota não encontrada (404)' },
-  auto_desligado: { icon: PauseCircle,  cor: 'var(--faint)',  label: 'Automático desligado' },
-  erro_aplicar:   { icon: AlertTriangle, cor: 'var(--danger)', label: 'Erro ao aplicar' },
-  erro_busca:     { icon: AlertTriangle, cor: 'var(--danger)', label: 'Erro ao buscar' },
-  erro_inesperado:{ icon: AlertTriangle, cor: 'var(--danger)', label: 'Erro inesperado' },
-}
-
-function statusEvento(res) {
-  if (!res) return { icon: Clock, cor: 'var(--faint)', label: 'Processando…', detalhe: null }
-  if (res.ok && res.aplicado) {
-    return { icon: CheckCircle2, cor: 'var(--ok)',
-             label: 'Desconto aplicado', detalhe: res.total_nota != null ? `total ${brl(res.total_nota)}` : null }
-  }
-  const m = STATUS_NFE[res.motivo] || { icon: Info, cor: 'var(--faint)', label: res.motivo || 'registrado' }
-  let detalhe = res.situacao_label || res.detalhe || null
-  if (detalhe && detalhe.length > 90) detalhe = detalhe.slice(0, 90) + '…'
-  return { ...m, detalhe }
-}
-
-function AutomacaoPanel({ cfg, eventos, onAbrir }) {
+function AutomacaoPanel({ cfg, eventos }) {
   const autoOn = !!cfg?.auto
   const lista = Array.isArray(eventos) ? eventos : []
   const aplicados = lista.filter((e) => e.resultado?.ok && e.resultado?.aplicado).length
@@ -339,14 +486,10 @@ function AutomacaoPanel({ cfg, eventos, onAbrir }) {
           </div>
           <div className="text-[11px] text-dim mt-0.5">
             {autoOn
-              ? <>Cada NF-e <b className="text-fg">pendente</b> que o Bling empurrar recebe o desconto padrão automaticamente.</>
+              ? <>Cada NF-e <b className="text-fg">pendente</b> que o Bling empurrar recebe o desconto padrão automaticamente. Acompanhe pelo <b className="text-fg">sino</b> no topo.</>
               : <>Ligue o <b className="text-fg">Modo automático</b> nas Regras para aplicar o desconto sozinho ao chegar cada nota.</>}
           </div>
         </div>
-        <button onClick={onAbrir}
-                className="glass rounded-xl px-3 py-2 text-xs text-dim hover:text-fg flex items-center gap-2 shrink-0">
-          <Bell size={14} /> Notificações
-        </button>
       </div>
 
       {lista.length > 0 && (
@@ -354,112 +497,8 @@ function AutomacaoPanel({ cfg, eventos, onAbrir }) {
           <span className="flex items-center gap-1.5"><CheckCircle2 size={13} style={{ color: 'var(--ok)' }} /> {aplicados} aplicada(s)</span>
           <span className="flex items-center gap-1.5"><Activity size={13} className="text-faint" /> {lista.length} evento(s) recebido(s)</span>
           {temNaoEncontrada && <span className="flex items-center gap-1.5" style={{ color: 'var(--warn)' }}><HelpCircle size={13} /> algumas notas não encontradas (id de pedido, não da nota)</span>}
-          <button onClick={onAbrir} className="text-accent hover:underline ml-auto">ver detalhes →</button>
         </div>
       )}
-    </div>
-  )
-}
-
-/* ------------------------- Notificações (push) -------------------------- */
-function PushCard({ e, onVer, onFechar }) {
-  const s = statusEvento(e.resultado)
-  const Icon = s.icon
-  return (
-    <div className="rounded-2xl p-4 border flex items-center gap-3"
-         style={{ borderColor: 'var(--accent)', background: 'color-mix(in srgb, var(--accent) 10%, var(--bg))',
-                  boxShadow: '0 8px 28px color-mix(in srgb, var(--accent) 22%, transparent)' }}>
-      <div className="h-10 w-10 rounded-xl grid place-items-center shrink-0" style={{ background: 'color-mix(in srgb, ' + s.cor + ' 20%, transparent)' }}>
-        <Icon size={18} style={{ color: s.cor }} />
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="text-sm font-semibold flex items-center gap-1.5"><Sparkles size={13} style={{ color: 'var(--accent)' }} /> Nova notificação do Bling</div>
-        <div className="text-xs text-dim mt-0.5">
-          {e.resultado?.numero ? <>NF-e nº {e.resultado.numero} — </> : <>Evento {e.entidade_id} — </>}
-          <span style={{ color: s.cor }}>{s.label}</span>{s.detalhe ? ` · ${s.detalhe}` : ''}
-        </div>
-      </div>
-      {e.entidade_id && <button onClick={() => onVer(e.entidade_id)} className="text-xs rounded-lg px-3 py-1.5 font-medium text-white shrink-0" style={{ background: 'var(--accent)' }}>Ver nota</button>}
-      <button onClick={onFechar} className="text-faint hover:text-fg p-1 shrink-0"><X size={16} /></button>
-    </div>
-  )
-}
-
-function NotificacoesModal({ eventos, cfg, onClose, onVerNota, onAtualizar }) {
-  const lista = Array.isArray(eventos) ? eventos : []
-  const autoOn = !!cfg?.auto
-  const aplicados = lista.filter((e) => e.resultado?.ok && e.resultado?.aplicado).length
-  return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center p-4 sm:p-8 overflow-y-auto"
-         style={{ background: 'rgba(0,0,0,.6)', backdropFilter: 'blur(3px)' }} onClick={onClose}>
-      <div className="glass rounded-2xl w-full max-w-lg my-auto" onClick={(e) => e.stopPropagation()} style={{ background: 'var(--bg)' }}>
-        <div className="flex items-center gap-3 p-5 border-b" style={{ borderColor: 'var(--glass-border)' }}>
-          <div className="h-10 w-10 rounded-xl grid place-items-center shrink-0" style={{ background: 'linear-gradient(135deg, var(--accent), var(--accent2))' }}>
-            <Bell size={18} className="text-white" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="font-display font-semibold">Notificações</div>
-            <div className="text-[11px] text-dim">O que a aplicação fez com os eventos que o Bling enviou</div>
-          </div>
-          <button onClick={onAtualizar} className="text-faint hover:text-fg p-1" title="Atualizar"><RefreshCw size={15} /></button>
-          <button onClick={onClose} className="text-dim hover:text-fg p-1"><X size={20} /></button>
-        </div>
-        <div className="p-4">
-          {!autoOn && lista.length > 0 && (
-            <div className="mb-3 rounded-xl px-3 py-2 text-[11px] flex items-center gap-2" style={{ background: 'var(--glass-hover)', color: 'var(--dim)' }}>
-              <PauseCircle size={13} /> Modo automático desligado — os pushes são registrados, mas o desconto não é aplicado sozinho.
-            </div>
-          )}
-          {aplicados > 0 && (
-            <div className="mb-3 text-[11px] text-dim flex items-center gap-1.5"><CheckCircle2 size={13} style={{ color: 'var(--ok)' }} /> {aplicados} nota(s) com desconto aplicado automaticamente.</div>
-          )}
-          {lista.length === 0 ? (
-            <div className="text-center py-10">
-              <div className="h-12 w-12 rounded-2xl grid place-items-center mx-auto mb-3" style={{ background: 'var(--glass-hover)' }}><Bell size={20} className="text-faint" /></div>
-              <div className="text-sm font-medium">Nenhuma notificação ainda</div>
-              <div className="text-xs text-dim mt-1">Quando o Bling enviar um evento de NF-e, ele aparece aqui com o que o sistema fez.</div>
-            </div>
-          ) : (
-            <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
-              {lista.map((e) => <NotifCard key={e.id} e={e} onVerNota={onVerNota} />)}
-            </div>
-          )}
-          {lista.some((e) => e.resultado?.motivo === 'nao_encontrada') && (
-            <div className="mt-3 rounded-xl px-3 py-2 text-[11px] flex items-start gap-2 border"
-                 style={{ borderColor: 'var(--warn)', background: 'color-mix(in srgb, var(--warn) 8%, transparent)' }}>
-              <HelpCircle size={13} className="mt-0.5 shrink-0" style={{ color: 'var(--warn)' }} />
-              <span className="text-dim">
-                <b className="text-fg">Nota não encontrada (404):</b> o evento trouxe o ID do <b className="text-fg">pedido</b> (ou outro recurso),
-                não o da NF-e — ou a nota foi removida. Nesses casos não há o que aplicar.
-              </span>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function NotifCard({ e, onVerNota }) {
-  const s = statusEvento(e.resultado)
-  const Icon = s.icon
-  return (
-    <div className="rounded-xl border border-glassb p-3 flex items-start gap-3" style={{ background: 'var(--glass-hover)' }}>
-      <div className="h-8 w-8 rounded-lg grid place-items-center shrink-0 mt-0.5" style={{ background: 'color-mix(in srgb, ' + s.cor + ' 18%, transparent)' }}>
-        <Icon size={15} style={{ color: s.cor }} />
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium" style={{ color: s.cor }}>{s.label}</div>
-        <div className="text-[11px] text-dim mt-0.5 num">
-          {e.resultado?.numero ? <>NF-e nº {e.resultado.numero}</> : <>id {e.entidade_id}</>}
-          {s.detalhe ? ` · ${s.detalhe}` : ''}
-        </div>
-        <div className="text-[10px] text-faint num mt-1 flex items-center gap-1.5 flex-wrap">
-          {e.evento && <span>{e.evento}</span>}
-          {e.quando && <span>· {fmtQuando(e.quando)}</span>}
-        </div>
-      </div>
-      {e.entidade_id && <button onClick={() => onVerNota(e.entidade_id)} className="text-[11px] text-accent hover:underline shrink-0 flex items-center gap-1 mt-0.5"><Eye size={12} /> ver</button>}
     </div>
   )
 }
@@ -497,59 +536,6 @@ function ConfigCard({ cfg, setCfg }) {
           <input type="number" value={cfg.situacao_pendente} onChange={(e) => salvar({ situacao_pendente: Number(e.target.value) })}
                  className="w-24 bg-glass border border-glassb rounded-xl px-3 py-2 text-sm outline-none focus:border-accent num" />
         </label>
-      </div>
-    </div>
-  )
-}
-
-/* ----------------------------- Pendentes -------------------------------- */
-function PendentesPanel({ pendentes, blingErro, notaId, onAbrir, onSimular, onVerCompleta }) {
-  return (
-    <div className="glass rounded-2xl p-5">
-      <div className="text-sm font-semibold mb-3 flex items-center gap-2">
-        <FileText size={16} className="text-accent" /> Notas pendentes
-      </div>
-
-      {blingErro ? (
-        <div className="text-center py-6">
-          <div className="h-12 w-12 rounded-2xl grid place-items-center mx-auto mb-3" style={{ background: 'var(--glass-hover)' }}>
-            <Plug size={20} className="text-accent" />
-          </div>
-          <div className="text-sm font-medium">Conecte o Bling</div>
-          <div className="text-xs text-dim mt-1">Suas notas pendentes aparecem aqui assim que a conta Bling estiver autorizada.</div>
-        </div>
-      ) : pendentes === null ? (
-        <div className="text-xs text-dim py-4">Carregando…</div>
-      ) : pendentes.length === 0 ? (
-        <div className="text-xs text-dim py-4">Nenhuma nota pendente no momento.</div>
-      ) : (
-        <div className="space-y-2">
-          {pendentes.map((n) => {
-            const id = n.id || n.numero
-            return (
-              <div key={id}
-                   className={`w-full rounded-xl border px-3 py-2.5 flex items-center gap-2 transition ${id === notaId ? 'border-accent' : 'border-glassb hover:bg-[var(--glass-hover)]'}`}>
-                <button onClick={() => onAbrir(id)} className="min-w-0 flex-1 text-left">
-                  <div className="text-sm font-medium truncate">{(n.contato?.nome) || n.contato || `Nota ${n.numero || id}`}</div>
-                  <div className="text-[11px] text-faint">Nº {n.numero || '—'} · série {n.serie || '—'}</div>
-                </button>
-                {id && (
-                  <button onClick={() => onVerCompleta(id)} title="Ver nota completa"
-                          className="text-faint hover:text-accent p-1 shrink-0"><Eye size={15} /></button>
-                )}
-                <button onClick={() => onAbrir(id)} className="text-faint hover:text-fg p-1 shrink-0" title="Editar desconto">
-                  <ChevronRight size={16} />
-                </button>
-              </div>
-            )
-          })}
-        </div>
-      )}
-
-      <div className="mt-4 pt-4 border-t border-glassb">
-        <button onClick={onSimular} className="w-full glass rounded-xl py-2 text-sm text-dim hover:text-accent flex items-center justify-center gap-2">
-          <Zap size={15} /> Simular manualmente
-        </button>
       </div>
     </div>
   )
