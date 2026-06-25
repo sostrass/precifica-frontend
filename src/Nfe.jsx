@@ -3,8 +3,23 @@ import {
   FileText, Settings2, Plug, RefreshCw, Plus, Trash2, Send, Percent, DollarSign,
   Truck, Lock, ChevronRight, Zap, Info, X, Download, ExternalLink, User, Receipt, MapPin,
   CheckCircle2, AlertTriangle, Clock, HelpCircle, PauseCircle, Activity, Hash, CreditCard,
-  Eye, Landmark, ShieldCheck, Bell, Sparkles, TrendingDown, Search, ToggleRight, Users, Inbox,
+  Eye, Landmark, ShieldCheck, Bell, Sparkles, TrendingDown, Search, ToggleRight, Users, Inbox, ShoppingBag,
 } from 'lucide-react'
+
+const PLATAFORMA_COR = {
+  'Shopee': '#EE4D2D', 'Mercado Livre': '#2D8CFF', 'Amazon': '#FF9900',
+  'Magalu': '#0086FF', 'Americanas': '#E60014', 'TikTok Shop': '#FE2C55',
+}
+function PlataformaBadge({ nome }) {
+  if (!nome) return null
+  const cor = PLATAFORMA_COR[nome] || 'var(--accent2)'
+  return (
+    <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold inline-flex items-center gap-1"
+          style={{ background: 'color-mix(in srgb, ' + cor + ' 18%, transparent)', color: cor }}>
+      <ShoppingBag size={10} /> {nome}
+    </span>
+  )
+}
 import { api } from './api.js'
 import { useToast } from './toast.jsx'
 
@@ -350,6 +365,7 @@ function NotaCard({ n, ativo, onAbrir, onVer }) {
           <Badge>{`nº ${n.numero ?? '—'}`}</Badge>
           <Badge cor={cor}>{n.situacao_label}</Badge>
           {n.editavel && <Badge cor="var(--ok)">editável</Badge>}
+          <PlataformaBadge nome={n.plataforma} />
         </div>
       </button>
       <div className="text-right shrink-0">
@@ -602,8 +618,10 @@ function Editor({ nota, cfg, onAplicado, onVerCompleta }) {
       <div className="flex items-start justify-between gap-3 pb-3 border-b border-glassb">
         <div className="min-w-0">
           <div className="text-sm font-semibold truncate">{nota.contato || 'Nota'}</div>
-          <div className="text-[11px] text-faint mt-0.5">
+          <div className="text-[11px] text-faint mt-0.5 flex items-center gap-1.5 flex-wrap">
             {nota._manual ? 'Simulação manual' : `Nota nº ${nota.numero || '—'} · série ${nota.serie || '—'}`}
+            {nota.documento && <span className="num">· doc {nota.documento}</span>}
+            {!nota._manual && <PlataformaBadge nome={nota.plataforma} />}
           </div>
         </div>
         {nota._manual
@@ -673,6 +691,20 @@ function Editor({ nota, cfg, onAplicado, onVerCompleta }) {
 
       {/* Resumo + aplicar */}
       <Resumo resumo={resumo} />
+
+      {!nota._manual && Array.isArray(nota.parcelas) && nota.parcelas.length > 0 && (
+        <div className="mt-3 pt-3 border-t border-glassb">
+          <div className="text-[11px] text-dim mb-2 flex items-center gap-1.5"><CreditCard size={12} /> Parcelas (atualizadas ao aplicar)</div>
+          <div className="space-y-1">
+            {nota.parcelas.map((p, i) => (
+              <div key={i} className="flex items-center justify-between text-[12px]">
+                <span className="text-faint num">{p.data || `Parcela ${i + 1}`}</span>
+                <span className="num text-dim">{brl(p.valor)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {!nota._manual && (
         <>
@@ -815,6 +847,7 @@ function NfeDetalhe({ nota, onClose }) {
               {n.finalidade_label && <span className="text-[11px] px-2 py-0.5 rounded-full" style={{ background: 'var(--glass-hover)', color: 'var(--text-dim)' }}>{n.finalidade_label}</span>}
               {n.data_emissao && <span className="text-[11px] text-faint num">{n.data_emissao}</span>}
               {n.simples_nacional && <span className="text-[11px] px-2 py-0.5 rounded-full flex items-center gap-1" style={{ background: 'var(--glass-hover)', color: 'var(--accent2)' }}><ShieldCheck size={11} /> Simples Nacional</span>}
+              <PlataformaBadge nome={n.plataforma} />
               {n.pedido_loja && <span className="text-[11px] text-faint num flex items-center gap-1"><Hash size={10} /> pedido {n.pedido_loja}</span>}
             </div>
           </div>
