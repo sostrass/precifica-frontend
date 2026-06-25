@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   FileText, Settings2, Plug, RefreshCw, Plus, Trash2, Send, Percent, DollarSign,
   Truck, Lock, ChevronRight, Zap, Info, X, Download, ExternalLink, User, Receipt, MapPin,
   CheckCircle2, AlertTriangle, Clock, HelpCircle, PauseCircle, Activity, Hash, CreditCard,
-  Eye, Landmark, ShieldCheck,
+  Eye, Landmark, ShieldCheck, Bell, Sparkles,
 } from 'lucide-react'
 import { api } from './api.js'
 import { useToast } from './toast.jsx'
@@ -27,6 +27,56 @@ export default function Nfe() {
   const [completa, setCompleta] = useState(null)
   const [consultaId, setConsultaId] = useState('')
   const [eventos, setEventos] = useState(null)
+  const [notifAberto, setNotifAberto] = useState(false)
+  const [novoEvento, setNovoEvento] = useState(null)
+  const [ultimoVistoId, setUltimoVistoId] = useState(0)
+  const maxIdRef = useRef(0)
+  const primeiraRef = useRef(true)
+
+  // Detecta eventos novos (push) ao atualizar a lista
+  useEffect(() => {
+    if (!Array.isArray(eventos) || eventos.length === 0) return
+    const maxId = Math.max(...eventos.map((e) => e.id))
+    if (primeiraRef.current) {
+      primeiraRef.current = false
+      maxIdRef.current = maxId
+      setUltimoVistoId(maxId)
+      return
+    }
+    if (maxId > maxIdRef.current) {
+      const novos = eventos.filter((e) => e.id > maxIdRef.current)
+      maxIdRef.current = maxId
+      if (novos[0]) setNovoEvento(novos[0])
+    }
+  }, [eventos])
+
+  // Polling leve: busca eventos novos a cada 30s
+  useEffect(() => {
+    const t = setInterval(() => { carregarEventos() }, 30000)
+    return () => clearInterval(t)
+  }, [])
+
+  const naoVistos = Array.isArray(eventos) ? eventos.filter((e) => e.id > ultimoVistoId).length : 0
+  const abrirNotificacoes = () => { setNotifAberto(true); setUltimoVistoId(maxIdRef.current) }
+  const [loteRodando, setLoteRodando] = useState(false)
+  const [loteReport, setLoteReport] = useState(null)
+
+  const aplicarTodas = async () => {
+    const n = Array.isArray(pendentes) ? pendentes.length : 0
+    if (!n) { notify('Não há notas pendentes para aplicar.', 'danger'); return }
+    const tipo = cfg?.desconto_tipo === 'valor' ? `R$ ${cfg?.desconto_valor}` : `${cfg?.desconto_valor}%`
+    if (!window.confirm(`Aplicar o desconto padrão (${tipo}${cfg?.remover_frete ? ' + zerar frete' : ''}) em TODAS as ${n} notas pendentes e salvar no Bling?\n\nA autorização na Sefaz continua manual, no Bling.`)) return
+    setLoteRodando(true); setLoteReport(null)
+    try {
+      const r = await api.nfeAplicarTodas()
+      setLoteReport(r)
+      carregarPendentes(); carregarEventos()
+    } catch (e) {
+      setLoteReport({ erro: e.message })
+    } finally {
+      setLoteRodando(false)
+    }
+  }
 
   useEffect(() => {
     api.nfeConfig().then(setCfg).catch(() => {})
@@ -90,6 +140,14 @@ export default function Nfe() {
                    className="bg-transparent outline-none text-sm w-28 text-fg num" />
             <button onClick={() => verCompleta(consultaId)} className="text-xs text-accent hover:underline shrink-0">Ver nota</button>
           </div>
+          <button onClick={abrirNotificacoes}
+                  className="glass rounded-xl px-3 py-2 text-sm text-dim hover:text-fg flex items-center gap-2 relative" title="Notificações">
+            <Bell size={15} />
+            {naoVistos > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full text-[9px] font-bold grid place-items-center text-white"
+                    style={{ background: 'var(--accent)' }}>{naoVistos > 9 ? '9+' : naoVistos}</span>
+            )}
+          </button>
           <button
             onClick={() => setShowCfg((v) => !v)}
             className="glass rounded-xl px-3 py-2 text-sm text-dim hover:text-fg flex items-center gap-2"
@@ -107,8 +165,11 @@ export default function Nfe() {
 
       {showCfg && cfg && <ConfigCard cfg={cfg} setCfg={setCfg} />}
 
-      {/* Automação por webhook — o que o Bling empurrou e o que o sistema fez */}
-      <AutomacaoPanel cfg={cfg} eventos={eventos} onVerNota={verCompleta} onAtualizar={carregarEventos} />
+      {/* Card intuitivo quando chega um push novo */}
+      {novoEvento && <PushCard e={novoEvento} onVer={(id) => { verCompleta(id); setNovoEvento(null) }} onFechar={() => setNovoEvento(null)} />}
+
+      {/* Automação por webhook — status + atalho pro centro de notificações */}
+      <AutomacaoPanel cfg={cfg} eventos={eventos} onAbrir={abrirNotificacoes} />
 
       {/* Aviso da regra fiscal */}
       <div className="rounded-2xl px-4 py-3 text-xs flex items-start gap-2 border border-glassb"
@@ -121,6 +182,13 @@ export default function Nfe() {
         </span>
       </div>
 
+      {/* Aplicar em lote — resolve o "editar nota por nota no Bling" */}
+      <LoteBar
+        qtd={Array.isArray(pendentes) ? pendentes.length : 0}
+        cfg={cfg} rodando={loteRodando} onAplicar={aplicarTodas}
+        report={loteReport} onFechar={() => setLoteReport(null)} onVerNota={verCompleta}
+      />
+
       <div className="grid gap-4" style={{ gridTemplateColumns: 'minmax(0, 0.9fr) minmax(0, 1.4fr)' }}>
         <PendentesPanel
           pendentes={pendentes} blingErro={blingErro}
@@ -132,6 +200,94 @@ export default function Nfe() {
       </div>
 
       {completa && <NfeDetalhe nota={completa} onClose={() => setCompleta(null)} />}
+      {notifAberto && <NotificacoesModal eventos={eventos} cfg={cfg} onClose={() => setNotifAberto(false)} onVerNota={(id) => { setNotifAberto(false); verCompleta(id) }} onAtualizar={carregarEventos} />}
+    </div>
+  )
+}
+
+/* --------------------------- Aplicar em lote ---------------------------- */
+function LoteBar({ qtd, cfg, rodando, onAplicar, report, onFechar, onVerNota }) {
+  const tipo = cfg?.desconto_tipo === 'valor' ? `R$ ${cfg?.desconto_valor}` : `${cfg?.desconto_valor ?? 0}%`
+  const semDesconto = !cfg || !Number(cfg?.desconto_valor)
+  return (
+    <div className="rounded-2xl p-5 border" style={{ borderColor: 'var(--accent)', background: 'color-mix(in srgb, var(--accent) 7%, transparent)' }}>
+      <div className="flex items-center gap-4 flex-wrap">
+        <div className="h-10 w-10 rounded-xl grid place-items-center shrink-0" style={{ background: 'linear-gradient(135deg, var(--accent), var(--accent2))' }}>
+          <Send size={18} className="text-white" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-semibold">Aplicar o desconto em todas as pendentes de uma vez</div>
+          <div className="text-[11px] text-dim mt-0.5">
+            Aplica <b className="text-fg">{tipo}{cfg?.remover_frete ? ' + zerar frete' : ''}</b> em <b className="text-fg">{qtd}</b> nota(s)
+            e salva no Bling — você não precisa editar nota por nota lá. A autorização na Sefaz segue manual, no Bling.
+          </div>
+        </div>
+        <button onClick={onAplicar} disabled={rodando || !qtd || semDesconto}
+                className="rounded-xl px-4 py-2.5 font-semibold text-white flex items-center gap-2 disabled:opacity-50 shrink-0"
+                style={{ background: 'var(--accent)' }}>
+          {rodando ? <RefreshCw size={16} className="animate-spin" /> : <Send size={16} />}
+          {rodando ? 'Aplicando…' : `Aplicar nas ${qtd} pendentes`}
+        </button>
+      </div>
+
+      {semDesconto && (
+        <div className="mt-3 text-[11px] flex items-center gap-1.5" style={{ color: 'var(--warn)' }}>
+          <Info size={12} /> Defina o desconto padrão em <b>Regras</b> antes de aplicar em lote.
+        </div>
+      )}
+
+      {report && <LoteReport report={report} onFechar={onFechar} onVerNota={onVerNota} />}
+    </div>
+  )
+}
+
+function LoteReport({ report, onFechar, onVerNota }) {
+  if (report.erro) {
+    return (
+      <div className="mt-4 rounded-xl px-3 py-3 border flex items-start gap-2" style={{ borderColor: 'var(--danger)', background: 'color-mix(in srgb, var(--danger) 8%, transparent)' }}>
+        <AlertTriangle size={15} className="mt-0.5 shrink-0" style={{ color: 'var(--danger)' }} />
+        <div className="min-w-0 flex-1">
+          <div className="text-xs font-medium" style={{ color: 'var(--danger)' }}>Não foi possível processar o lote</div>
+          <div className="text-[11px] text-dim mt-0.5 break-words">{report.erro}</div>
+        </div>
+        <button onClick={onFechar} className="text-faint hover:text-fg p-0.5"><X size={14} /></button>
+      </div>
+    )
+  }
+  const rel = report.relatorio || []
+  const ok = report.aplicadas ?? rel.filter((r) => r.ok).length
+  const falhas = rel.filter((r) => !r.ok)
+  return (
+    <div className="mt-4 rounded-xl border border-glassb overflow-hidden" style={{ background: 'var(--bg)' }}>
+      <div className="px-3 py-2.5 flex items-center gap-2 border-b border-glassb">
+        <CheckCircle2 size={15} style={{ color: ok ? 'var(--ok)' : 'var(--faint)' }} />
+        <div className="text-xs font-medium">
+          {ok} de {report.processadas} nota(s) com desconto aplicado e salvo no Bling
+          {falhas.length > 0 && <span className="text-faint font-normal"> · {falhas.length} com erro</span>}
+        </div>
+        <button onClick={onFechar} className="ml-auto text-faint hover:text-fg p-0.5"><X size={14} /></button>
+      </div>
+      <div className="max-h-64 overflow-y-auto divide-y" style={{ borderColor: 'var(--glass-border)' }}>
+        {rel.map((r, i) => (
+          <div key={i} className="px-3 py-2 flex items-center gap-2.5 text-xs" style={{ borderColor: 'var(--glass-border)' }}>
+            {r.ok
+              ? <CheckCircle2 size={14} className="shrink-0" style={{ color: 'var(--ok)' }} />
+              : <AlertTriangle size={14} className="shrink-0" style={{ color: 'var(--danger)' }} />}
+            <div className="min-w-0 flex-1">
+              <div className="font-medium">Nota nº {r.numero || r.id}</div>
+              {r.ok
+                ? <div className="text-[10px] text-faint num">total {brl(r.total_nota)}{r.total_desconto ? ` · desconto ${brl(r.total_desconto)}` : ''}</div>
+                : <div className="text-[10px] num" style={{ color: 'var(--danger)' }}>{r.erro}</div>}
+            </div>
+            {r.id && <button onClick={() => onVerNota(r.id)} className="text-[11px] text-accent hover:underline shrink-0 flex items-center gap-1"><Eye size={12} /> ver</button>}
+          </div>
+        ))}
+      </div>
+      {falhas.length > 0 && (
+        <div className="px-3 py-2 text-[11px] text-dim border-t border-glassb" style={{ background: 'var(--glass-hover)' }}>
+          As notas com erro mostram a mensagem exata do Bling. Se for sobre campo do schema (ex.: contato/CFOP), me mande o texto que eu ajusto o envio.
+        </div>
+      )}
     </div>
   )
 }
@@ -159,11 +315,11 @@ function statusEvento(res) {
   return { ...m, detalhe }
 }
 
-function AutomacaoPanel({ cfg, eventos, onVerNota, onAtualizar }) {
-  const [aberto, setAberto] = useState(true)
+function AutomacaoPanel({ cfg, eventos, onAbrir }) {
   const autoOn = !!cfg?.auto
-  const temNaoEncontrada = (eventos || []).some((e) => e.resultado?.motivo === 'nao_encontrada')
-  const aplicados = (eventos || []).filter((e) => e.resultado?.ok && e.resultado?.aplicado).length
+  const lista = Array.isArray(eventos) ? eventos : []
+  const aplicados = lista.filter((e) => e.resultado?.ok && e.resultado?.aplicado).length
+  const temNaoEncontrada = lista.some((e) => e.resultado?.motivo === 'nao_encontrada')
 
   return (
     <div className="glass rounded-2xl p-5">
@@ -187,72 +343,123 @@ function AutomacaoPanel({ cfg, eventos, onVerNota, onAtualizar }) {
               : <>Ligue o <b className="text-fg">Modo automático</b> nas Regras para aplicar o desconto sozinho ao chegar cada nota.</>}
           </div>
         </div>
-        <button onClick={onAtualizar} className="text-faint hover:text-fg p-1 shrink-0" title="Atualizar eventos"><RefreshCw size={14} /></button>
-        <button onClick={() => setAberto((v) => !v)} className="text-faint hover:text-fg p-1 shrink-0">
-          <ChevronRight size={16} style={{ transform: aberto ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} />
+        <button onClick={onAbrir}
+                className="glass rounded-xl px-3 py-2 text-xs text-dim hover:text-fg flex items-center gap-2 shrink-0">
+          <Bell size={14} /> Notificações
         </button>
       </div>
 
-      {aberto && (
-        <div className="mt-4">
-          {eventos === null ? (
-            <div className="text-xs text-dim py-2">Carregando eventos…</div>
-          ) : eventos.length === 0 ? (
-            <div className="rounded-xl border border-glassb px-3 py-3 text-xs text-dim" style={{ background: 'var(--glass-hover)' }}>
-              Nenhum evento de NF-e recebido ainda. Quando o Bling disparar um evento de nota, ele aparece aqui com o que o sistema fez.
-            </div>
-          ) : (
-            <>
-              {aplicados > 0 && (
-                <div className="text-[11px] text-dim mb-2">{aplicados} nota(s) com desconto aplicado automaticamente.</div>
-              )}
-              <div className="space-y-1.5">
-                {eventos.map((e) => <EventoLinha key={e.id} e={e} onVerNota={onVerNota} />)}
-              </div>
-            </>
-          )}
-
-          {temNaoEncontrada && (
-            <div className="mt-3 rounded-xl px-3 py-2 text-[11px] flex items-start gap-2 border"
-                 style={{ borderColor: 'var(--warn)', background: 'color-mix(in srgb, var(--warn) 8%, transparent)' }}>
-              <HelpCircle size={13} className="mt-0.5 shrink-0" style={{ color: 'var(--warn)' }} />
-              <span className="text-dim">
-                Algumas notas vieram como <b className="text-fg">não encontradas (404)</b>. Isso acontece quando o evento do Bling
-                traz o ID do <b className="text-fg">pedido</b> (ou de outro recurso), não o ID da NF-e — ou quando a nota foi removida.
-                Nesses casos não há o que aplicar; a nota correta, quando existir como NF-e pendente, aparece na lista ao lado.
-              </span>
-            </div>
-          )}
+      {lista.length > 0 && (
+        <div className="mt-3 flex items-center gap-3 flex-wrap text-[11px] text-dim">
+          <span className="flex items-center gap-1.5"><CheckCircle2 size={13} style={{ color: 'var(--ok)' }} /> {aplicados} aplicada(s)</span>
+          <span className="flex items-center gap-1.5"><Activity size={13} className="text-faint" /> {lista.length} evento(s) recebido(s)</span>
+          {temNaoEncontrada && <span className="flex items-center gap-1.5" style={{ color: 'var(--warn)' }}><HelpCircle size={13} /> algumas notas não encontradas (id de pedido, não da nota)</span>}
+          <button onClick={onAbrir} className="text-accent hover:underline ml-auto">ver detalhes →</button>
         </div>
       )}
     </div>
   )
 }
 
-function EventoLinha({ e, onVerNota }) {
+/* ------------------------- Notificações (push) -------------------------- */
+function PushCard({ e, onVer, onFechar }) {
   const s = statusEvento(e.resultado)
   const Icon = s.icon
-  const idNota = e.resultado?.numero || e.entidade_id
   return (
-    <div className="rounded-xl border border-glassb px-3 py-2 flex items-center gap-2.5" style={{ background: 'var(--glass-hover)' }}>
-      <Icon size={15} className="shrink-0" style={{ color: s.cor }} />
+    <div className="rounded-2xl p-4 border flex items-center gap-3"
+         style={{ borderColor: 'var(--accent)', background: 'color-mix(in srgb, var(--accent) 10%, var(--bg))',
+                  boxShadow: '0 8px 28px color-mix(in srgb, var(--accent) 22%, transparent)' }}>
+      <div className="h-10 w-10 rounded-xl grid place-items-center shrink-0" style={{ background: 'color-mix(in srgb, ' + s.cor + ' 20%, transparent)' }}>
+        <Icon size={18} style={{ color: s.cor }} />
+      </div>
       <div className="min-w-0 flex-1">
-        <div className="text-xs font-medium flex items-center gap-1.5">
-          <span style={{ color: s.cor }}>{s.label}</span>
-          {s.detalhe && <span className="text-faint font-normal">· {s.detalhe}</span>}
+        <div className="text-sm font-semibold flex items-center gap-1.5"><Sparkles size={13} style={{ color: 'var(--accent)' }} /> Nova notificação do Bling</div>
+        <div className="text-xs text-dim mt-0.5">
+          {e.resultado?.numero ? <>NF-e nº {e.resultado.numero} — </> : <>Evento {e.entidade_id} — </>}
+          <span style={{ color: s.cor }}>{s.label}</span>{s.detalhe ? ` · ${s.detalhe}` : ''}
         </div>
-        <div className="text-[10px] text-faint num flex items-center gap-1.5">
+      </div>
+      {e.entidade_id && <button onClick={() => onVer(e.entidade_id)} className="text-xs rounded-lg px-3 py-1.5 font-medium text-white shrink-0" style={{ background: 'var(--accent)' }}>Ver nota</button>}
+      <button onClick={onFechar} className="text-faint hover:text-fg p-1 shrink-0"><X size={16} /></button>
+    </div>
+  )
+}
+
+function NotificacoesModal({ eventos, cfg, onClose, onVerNota, onAtualizar }) {
+  const lista = Array.isArray(eventos) ? eventos : []
+  const autoOn = !!cfg?.auto
+  const aplicados = lista.filter((e) => e.resultado?.ok && e.resultado?.aplicado).length
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center p-4 sm:p-8 overflow-y-auto"
+         style={{ background: 'rgba(0,0,0,.6)', backdropFilter: 'blur(3px)' }} onClick={onClose}>
+      <div className="glass rounded-2xl w-full max-w-lg my-auto" onClick={(e) => e.stopPropagation()} style={{ background: 'var(--bg)' }}>
+        <div className="flex items-center gap-3 p-5 border-b" style={{ borderColor: 'var(--glass-border)' }}>
+          <div className="h-10 w-10 rounded-xl grid place-items-center shrink-0" style={{ background: 'linear-gradient(135deg, var(--accent), var(--accent2))' }}>
+            <Bell size={18} className="text-white" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="font-display font-semibold">Notificações</div>
+            <div className="text-[11px] text-dim">O que a aplicação fez com os eventos que o Bling enviou</div>
+          </div>
+          <button onClick={onAtualizar} className="text-faint hover:text-fg p-1" title="Atualizar"><RefreshCw size={15} /></button>
+          <button onClick={onClose} className="text-dim hover:text-fg p-1"><X size={20} /></button>
+        </div>
+        <div className="p-4">
+          {!autoOn && lista.length > 0 && (
+            <div className="mb-3 rounded-xl px-3 py-2 text-[11px] flex items-center gap-2" style={{ background: 'var(--glass-hover)', color: 'var(--dim)' }}>
+              <PauseCircle size={13} /> Modo automático desligado — os pushes são registrados, mas o desconto não é aplicado sozinho.
+            </div>
+          )}
+          {aplicados > 0 && (
+            <div className="mb-3 text-[11px] text-dim flex items-center gap-1.5"><CheckCircle2 size={13} style={{ color: 'var(--ok)' }} /> {aplicados} nota(s) com desconto aplicado automaticamente.</div>
+          )}
+          {lista.length === 0 ? (
+            <div className="text-center py-10">
+              <div className="h-12 w-12 rounded-2xl grid place-items-center mx-auto mb-3" style={{ background: 'var(--glass-hover)' }}><Bell size={20} className="text-faint" /></div>
+              <div className="text-sm font-medium">Nenhuma notificação ainda</div>
+              <div className="text-xs text-dim mt-1">Quando o Bling enviar um evento de NF-e, ele aparece aqui com o que o sistema fez.</div>
+            </div>
+          ) : (
+            <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
+              {lista.map((e) => <NotifCard key={e.id} e={e} onVerNota={onVerNota} />)}
+            </div>
+          )}
+          {lista.some((e) => e.resultado?.motivo === 'nao_encontrada') && (
+            <div className="mt-3 rounded-xl px-3 py-2 text-[11px] flex items-start gap-2 border"
+                 style={{ borderColor: 'var(--warn)', background: 'color-mix(in srgb, var(--warn) 8%, transparent)' }}>
+              <HelpCircle size={13} className="mt-0.5 shrink-0" style={{ color: 'var(--warn)' }} />
+              <span className="text-dim">
+                <b className="text-fg">Nota não encontrada (404):</b> o evento trouxe o ID do <b className="text-fg">pedido</b> (ou outro recurso),
+                não o da NF-e — ou a nota foi removida. Nesses casos não há o que aplicar.
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function NotifCard({ e, onVerNota }) {
+  const s = statusEvento(e.resultado)
+  const Icon = s.icon
+  return (
+    <div className="rounded-xl border border-glassb p-3 flex items-start gap-3" style={{ background: 'var(--glass-hover)' }}>
+      <div className="h-8 w-8 rounded-lg grid place-items-center shrink-0 mt-0.5" style={{ background: 'color-mix(in srgb, ' + s.cor + ' 18%, transparent)' }}>
+        <Icon size={15} style={{ color: s.cor }} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-medium" style={{ color: s.cor }}>{s.label}</div>
+        <div className="text-[11px] text-dim mt-0.5 num">
           {e.resultado?.numero ? <>NF-e nº {e.resultado.numero}</> : <>id {e.entidade_id}</>}
-          {e.acao && <span>· {e.acao}</span>}
+          {s.detalhe ? ` · ${s.detalhe}` : ''}
+        </div>
+        <div className="text-[10px] text-faint num mt-1 flex items-center gap-1.5 flex-wrap">
+          {e.evento && <span>{e.evento}</span>}
           {e.quando && <span>· {fmtQuando(e.quando)}</span>}
         </div>
       </div>
-      {e.entidade_id && (
-        <button onClick={() => onVerNota(e.entidade_id)}
-                className="text-[11px] text-accent hover:underline shrink-0 flex items-center gap-1">
-          <Eye size={12} /> ver
-        </button>
-      )}
+      {e.entidade_id && <button onClick={() => onVerNota(e.entidade_id)} className="text-[11px] text-accent hover:underline shrink-0 flex items-center gap-1 mt-0.5"><Eye size={12} /> ver</button>}
     </div>
   )
 }
