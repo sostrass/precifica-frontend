@@ -101,6 +101,22 @@ export const api = {
   shopeePedidosPainel: (status = 'A_ENVIAR', dias = 15) => req(`/api/shopee/pedidos/painel?status=${status}&dias=${dias}`),
   shopeePedidoDetalhe: (orderSn) => req(`/api/shopee/pedidos/${orderSn}/detalhe`),
   shopeePedidosSeparacao: (status = 'A_ENVIAR', dias = 15) => req(`/api/shopee/pedidos/separacao?status=${status}&dias=${dias}`),
+  shopeeEnriquecerImpressao: (order_sns, skus) => req('/api/shopee/pedidos/enriquecer-impressao', { method: 'POST', body: { order_sns, skus } }),
+  // Etiqueta OFICIAL da Shopee (PDF binário) — não usa req() porque a resposta é um blob, não JSON
+  shopeeEtiquetaOficial: async (order_sns, tipo = 'auto') => {
+    const headers = { 'Content-Type': 'application/json' }
+    const t = getToken(); if (t) headers.Authorization = `Bearer ${t}`
+    let res
+    try {
+      res = await fetch(`${BASE}/api/shopee/pedidos/etiqueta-oficial`, { method: 'POST', headers, body: JSON.stringify({ order_sns, tipo }) })
+    } catch (e) { throw new Error('Sem resposta do servidor (rede ou timeout). Tente de novo em instantes.') }
+    if (!res.ok) {
+      if (res.status === 401) { setToken(null); try { window.dispatchEvent(new CustomEvent('sessao-expirada')) } catch (_) {} }
+      let msg = `Erro ${res.status}`; try { msg = (await res.json()).detail || msg } catch (_) {}
+      throw new Error(msg)
+    }
+    return await res.blob()
+  },
   shopeeMargemReal: (dias = 7, limite = 40) => req(`/api/shopee/financeiro/margem-real?dias=${dias}&limite=${limite}`),
   shopeeDescontos: (status = 'ongoing') => req(`/api/shopee/descontos?status=${status}`),
   shopeeCampanhaDetalhe: (tipo, id) => req(`/api/shopee/campanha/${tipo}/${id}`),

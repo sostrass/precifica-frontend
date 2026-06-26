@@ -114,6 +114,15 @@ export default function Nfe() {
   }, [])
   useEffect(() => { carregarNotas() /* eslint-disable-next-line */ }, [situacao])
 
+  // Auto-atualiza a lista enquanto o modo automático está ligado (notas geradas no Bling
+  // chegam sozinhas, sem precisar clicar em Atualizar). Silencioso: não pisca o loading.
+  useEffect(() => {
+    if (!cfg?.auto) return
+    const t = setInterval(() => { if (!loteRodando) carregarNotas({ silencioso: true }) }, 45000)
+    return () => clearInterval(t)
+    /* eslint-disable-next-line */
+  }, [cfg?.auto, situacao, loteRodando])
+
   const [faturamento, setFaturamento] = useState(null)
   const [fatRecalc, setFatRecalc] = useState(false)
   const recalcularFaturamento = async () => {
@@ -135,8 +144,9 @@ export default function Nfe() {
     try { setEventos(await api.nfeEventos()) } catch { setEventos([]) }
   }
 
-  const carregarNotas = async () => {
-    setBlingErro(false); setPendentes(null); setAplicadas({})
+  const carregarNotas = async ({ silencioso = false } = {}) => {
+    setBlingErro(false)
+    if (!silencioso) { setPendentes(null); setAplicadas({}) }
     try {
       const r = await api.nfePendentes(situacao)
       const lista = Array.isArray(r) ? r : (r?.notas || r?.data || [])
@@ -156,7 +166,7 @@ export default function Nfe() {
           .finally(() => setCarregandoValores(false))
       }
     } catch (e) {
-      setBlingErro(true); setPendentes([])
+      if (!silencioso) { setBlingErro(true); setPendentes([]) }
     }
   }
 
@@ -196,6 +206,7 @@ export default function Nfe() {
       setLoteReport(r)
       // marca as aplicadas localmente (sem recarregar)
       ;(r?.relatorio || []).forEach((it) => { if (it.ok && it.id != null) marcarAplicada(it.id, it.total_nota) })
+      setNota(null)  // fecha o editor (a nota aberta pode ter sido aplicada)
       carregarEventos()
     } catch (e) {
       setLoteReport({ erro: e.message })
@@ -216,6 +227,7 @@ export default function Nfe() {
       const r = await api.nfeAplicarSelecionadas(ids)
       setLoteReport(r)
       ;(r?.relatorio || []).forEach((it) => { if (it.ok && it.id != null) marcarAplicada(it.id, it.total_nota) })
+      setNota(null)  // fecha o editor após aplicar
       limparSel(); carregarEventos()
     } catch (e) {
       setLoteReport({ erro: e.message })
