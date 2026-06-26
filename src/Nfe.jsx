@@ -1363,8 +1363,11 @@ function DiagEdicao({ diag, onFechar }) {
       <div className="grid grid-cols-2 gap-x-3 gap-y-1 num">
         <div>soma parcelas: <b className="text-fg">{diag.soma_parcelas_payload}</b></div>
         <div>valorNota envio: <b className="text-fg">{diag.total_calculado}</b></div>
-        <div>Σ itens+frete: <b className="text-fg">{diag.soma_itens_payload}</b></div>
+        <div>Σ(itens−desc)+frete: <b className="text-fg">{diag.soma_itens_payload}</b></div>
         <div>itens consistentes: <b style={{ color: diag.consistente_itens ? 'var(--ok)' : 'var(--danger)' }}>{diag.consistente_itens ? 'sim' : 'não'}</b></div>
+      </div>
+      <div className="mt-1 text-[10px] text-faint">
+        O desconto ({brl((diag.comparacao?.enviado?.itens || []).reduce((s, i) => s + (i.desconto || 0), 0))}) vai no <b>campo desconto do item</b> (vDesc). Item bruto − desconto = líquido; soma + frete = valorNota = parcelas.
       </div>
 
       <button onClick={copiar}
