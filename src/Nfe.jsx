@@ -4,6 +4,7 @@ import {
   Truck, Lock, ChevronRight, Zap, Info, X, Download, ExternalLink, User, Receipt, MapPin,
   CheckCircle2, AlertTriangle, Clock, HelpCircle, PauseCircle, Activity, Hash, CreditCard,
   Eye, Landmark, ShieldCheck, Bell, Sparkles, TrendingDown, Search, ToggleRight, Users, Inbox, ShoppingBag,
+  CheckSquare, Square, BarChart3,
 } from 'lucide-react'
 
 const PLATAFORMA_COR = {
@@ -42,6 +43,30 @@ export default function Nfe() {
   const [busca, setBusca] = useState('')
   const [ordem, setOrdem] = useState('valor_desc')
   const [soEditaveis, setSoEditaveis] = useState(false)
+  const [aplicadas, setAplicadas] = useState({})     // { id: novoTotal } — marca local, sem recarregar
+  const [carregandoValores, setCarregandoValores] = useState(false)
+  const [selecao, setSelecao] = useState(() => new Set())   // ids selecionados (massa)
+
+  const toggleSel = (id) => setSelecao((s) => {
+    const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n
+  })
+  const limparSel = () => setSelecao(new Set())
+  const selTodasEditaveis = (lista) => setSelecao(new Set(lista.filter((n) => n.editavel).map((n) => n.id)))
+  const [concilLote, setConcilLote] = useState(null)
+  const [concilLoteLoad, setConcilLoteLoad] = useState(false)
+
+  const conciliarSelecionadas = async () => {
+    const ids = [...selecao]
+    if (!ids.length) { notify('Selecione ao menos uma nota Shopee.', 'danger'); return }
+    setConcilLoteLoad(true); setConcilLote(null)
+    try {
+      const r = await api.nfeConciliacaoShopeeLote(ids)
+      setConcilLote(r)
+      if (r.conferidas === 0) notify('Nenhuma nota Shopee conciliável na seleção.', 'danger')
+      else notify(`${r.conferidas} conferida(s) · ${r.divergentes} divergente(s)`, r.divergentes ? 'danger' : 'ok')
+    } catch (e) { notify(e.message, 'danger') }
+    setConcilLoteLoad(false)
+  }
 
   useEffect(() => {
     api.nfeConfig().then(setCfg).catch(() => {})
@@ -54,10 +79,25 @@ export default function Nfe() {
   }
 
   const carregarNotas = async () => {
-    setBlingErro(false); setPendentes(null)
+    setBlingErro(false); setPendentes(null); setAplicadas({})
     try {
       const r = await api.nfePendentes(situacao)
-      setPendentes(Array.isArray(r) ? r : (r?.notas || r?.data || []))
+      const lista = Array.isArray(r) ? r : (r?.notas || r?.data || [])
+      setPendentes(lista)
+      // valores + plataforma vêm em background (a lista do Bling não traz) — tela aparece rápida
+      const ids = lista.map((n) => n.id).filter(Boolean)
+      if (ids.length) {
+        setCarregandoValores(true)
+        api.nfeValores(ids)
+          .then((mapa) => {
+            setPendentes((atual) => (atual || []).map((n) => {
+              const e = mapa?.[String(n.id)]
+              return e ? { ...n, ...e } : n
+            }))
+          })
+          .catch(() => {})
+          .finally(() => setCarregandoValores(false))
+      }
     } catch (e) {
       setBlingErro(true); setPendentes([])
     }
@@ -82,6 +122,12 @@ export default function Nfe() {
     })
   }
 
+  // marca uma nota como aplicada localmente (sem recarregar a lista toda)
+  const marcarAplicada = (id, novoTotal) => {
+    if (id == null) return
+    setAplicadas((a) => ({ ...a, [id]: novoTotal }))
+  }
+
   const aplicarTodas = async () => {
     const editaveis = (pendentes || []).filter((n) => n.editavel)
     if (!editaveis.length) { notify('Não há notas pendentes (editáveis) para aplicar.', 'danger'); return }
@@ -90,7 +136,10 @@ export default function Nfe() {
     setLoteRodando(true); setLoteReport(null)
     try {
       const r = await api.nfeAplicarTodas()
-      setLoteReport(r); carregarNotas(); carregarEventos()
+      setLoteReport(r)
+      // marca as aplicadas localmente (sem recarregar)
+      ;(r?.relatorio || []).forEach((it) => { if (it.ok && it.id != null) marcarAplicada(it.id, it.total_nota) })
+      carregarEventos()
     } catch (e) {
       setLoteReport({ erro: e.message })
     } finally {
@@ -99,6 +148,44 @@ export default function Nfe() {
   }
 
   const filtradas = filtrarNotas(pendentes, { busca, ordem, soEditaveis })
+
+  const aplicarSelecionadas = async () => {
+    const ids = [...selecao]
+    if (!ids.length) { notify('Selecione ao menos uma nota.', 'danger'); return }
+    const tipo = cfg?.desconto_tipo === 'valor' ? `R$ ${cfg?.desconto_valor}` : `${cfg?.desconto_valor}%`
+    if (!window.confirm(`Aplicar o desconto padrão (${tipo}) nas ${ids.length} notas selecionadas e salvar no Bling?`)) return
+    setLoteRodando(true); setLoteReport(null)
+    try {
+      const r = await api.nfeAplicarSelecionadas(ids)
+      setLoteReport(r)
+      ;(r?.relatorio || []).forEach((it) => { if (it.ok && it.id != null) marcarAplicada(it.id, it.total_nota) })
+      limparSel(); carregarEventos()
+    } catch (e) {
+      setLoteReport({ erro: e.message })
+    } finally {
+      setLoteRodando(false)
+    }
+  }
+
+  const exportarCSV = () => {
+    const linhas = filtradas
+    if (!linhas.length) { notify('Nada para exportar neste filtro.', 'danger'); return }
+    const cols = ['numero', 'serie', 'situacao_label', 'cliente', 'documento', 'plataforma', 'uf', 'municipio', 'valor', 'tributos', 'pedido', 'chave', 'link_xml', 'link_danfe', 'link_pdf']
+    const cab = ['Número', 'Série', 'Situação', 'Cliente', 'Documento', 'Plataforma', 'UF', 'Município', 'Valor', 'Tributos aprox', 'Pedido', 'Chave de acesso', 'XML', 'DANFE', 'PDF']
+    const esc = (v) => {
+      const s = v == null ? '' : String(v)
+      return /[";\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s
+    }
+    const csv = [cab.join(';'), ...linhas.map((n) => cols.map((c) => esc(n[c])).join(';'))].join('\n')
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `notas-fiscais-${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+    notify(`${linhas.length} nota(s) exportada(s)`, 'ok')
+  }
 
   return (
     <div className="space-y-4 max-w-6xl">
@@ -134,6 +221,9 @@ export default function Nfe() {
       {/* Status da automação (notificações ficam no sino global, no topo) */}
       <AutomacaoPanel cfg={cfg} eventos={eventos} />
 
+      {/* Inteligência fiscal: carga tributária (IBPT) + vendas por UF */}
+      <InteligenciaFiscal notas={pendentes} carregando={carregandoValores} />
+
       {/* Aviso fiscal compacto */}
       <div className="rounded-xl px-4 py-2.5 text-[11px] flex items-start gap-2 border border-glassb"
            style={{ background: 'var(--glass-hover)' }}>
@@ -162,14 +252,20 @@ export default function Nfe() {
             ordem={ordem} setOrdem={setOrdem}
             soEditaveis={soEditaveis} setSoEditaveis={setSoEditaveis}
             total={(pendentes || []).length} mostrando={filtradas.length}
+            onExportar={exportarCSV}
           />
           <NotasList
             notas={filtradas} blingErro={blingErro} carregando={pendentes === null}
+            carregandoValores={carregandoValores} aplicadas={aplicadas}
+            selecao={selecao} onToggleSel={toggleSel} onSelTodas={selTodasEditaveis}
+            onLimparSel={limparSel} onAplicarSel={aplicarSelecionadas} loteRodando={loteRodando}
+            onConciliarSel={conciliarSelecionadas} concilLoteLoad={concilLoteLoad}
             notaId={nota?.id} onAbrir={abrirNota} onVerCompleta={verCompleta} onSimular={simularManual}
           />
+          {concilLote && <ConciliacaoLoteReport r={concilLote} onFechar={() => setConcilLote(null)} onVerNota={verCompleta} />}
         </div>
         {nota
-          ? <Editor key={nota.id || 'manual'} nota={nota} cfg={cfg} onAplicado={() => { carregarNotas(); carregarEventos() }} onVerCompleta={verCompleta} />
+          ? <Editor key={nota.id || 'manual'} nota={nota} cfg={cfg} aplicada={aplicadas[nota.id]} onAplicado={(id, novoTotal) => { marcarAplicada(id, novoTotal); carregarEventos() }} onVerCompleta={verCompleta} />
           : <VazioEditor />}
       </div>
 
@@ -188,7 +284,9 @@ function filtrarNotas(notas, { busca, ordem, soEditaveis }) {
       String(n.numero ?? '').toLowerCase().includes(q) ||
       String(n.id ?? '').includes(q) ||
       (n.cliente || '').toLowerCase().includes(q) ||
-      (n.documento || '').toLowerCase().includes(q))
+      (n.documento || '').toLowerCase().includes(q) ||
+      (n.pedido || '').toLowerCase().includes(q) ||
+      (n.chave || '').toLowerCase().includes(q))
   }
   const [campo, dir] = (ordem || 'valor_desc').split('_')
   arr.sort((a, b) => {
@@ -279,8 +377,87 @@ function SimMini({ label, valor, cor = 'var(--fg)', forte = false }) {
   )
 }
 
+/* --------------------- Inteligência fiscal (IBPT + UF) ------------------- */
+function InteligenciaFiscal({ notas, carregando }) {
+  const lista = notas || []
+  const comValor = lista.filter((n) => n.valor)
+  const totalValor = comValor.reduce((s, n) => s + (n.valor || 0), 0)
+  const totalTrib = lista.reduce((s, n) => s + (n.tributos || 0), 0)
+  const pctEfetivo = totalValor > 0 ? (totalTrib / totalValor) * 100 : 0
+
+  // agrupa por UF
+  const porUF = {}
+  for (const n of comValor) {
+    const uf = n.uf || '—'
+    if (!porUF[uf]) porUF[uf] = { uf, qtd: 0, valor: 0 }
+    porUF[uf].qtd += 1
+    porUF[uf].valor += n.valor || 0
+  }
+  const ufs = Object.values(porUF).sort((a, b) => b.valor - a.valor)
+  const maxUF = Math.max(1, ...ufs.map((u) => u.valor))
+
+  if (!lista.length) return null
+
+  return (
+    <div className="grid gap-4 md:grid-cols-2">
+      {/* Carga tributária aproximada */}
+      <div className="glass rounded-2xl p-5">
+        <div className="flex items-center gap-2 mb-3">
+          <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: 'color-mix(in srgb, var(--accent2) 18%, transparent)' }}>
+            <Landmark size={16} style={{ color: 'var(--accent2)' }} />
+          </div>
+          <div>
+            <div className="text-sm font-semibold">Carga tributária aproximada</div>
+            <div className="text-[11px] text-dim">Estimativa IBPT das notas listadas</div>
+          </div>
+          {carregando && <RefreshCw size={13} className="text-faint animate-spin ml-auto" />}
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          <SimMini label="Faturamento" valor={brl(totalValor)} />
+          <SimMini label="Tributos aprox" valor={brl(totalTrib)} cor="var(--warn)" />
+          <SimMini label="% efetivo" valor={`${pctEfetivo.toFixed(1)}%`} cor="var(--accent2)" forte />
+        </div>
+        <div className="text-[10px] text-faint mt-2 flex items-start gap-1">
+          <Info size={10} className="mt-0.5 shrink-0" />
+          Valores aproximados informados pela fonte IBPT em cada item (Lei 12.741). Não substitui a apuração do DAS.
+        </div>
+      </div>
+
+      {/* Vendas por UF */}
+      <div className="glass rounded-2xl p-5">
+        <div className="flex items-center gap-2 mb-3">
+          <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: 'color-mix(in srgb, var(--accent) 18%, transparent)' }}>
+            <MapPin size={16} style={{ color: 'var(--accent)' }} />
+          </div>
+          <div>
+            <div className="text-sm font-semibold">Vendas por estado</div>
+            <div className="text-[11px] text-dim">{ufs.length} UF(s) · por valor</div>
+          </div>
+          {carregando && <RefreshCw size={13} className="text-faint animate-spin ml-auto" />}
+        </div>
+        {ufs.length === 0 ? (
+          <div className="text-xs text-dim py-3 text-center">Carregando dados das notas…</div>
+        ) : (
+          <div className="space-y-1.5 max-h-[160px] overflow-y-auto pr-1">
+            {ufs.slice(0, 12).map((u) => (
+              <div key={u.uf} className="flex items-center gap-2">
+                <span className="num text-[11px] font-semibold w-7 shrink-0">{u.uf}</span>
+                <div className="flex-1 h-4 rounded-md overflow-hidden" style={{ background: 'var(--glass-hover)' }}>
+                  <div className="h-full rounded-md" style={{ width: `${(u.valor / maxUF) * 100}%`, background: 'var(--accent)', minWidth: '4px' }} />
+                </div>
+                <span className="num text-[11px] text-dim w-20 text-right shrink-0">{brl(u.valor)}</span>
+                <span className="num text-[10px] text-faint w-8 text-right shrink-0">{u.qtd}x</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 /* ------------------------------- Filtros bar ---------------------------- */
-function FiltrosBar({ situacao, setSituacao, busca, setBusca, ordem, setOrdem, soEditaveis, setSoEditaveis, total, mostrando }) {
+function FiltrosBar({ situacao, setSituacao, busca, setBusca, ordem, setOrdem, soEditaveis, setSoEditaveis, total, mostrando, onExportar }) {
   return (
     <div className="glass rounded-2xl p-4 space-y-3">
       <div className="flex items-center gap-1.5 flex-wrap">
@@ -293,11 +470,16 @@ function FiltrosBar({ situacao, setSituacao, busca, setBusca, ordem, setOrdem, s
             {c.label}
           </button>
         ))}
+        <button onClick={onExportar} title="Exportar a lista filtrada (CSV/Excel, com links de XML e DANFE)"
+                className="ml-auto text-xs px-3 py-1.5 rounded-full font-medium flex items-center gap-1.5"
+                style={{ background: 'var(--glass-hover)', color: 'var(--text-dim)' }}>
+          <Download size={13} /> Exportar
+        </button>
       </div>
       <div className="flex items-center gap-2 flex-wrap">
         <div className="glass rounded-xl flex items-center gap-2 px-3 py-2 flex-1 min-w-[150px]">
           <Search size={14} className="text-faint shrink-0" />
-          <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="buscar nº ou cliente…"
+          <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="nº, cliente, pedido ou chave…"
                  className="bg-transparent outline-none text-sm w-full text-fg" />
         </div>
         <select value={ordem} onChange={(e) => setOrdem(e.target.value)}
@@ -321,9 +503,45 @@ function FiltrosBar({ situacao, setSituacao, busca, setBusca, ordem, setOrdem, s
 }
 
 /* -------------------------------- Lista --------------------------------- */
-function NotasList({ notas, blingErro, carregando, notaId, onAbrir, onVerCompleta, onSimular }) {
+function NotasList({ notas, blingErro, carregando, carregandoValores, aplicadas, notaId,
+                    selecao, onToggleSel, onSelTodas, onLimparSel, onAplicarSel, loteRodando,
+                    onConciliarSel, concilLoteLoad, onAbrir, onVerCompleta, onSimular }) {
+  const selCount = selecao?.size || 0
+  const editaveisVis = notas.filter((n) => n.editavel).length
   return (
     <div className="glass rounded-2xl p-4">
+      {/* Barra de seleção em massa */}
+      {!blingErro && !carregando && editaveisVis > 0 && (
+        <div className="flex items-center gap-2 pb-3 mb-2 border-b border-glassb flex-wrap">
+          <button onClick={() => (selCount === editaveisVis ? onLimparSel() : onSelTodas(notas))}
+                  className="text-[11px] px-2 py-1 rounded-lg flex items-center gap-1.5"
+                  style={{ background: 'var(--glass-hover)', color: 'var(--text-dim)' }}>
+            {selCount === editaveisVis && editaveisVis > 0
+              ? <><CheckSquare size={13} /> limpar</>
+              : <><Square size={13} /> selecionar editáveis</>}
+          </button>
+          {selCount > 0 && (
+            <>
+              <span className="text-[11px] text-dim num">{selCount} selecionada(s)</span>
+              <div className="ml-auto flex items-center gap-2">
+                {onConciliarSel && (
+                  <button onClick={onConciliarSel} disabled={concilLoteLoad}
+                          className="text-[11px] px-3 py-1.5 rounded-lg font-medium flex items-center gap-1.5 disabled:opacity-60 border"
+                          style={{ borderColor: '#EE4D2D55', color: '#EE4D2D' }}>
+                    <ShoppingBag size={12} /> {concilLoteLoad ? 'Conciliando…' : 'Conciliar'}
+                  </button>
+                )}
+                <button onClick={onAplicarSel} disabled={loteRodando}
+                        className="text-[11px] px-3 py-1.5 rounded-lg font-medium text-white flex items-center gap-1.5 disabled:opacity-60"
+                        style={{ background: 'var(--accent)' }}>
+                  <Send size={12} /> {loteRodando ? 'Aplicando…' : `Aplicar nas ${selCount}`}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       {blingErro ? (
         <div className="text-center py-8">
           <Plug size={22} className="text-faint mx-auto mb-2" />
@@ -331,7 +549,9 @@ function NotasList({ notas, blingErro, carregando, notaId, onAbrir, onVerComplet
           <div className="text-xs text-dim mt-1">Conecte o Bling no topo e tente Atualizar.</div>
         </div>
       ) : carregando ? (
-        <div className="text-xs text-dim py-6 text-center">Carregando notas…</div>
+        <div className="space-y-2">
+          {[0, 1, 2].map((i) => <div key={i} className="rounded-xl border border-glassb h-[60px] animate-pulse" style={{ background: 'var(--glass-hover)' }} />)}
+        </div>
       ) : notas.length === 0 ? (
         <div className="text-center py-8">
           <Inbox size={22} className="text-faint mx-auto mb-2" />
@@ -341,7 +561,10 @@ function NotasList({ notas, blingErro, carregando, notaId, onAbrir, onVerComplet
       ) : (
         <div className="space-y-2 max-h-[58vh] overflow-y-auto pr-1">
           {notas.map((n) => (
-            <NotaCard key={n.id || n.numero} n={n} ativo={n.id === notaId} onAbrir={onAbrir} onVer={onVerCompleta} />
+            <NotaCard key={n.id || n.numero} n={n} ativo={n.id === notaId}
+                      aplicadaTotal={aplicadas?.[n.id]} carregandoValor={carregandoValores}
+                      selecionada={selecao?.has(n.id)} onToggleSel={onToggleSel}
+                      onAbrir={onAbrir} onVer={onVerCompleta} />
           ))}
         </div>
       )}
@@ -354,22 +577,43 @@ function NotasList({ notas, blingErro, carregando, notaId, onAbrir, onVerComplet
   )
 }
 
-function NotaCard({ n, ativo, onAbrir, onVer }) {
+function NotaCard({ n, ativo, aplicadaTotal, carregandoValor, selecionada, onToggleSel, onAbrir, onVer }) {
   const cor = corSituacao(n.situacao)
   const acao = () => (n.editavel ? onAbrir(n.id) : onVer(n.id))
+  const aplicada = aplicadaTotal != null
+  const semValor = !n.valor && carregandoValor
   return (
-    <div className={`rounded-xl border px-3 py-2.5 flex items-center gap-3 transition ${ativo ? 'border-accent' : 'border-glassb hover:bg-[var(--glass-hover)]'}`}>
+    <div className={`rounded-xl border px-3 py-2.5 flex items-center gap-2.5 transition ${ativo ? 'border-accent' : aplicada ? '' : selecionada ? '' : 'border-glassb hover:bg-[var(--glass-hover)]'}`}
+         style={selecionada && !ativo ? { borderColor: 'var(--accent)', background: 'color-mix(in srgb, var(--accent) 8%, transparent)' }
+              : aplicada && !ativo ? { borderColor: 'var(--ok)', background: 'color-mix(in srgb, var(--ok) 7%, transparent)' } : undefined}>
+      {n.editavel && onToggleSel && (
+        <button onClick={() => onToggleSel(n.id)} className="shrink-0 text-faint hover:text-accent" title="Selecionar">
+          {selecionada ? <CheckSquare size={16} style={{ color: 'var(--accent)' }} /> : <Square size={16} />}
+        </button>
+      )}
       <button onClick={acao} className="min-w-0 flex-1 text-left">
         <div className="text-sm font-medium truncate">{n.cliente || `Nota ${n.numero ?? ''}`}</div>
         <div className="flex items-center gap-1.5 mt-1 flex-wrap">
           <Badge>{`nº ${n.numero ?? '—'}`}</Badge>
-          <Badge cor={cor}>{n.situacao_label}</Badge>
-          {n.editavel && <Badge cor="var(--ok)">editável</Badge>}
+          {aplicada
+            ? <Badge cor="var(--ok)"><span className="inline-flex items-center gap-0.5"><CheckCircle2 size={9} /> aplicada</span></Badge>
+            : <Badge cor={cor}>{n.situacao_label}</Badge>}
+          {!aplicada && n.editavel && <Badge cor="var(--ok)">editável</Badge>}
+          {n.uf && <Badge>{n.uf}</Badge>}
           <PlataformaBadge nome={n.plataforma} />
         </div>
+        {n.situacao === 4 && n.motivo && (
+          <div className="text-[10px] mt-1 flex items-start gap-1" style={{ color: 'var(--danger)' }}>
+            <AlertTriangle size={10} className="mt-0.5 shrink-0" /> <span className="line-clamp-2">{n.motivo}</span>
+          </div>
+        )}
       </button>
       <div className="text-right shrink-0">
-        <div className="num text-sm font-semibold">{brl(n.valor)}</div>
+        {aplicada
+          ? <div className="num text-sm font-semibold" style={{ color: 'var(--ok)' }}>{brl(aplicadaTotal)}</div>
+          : semValor
+            ? <div className="h-4 w-14 rounded animate-pulse ml-auto" style={{ background: 'var(--glass-hover)' }} />
+            : <div className="num text-sm font-semibold">{brl(n.valor)}</div>}
         <div className="flex items-center gap-1 justify-end mt-1">
           <button onClick={() => onVer(n.id)} title="Ver nota completa" className="text-faint hover:text-accent p-0.5"><Eye size={14} /></button>
           <button onClick={acao} title={n.editavel ? 'Editar desconto' : 'Ver nota'} className="text-faint hover:text-fg p-0.5"><ChevronRight size={15} /></button>
@@ -553,12 +797,68 @@ function ConfigCard({ cfg, setCfg }) {
                  className="w-24 bg-glass border border-glassb rounded-xl px-3 py-2 text-sm outline-none focus:border-accent num" />
         </label>
       </div>
+
+      <PlataformaDescontos cfg={cfg} salvar={salvar} />
+    </div>
+  )
+}
+
+const PLATAFORMAS_DESC = ['Shopee', 'Mercado Livre', 'Amazon', 'Magalu', 'Americanas', 'TikTok Shop']
+
+function PlataformaDescontos({ cfg, salvar }) {
+  const [aberto, setAberto] = useState(false)
+  const regras = cfg.desconto_plataformas || {}
+  const ativas = Object.keys(regras).length
+
+  const setRegra = (plat, patch) => {
+    const atual = regras[plat] || { tipo: 'percentual', valor: 0 }
+    const nova = { ...atual, ...patch }
+    const todas = { ...regras }
+    if (!nova.valor || Number(nova.valor) <= 0) delete todas[plat]
+    else todas[plat] = { tipo: nova.tipo, valor: Number(nova.valor) }
+    salvar({ desconto_plataformas: todas })
+  }
+
+  return (
+    <div className="mt-4 pt-4 border-t border-glassb">
+      <button onClick={() => setAberto((v) => !v)} className="flex items-center gap-2 w-full text-left">
+        <ShoppingBag size={14} className="text-accent2" />
+        <span className="text-sm font-medium">Desconto por plataforma</span>
+        {ativas > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded num" style={{ background: 'color-mix(in srgb, var(--accent2) 18%, transparent)', color: 'var(--accent2)' }}>{ativas} ativa(s)</span>}
+        <ChevronRight size={15} className={`ml-auto text-faint transition ${aberto ? 'rotate-90' : ''}`} />
+      </button>
+      <div className="text-[11px] text-dim mt-1">
+        Regra própria por marketplace no lote/automático. Em branco, usa o desconto padrão acima.
+      </div>
+      {aberto && (
+        <div className="mt-3 space-y-2">
+          {PLATAFORMAS_DESC.map((plat) => {
+            const r = regras[plat]
+            return (
+              <div key={plat} className="flex items-center gap-2">
+                <span className="text-[11px] font-medium w-28 shrink-0 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full" style={{ background: PLATAFORMA_COR[plat] || 'var(--text-faint)' }} />
+                  {plat}
+                </span>
+                <select value={r?.tipo || 'percentual'} onChange={(e) => setRegra(plat, { tipo: e.target.value })}
+                        className="bg-glass border border-glassb rounded-lg px-2 py-1.5 text-xs outline-none focus:border-accent">
+                  <option value="percentual">%</option>
+                  <option value="valor">R$</option>
+                </select>
+                <input type="number" placeholder="padrão" value={r?.valor ?? ''} onChange={(e) => setRegra(plat, { valor: e.target.value })}
+                       className="w-20 bg-glass border border-glassb rounded-lg px-2 py-1.5 text-xs outline-none focus:border-accent num" />
+                {r && <Badge cor="var(--ok)">ativo</Badge>}
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
 
 /* ------------------------------ Editor ---------------------------------- */
-function Editor({ nota, cfg, onAplicado, onVerCompleta }) {
+function Editor({ nota, cfg, aplicada, onAplicado, onVerCompleta }) {
   const notify = useToast()
   const [itens, setItens] = useState(nota.itens || [])
   const [tipo, setTipo] = useState(cfg?.desconto_tipo || 'percentual')
@@ -569,6 +869,15 @@ function Editor({ nota, cfg, onAplicado, onVerCompleta }) {
   const [aplicando, setAplicando] = useState(false)
   const [diag, setDiag] = useState(null)
   const [diagLoad, setDiagLoad] = useState(false)
+  const [concil, setConcil] = useState(null)
+  const [concilLoad, setConcilLoad] = useState(false)
+
+  const conferirShopee = async () => {
+    setConcilLoad(true); setConcil(null)
+    try { setConcil(await api.nfeConciliacaoShopee(nota.id)) }
+    catch (e) { notify(e.message, 'danger') }
+    setConcilLoad(false)
+  }
 
   const diagnosticar = async () => {
     if (nota._manual) return
@@ -602,12 +911,12 @@ function Editor({ nota, cfg, onAplicado, onVerCompleta }) {
     if (nota._manual) return
     setAplicando(true)
     try {
-      await api.nfeAplicar(nota.id, {
+      const resp = await api.nfeAplicar(nota.id, {
         desconto_tipo: tipo, desconto_valor: Number(global) || 0,
         descontos_por_item: porItem, remover_frete: removerFrete, enviar: true,
       })
       notify('Nota atualizada no Bling', 'ok')
-      onAplicado?.()
+      onAplicado?.(nota.id, resp?.resumo?.total_nota)
     } catch (e) { notify(e.message, 'danger') }
     setAplicando(false)
   }
@@ -636,6 +945,12 @@ function Editor({ nota, cfg, onAplicado, onVerCompleta }) {
             </div>
           )}
       </div>
+
+      {aplicada != null && (
+        <div className="mt-3 rounded-xl px-3 py-2 text-xs flex items-center gap-2" style={{ background: 'color-mix(in srgb, var(--ok) 14%, transparent)', color: 'var(--ok)' }}>
+          <CheckCircle2 size={14} /> Desconto aplicado e salvo no Bling · novo total {brl(aplicada)}
+        </div>
+      )}
 
       {/* Controles globais */}
       <div className="flex flex-wrap items-end gap-3 py-3">
@@ -722,7 +1037,122 @@ function Editor({ nota, cfg, onAplicado, onVerCompleta }) {
             <Activity size={13} /> {diagLoad ? 'Analisando…' : 'Diagnosticar envio (não envia)'}
           </button>
           {diag && <DiagEdicao diag={diag} onFechar={() => setDiag(null)} />}
+
+          {nota.plataforma === 'Shopee' && nota.pedido_loja && (
+            <button
+              onClick={conferirShopee} disabled={concilLoad}
+              className="mt-2 rounded-xl py-2 text-xs disabled:opacity-60 flex items-center justify-center gap-2 border"
+              style={{ borderColor: '#EE4D2D55', color: '#EE4D2D' }}
+            >
+              <ShoppingBag size={13} /> {concilLoad ? 'Conferindo…' : 'Conferir repasse Shopee'}
+            </button>
+          )}
+          {concil && <ConciliacaoShopee c={concil} onFechar={() => setConcil(null)} />}
         </>
+      )}
+    </div>
+  )
+}
+
+function ConciliacaoShopee({ c, onFechar }) {
+  if (!c.ok) {
+    return (
+      <div className="mt-2 rounded-xl p-3 text-xs border border-glassb" style={{ background: 'var(--glass-hover)' }}>
+        <div className="flex items-center justify-between">
+          <span className="flex items-center gap-1.5 text-warn"><AlertTriangle size={13} /> Não foi possível conciliar</span>
+          <button onClick={onFechar} className="text-faint hover:text-fg"><X size={13} /></button>
+        </div>
+        <div className="text-dim mt-1">{c.erro}</div>
+      </div>
+    )
+  }
+  const div = c.divergente
+  return (
+    <div className="mt-2 rounded-xl p-3.5 text-xs border" style={{ borderColor: div ? 'var(--warn)' : 'var(--ok)', background: div ? 'color-mix(in srgb, var(--warn) 8%, transparent)' : 'color-mix(in srgb, var(--ok) 7%, transparent)' }}>
+      <div className="flex items-center justify-between mb-2">
+        <span className="flex items-center gap-1.5 font-semibold" style={{ color: div ? 'var(--warn)' : 'var(--ok)' }}>
+          {div ? <AlertTriangle size={13} /> : <CheckCircle2 size={13} />}
+          {div ? 'Divergência com a Shopee' : 'Bate com a Shopee'}
+        </span>
+        <button onClick={onFechar} className="text-faint hover:text-fg"><X size={13} /></button>
+      </div>
+      <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
+        <ConcilLinha rotulo="Valor da nota (fiscal)" valor={brl(c.valor_nota)} />
+        <ConcilLinha rotulo="Pago pelo produto (Shopee)" valor={brl(c.pago_produto)} forte />
+        {c.recebido_liquido != null && <ConcilLinha rotulo="Repasse líquido recebido" valor={brl(c.recebido_liquido)} cor="var(--ok)" />}
+        {c.taxas != null && <ConcilLinha rotulo="Taxas Shopee" valor={brl(c.taxas)} cor="var(--danger)" />}
+      </div>
+      <div className="mt-2.5 pt-2.5 border-t border-glassb flex items-center justify-between">
+        <span className="text-dim">Diferença nota × pago</span>
+        <span className="num font-bold" style={{ color: div ? 'var(--warn)' : 'var(--ok)' }}>
+          {c.diferenca > 0 ? '+' : ''}{brl(c.diferenca)}
+        </span>
+      </div>
+      {div && (
+        <div className="text-[10px] text-dim mt-2 flex items-start gap-1">
+          <Info size={10} className="mt-0.5 shrink-0" />
+          O valor da nota está {c.diferenca > 0 ? 'acima' : 'abaixo'} do que o comprador pagou na Shopee. Ajuste o desconto para alinhar o fiscal à venda real.
+        </div>
+      )}
+      {!c.tem_escrow && (
+        <div className="text-[10px] text-faint mt-1.5">Pedido sem dados de repasse (escrow) ainda disponíveis na Shopee.</div>
+      )}
+      <div className="text-[10px] text-faint mt-1.5 num">Pedido {c.order_sn} · {c.comprador || '—'}{c.status ? ` · ${c.status}` : ''}</div>
+    </div>
+  )
+}
+
+function ConcilLinha({ rotulo, valor, cor = 'var(--fg)', forte = false }) {
+  return (
+    <div>
+      <div className="text-[10px] text-dim">{rotulo}</div>
+      <div className={`num ${forte ? 'text-sm font-bold' : 'text-[13px] font-semibold'}`} style={{ color: cor }}>{valor}</div>
+    </div>
+  )
+}
+
+function ConciliacaoLoteReport({ r, onFechar, onVerNota }) {
+  const divergentes = (r.linhas || []).filter((l) => l.ok && l.divergente)
+  const erros = (r.linhas || []).filter((l) => !l.ok)
+  return (
+    <div className="glass rounded-2xl p-4 mt-1">
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-sm font-semibold flex items-center gap-2">
+          <ShoppingBag size={15} style={{ color: '#EE4D2D' }} /> Conciliação Shopee
+        </span>
+        <button onClick={onFechar} className="text-faint hover:text-fg"><X size={15} /></button>
+      </div>
+      <div className="grid grid-cols-3 gap-2 mb-3">
+        <SimMini label="Conferidas" valor={String(r.conferidas)} />
+        <SimMini label="Divergentes" valor={String(r.divergentes)} cor={r.divergentes ? 'var(--warn)' : 'var(--ok)'} forte />
+        <SimMini label="Recebido (escrow)" valor={brl(r.soma_recebido)} cor="var(--ok)" />
+      </div>
+      <div className="grid grid-cols-2 gap-2 mb-3">
+        <SimMini label="Soma das notas" valor={brl(r.soma_nota)} />
+        <SimMini label="Pago na Shopee" valor={brl(r.soma_pago)} />
+      </div>
+      {divergentes.length > 0 ? (
+        <div className="space-y-1.5 max-h-[200px] overflow-y-auto pr-1">
+          <div className="text-[11px] text-dim mb-1">Notas com divergência:</div>
+          {divergentes.map((l) => (
+            <button key={l.id} onClick={() => onVerNota(l.id)}
+                    className="w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left border border-glassb hover:bg-[var(--glass-hover)]">
+              <AlertTriangle size={13} style={{ color: 'var(--warn)' }} className="shrink-0" />
+              <span className="text-xs num">pedido {l.order_sn}</span>
+              <span className="ml-auto num text-xs text-dim">nota {brl(l.valor_nota)} · pago {brl(l.pago_produto)}</span>
+              <span className="num text-xs font-semibold" style={{ color: 'var(--warn)' }}>
+                {l.diferenca > 0 ? '+' : ''}{brl(l.diferenca)}
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : r.conferidas > 0 ? (
+        <div className="text-xs flex items-center gap-2 py-2" style={{ color: 'var(--ok)' }}>
+          <CheckCircle2 size={14} /> Todas as notas Shopee conferidas batem com o repasse.
+        </div>
+      ) : null}
+      {erros.length > 0 && (
+        <div className="text-[10px] text-faint mt-2">{erros.length} nota(s) não Shopee/sem pedido foram ignoradas.</div>
       )}
     </div>
   )
