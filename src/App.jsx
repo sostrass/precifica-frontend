@@ -158,7 +158,7 @@ export default function App() {
             <span className="hidden md:flex text-xs text-faint items-center gap-1.5 px-3 py-1.5 rounded-full glass">
               <CalendarDays size={13} /> {new Date().toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: 'short' })}
             </span>
-            <NotificacoesGlobais ativo={authed && blingOk} onIrParaNfe={() => setView('nfe')} />
+            <NotificacoesGlobais ativo={authed && blingOk} onNavegar={(v) => setView(v)} />
           </div>
         </header>
 

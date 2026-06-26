@@ -43,7 +43,7 @@ function visual(n) {
   return { ...base, statusCor: base.cor, StatusIcon: base.icon }
 }
 
-export default function NotificacoesGlobais({ ativo, onIrParaNfe }) {
+export default function NotificacoesGlobais({ ativo, onNavegar }) {
   const [itens, setItens] = useState(null)
   const [aberto, setAberto] = useState(false)
   const [push, setPush] = useState(null)
@@ -82,9 +82,14 @@ export default function NotificacoesGlobais({ ativo, onIrParaNfe }) {
 
   const naoVistos = Array.isArray(itens) ? itens.filter((e) => chave(e) > vistoAte).length : 0
   const abrir = () => { setAberto(true); setVistoAte(maxRef.current) }
+  const VIEW_POR_CAT = {
+    nfe: 'nfe', precificacao: 'precificacao', avaliacao: 'shopee', agente: 'shopee',
+    radar: 'radar', concorrencia: 'radar', produto: 'catalogo', pedido: 'dashboard', estoque: 'catalogo',
+  }
   const verNota = (n) => {
     setPush(null); setAberto(false)
-    if (n.categoria === 'nfe' && onIrParaNfe) onIrParaNfe(n.entidade_id)
+    const v = VIEW_POR_CAT[n.categoria]
+    if (v && onNavegar) onNavegar(v)
   }
 
   return (

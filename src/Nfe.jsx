@@ -4,7 +4,7 @@ import {
   Truck, Lock, ChevronRight, Zap, Info, X, Download, ExternalLink, User, Receipt, MapPin,
   CheckCircle2, AlertTriangle, Clock, HelpCircle, PauseCircle, Activity, Hash, CreditCard,
   Eye, Landmark, ShieldCheck, Bell, Sparkles, TrendingDown, Search, ToggleRight, Users, Inbox, ShoppingBag,
-  CheckSquare, Square, BarChart3,
+  CheckSquare, Square, BarChart3, Copy,
 } from 'lucide-react'
 
 const PLATAFORMA_COR = {
@@ -1315,6 +1315,28 @@ function ConciliacaoLoteReport({ r, onFechar, onVerNota }) {
 
 function DiagEdicao({ diag, onFechar }) {
   const ok = diag.bate
+  const [copiado, setCopiado] = useState(false)
+  const copiar = async () => {
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(diag, null, 2))
+      setCopiado(true); setTimeout(() => setCopiado(false), 2000)
+    } catch { /* clipboard pode falhar */ }
+  }
+  const comp = diag.comparacao || {}
+  const orig = comp.original || {}
+  const env = comp.enviado || {}
+  const itOrig = (orig.itens || [])[0] || {}
+  const itEnv = (env.itens || [])[0] || {}
+  const Dado = ({ label, de, para, destaque }) => (
+    <div className="flex items-center justify-between gap-2 py-0.5">
+      <span className="text-faint">{label}</span>
+      <span className="num">
+        <span className="text-dim">{de ?? '—'}</span>
+        <span className="text-faint mx-1">→</span>
+        <b className="text-fg" style={destaque ? { color: 'var(--accent)' } : undefined}>{para ?? '—'}</b>
+      </span>
+    </div>
+  )
   return (
     <div className="mt-3 rounded-xl border p-3 text-[11px]"
          style={{ borderColor: ok ? 'var(--ok)' : 'var(--danger)', background: 'var(--glass-hover)' }}>
@@ -1325,20 +1347,34 @@ function DiagEdicao({ diag, onFechar }) {
         </span>
         <button onClick={onFechar} className="ml-auto text-faint hover:text-fg"><X size={14} /></button>
       </div>
-      <div className="grid grid-cols-2 gap-2 num">
-        <div>valorNota (Bling): <b className="text-fg">{diag.raw?.valorNota ?? '—'}</b></div>
-        <div>total calculado: <b className="text-fg">{diag.total_calculado}</b></div>
-        <div>soma parcelas (envio): <b className="text-fg">{diag.soma_parcelas_payload}</b></div>
-        <div>nota tem parcelas: <b className="text-fg">{diag.raw?.tem_parcelas ? 'sim' : 'não'}</b></div>
+
+      {/* comparação: como está HOJE → como SERIA enviado */}
+      <div className="rounded-lg p-2 mb-2" style={{ background: 'var(--bg)' }}>
+        <div className="text-[10px] text-faint uppercase tracking-wide mb-1">Nota hoje → Envio</div>
+        <Dado label="valorNota" de={orig.valorNota} para={env.valorNota} destaque />
+        <Dado label="valorFrete" de={orig.valorFrete} para={env.valorFrete} />
+        <Dado label="item · valor (preço)" de={itOrig.valor} para={itEnv.valor} />
+        <Dado label="item · valorTotal (bruto)" de={itOrig.valorTotal} para={itEnv.valorTotal} />
+        <Dado label="item · desconto" de={itOrig.desconto} para={itEnv.desconto} destaque />
+        <Dado label="item · tributo aprox." de={itOrig.valorAproximadoTotalTributos} para={itEnv.valorAproximadoTotalTributos} />
+        <Dado label="parcela · valor" de={(orig.parcelas || [])[0]?.valor} para={(env.parcelas || [])[0]?.valor} destaque />
       </div>
-      {Array.isArray(diag.payload?.parcelas) && diag.payload.parcelas.length > 0 && (
-        <div className="mt-2 text-faint">parcelas no envio: <span className="num text-dim">{diag.payload.parcelas.map((p) => p.valor ?? p.valorParcela ?? 0).join(' · ')}</span></div>
-      )}
-      {!diag.raw?.tem_parcelas && (
-        <div className="mt-2" style={{ color: 'var(--warn)' }}>
-          ⚠️ A nota não tem o campo <b>parcelas</b> no payload do Bling — o pagamento pode estar em outro campo. Me manda esse diagnóstico que eu ajusto.
-        </div>
-      )}
+
+      <div className="grid grid-cols-2 gap-x-3 gap-y-1 num">
+        <div>soma parcelas: <b className="text-fg">{diag.soma_parcelas_payload}</b></div>
+        <div>valorNota envio: <b className="text-fg">{diag.total_calculado}</b></div>
+        <div>Σ itens+frete: <b className="text-fg">{diag.soma_itens_payload}</b></div>
+        <div>itens consistentes: <b style={{ color: diag.consistente_itens ? 'var(--ok)' : 'var(--danger)' }}>{diag.consistente_itens ? 'sim' : 'não'}</b></div>
+      </div>
+
+      <button onClick={copiar}
+              className="mt-2.5 w-full rounded-lg py-1.5 text-[11px] font-medium flex items-center justify-center gap-1.5"
+              style={{ background: 'var(--accent)', color: '#fff' }}>
+        <Copy size={12} /> {copiado ? 'Copiado! Cole aqui no chat' : 'Copiar diagnóstico completo'}
+      </button>
+      <div className="mt-1.5 text-[10px] text-faint">
+        O diagnóstico completo inclui o <b>payload inteiro que seria enviado</b> e a <b>nota original</b> — toque em copiar e cole pra mim com os dados corretos.
+      </div>
     </div>
   )
 }
