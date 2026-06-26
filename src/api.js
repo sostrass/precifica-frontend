@@ -170,5 +170,7 @@ export const api = {
   nfeAutoProcessar: () => req('/api/nfe/auto/processar', { method: 'POST' }),
   nfeEventos: (limite = 25) => req(`/api/nfe/eventos?limite=${limite}`),
   notificacoes: (limite = 40) => req(`/api/notificacoes?limite=${limite}`),
+  notificacoesMarcarLidas: () => req('/api/notificacoes/marcar-lidas', { method: 'POST', body: {} }),
+  notificacoesArquivar: (ids) => req('/api/notificacoes/arquivar', { method: 'POST', body: { ids } }),
   nfeAplicarTodas: () => req('/api/nfe/aplicar-todas', { method: 'POST' }),
 }

@@ -4,7 +4,7 @@ import {
   Truck, Lock, ChevronRight, Zap, Info, X, Download, ExternalLink, User, Receipt, MapPin,
   CheckCircle2, AlertTriangle, Clock, HelpCircle, PauseCircle, Activity, Hash, CreditCard,
   Eye, Landmark, ShieldCheck, Bell, Sparkles, TrendingDown, Search, ToggleRight, Users, Inbox, ShoppingBag,
-  CheckSquare, Square, BarChart3, Copy,
+  CheckSquare, Square, BarChart3, Copy, Package,
 } from 'lucide-react'
 
 const PLATAFORMA_COR = {
@@ -14,13 +14,42 @@ const PLATAFORMA_COR = {
   'WooCommerce': '#7F54B3', 'Loja Integrada': '#00A859', 'VTEX': '#F71963', 'Shopify': '#95BF47',
   'Site próprio': '#7b2a8c',
 }
+const PLATAFORMA_DOMINIO = {
+  'Shopee': 'shopee.com.br', 'Mercado Livre': 'mercadolivre.com.br', 'Amazon': 'amazon.com.br',
+  'Magalu': 'magazineluiza.com.br', 'Americanas': 'americanas.com.br', 'TikTok Shop': 'tiktok.com',
+  'NuvemShop': 'nuvemshop.com.br', 'Shein': 'shein.com', 'Olist': 'olist.com', 'Tray': 'tray.com.br',
+  'WooCommerce': 'woocommerce.com', 'Loja Integrada': 'lojaintegrada.com.br', 'VTEX': 'vtex.com',
+  'Shopify': 'shopify.com',
+}
+
+// Logo real do marketplace (favicon) com fallback para monograma colorido se a imagem falhar
+function MarketplaceLogo({ nome, size = 16 }) {
+  const [erro, setErro] = useState(false)
+  const cor = PLATAFORMA_COR[nome] || 'var(--accent2)'
+  const dom = PLATAFORMA_DOMINIO[nome]
+  const radius = Math.round(size * 0.22)
+  if (dom && !erro) {
+    return (
+      <img src={`https://www.google.com/s2/favicons?domain=${dom}&sz=64`} alt={nome}
+           width={size} height={size} loading="lazy" onError={() => setErro(true)}
+           style={{ width: size, height: size, borderRadius: radius, objectFit: 'contain', display: 'block', background: '#fff' }} />
+    )
+  }
+  return (
+    <span style={{ width: size, height: size, borderRadius: radius, background: `color-mix(in srgb, ${cor} 22%, transparent)`,
+                   color: cor, fontSize: Math.round(size * 0.56), fontWeight: 700, display: 'grid', placeItems: 'center', lineHeight: 1 }}>
+      {(nome || '?').charAt(0)}
+    </span>
+  )
+}
+
 function PlataformaBadge({ nome }) {
   if (!nome) return null
   const cor = PLATAFORMA_COR[nome] || 'var(--accent2)'
   return (
-    <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold inline-flex items-center gap-1"
-          style={{ background: 'color-mix(in srgb, ' + cor + ' 18%, transparent)', color: cor }}>
-      <ShoppingBag size={10} /> {nome}
+    <span className="text-[10px] pl-1 pr-1.5 py-0.5 rounded-md font-semibold inline-flex items-center gap-1"
+          style={{ background: 'color-mix(in srgb, ' + cor + ' 14%, transparent)', color: cor }}>
+      <MarketplaceLogo nome={nome} size={13} /> {nome}
     </span>
   )
 }
@@ -408,6 +437,15 @@ function SimMini({ label, valor, cor = 'var(--fg)', forte = false }) {
   )
 }
 
+function ResumoChip({ label, valor, forte }) {
+  return (
+    <div className="rounded-xl px-3 py-2" style={{ background: 'var(--glass-hover)' }}>
+      <div className="text-[9px] text-faint uppercase tracking-wide">{label}</div>
+      <div className={`num mt-0.5 truncate ${forte ? 'text-sm font-bold' : 'text-xs font-medium'}`} style={forte ? { color: 'var(--accent)' } : undefined}>{valor}</div>
+    </div>
+  )
+}
+
 /* --------------------- Inteligência fiscal (IBPT + UF) ------------------- */
 function InteligenciaFiscal({ notas, carregando }) {
   const lista = notas || []
@@ -467,7 +505,22 @@ function InteligenciaFiscal({ notas, carregando }) {
           {carregando && <RefreshCw size={13} className="text-faint animate-spin ml-auto" />}
         </div>
         {ufs.length === 0 ? (
-          <div className="text-xs text-dim py-3 text-center">Carregando dados das notas…</div>
+          carregando ? (
+            <div className="space-y-1.5 py-1">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <span className="num-skel h-3 w-7 rounded" style={{ background: 'var(--glass-hover)' }} />
+                  <div className="flex-1 h-4 rounded-md" style={{ background: 'var(--glass-hover)', opacity: 0.6 - i * 0.15 }} />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-xs text-dim py-4 text-center flex flex-col items-center gap-1.5">
+              <MapPin size={18} className="text-faint" />
+              <span>Nenhuma nota com UF nas notas listadas</span>
+              <span className="text-[10px] text-faint">O estado vem do endereço do destinatário.</span>
+            </div>
+          )
         ) : (
           <div className="space-y-1.5 max-h-[160px] overflow-y-auto pr-1">
             {ufs.slice(0, 12).map((u) => (
@@ -937,7 +990,7 @@ function ConfigCard({ cfg, setCfg }) {
   )
 }
 
-const PLATAFORMAS_DESC = ['Shopee', 'Mercado Livre', 'Amazon', 'Magalu', 'Americanas', 'TikTok Shop']
+const PLATAFORMAS_DESC = ['Shopee', 'Mercado Livre', 'Amazon', 'Shein', 'Magalu', 'TikTok Shop', 'Americanas', 'NuvemShop']
 
 function PlataformaDescontos({ cfg, salvar }) {
   const [aberto, setAberto] = useState(false)
@@ -970,8 +1023,8 @@ function PlataformaDescontos({ cfg, salvar }) {
             const r = regras[plat]
             return (
               <div key={plat} className="flex items-center gap-2">
-                <span className="text-[11px] font-medium w-28 shrink-0 flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full" style={{ background: PLATAFORMA_COR[plat] || 'var(--text-faint)' }} />
+                <span className="text-[11px] font-medium w-32 shrink-0 flex items-center gap-2">
+                  <MarketplaceLogo nome={plat} size={16} />
                   {plat}
                 </span>
                 <select value={r?.tipo || 'percentual'} onChange={(e) => setRegra(plat, { tipo: e.target.value })}
@@ -1091,6 +1144,17 @@ function Editor({ nota, cfg, aplicada, onAplicado, onVerCompleta }) {
           )}
       </div>
 
+      {/* Resumo compacto da nota (não-manual) */}
+      {!nota._manual && (
+        <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <ResumoChip label="Total da nota" valor={brl(nota.valor_nota || 0)} forte />
+          <ResumoChip label="Produtos" valor={brl(nota.valor_produtos || 0)} />
+          <ResumoChip label="Frete" valor={brl(nota.frete || 0)} />
+          <ResumoChip label="Destino" valor={nota.municipio ? `${nota.municipio}${nota.uf ? '/' + nota.uf : ''}` : (nota.uf || '—')} />
+          {nota.pedido_loja && <ResumoChip label="Pedido da loja" valor={`#${nota.pedido_loja}`} />}
+          {nota.documento && <ResumoChip label="Documento" valor={nota.documento} />}
+        </div>
+      )}
       {aplicada != null && (
         <div className="mt-3 rounded-xl px-3 py-2 text-xs flex items-center gap-2" style={{ background: 'color-mix(in srgb, var(--ok) 14%, transparent)', color: 'var(--ok)' }}>
           <CheckCircle2 size={14} /> Desconto aplicado e salvo no Bling · novo total {brl(aplicada)}
@@ -1490,9 +1554,24 @@ function NfeDetalhe({ nota, onClose }) {
           {/* Destinatário */}
           <Bloco titulo="Destinatário" icon={<User size={14} />}>
             <div className="text-sm font-medium">{dest.nome || '—'}</div>
-            <div className="text-xs text-dim num">{dest.documento || ''}{dest.telefone ? ` · ${dest.telefone}` : ''}</div>
+            <div className="text-xs text-dim num flex flex-wrap gap-x-2 mt-0.5">
+              {dest.documento && <span>{dest.documento}</span>}
+              {dest.ie && <span>· IE {dest.ie}</span>}
+              {dest.telefone && <span>· {dest.telefone}</span>}
+            </div>
             {dest.email && <div className="text-xs text-dim truncate">{dest.email}</div>}
-            {dest.endereco && <div className="text-xs text-dim flex items-start gap-1 mt-1"><MapPin size={12} className="mt-0.5 shrink-0" /> {dest.endereco}</div>}
+            {(dest.logradouro || dest.endereco) && (
+              <div className="text-xs text-dim flex items-start gap-1.5 mt-1.5">
+                <MapPin size={12} className="mt-0.5 shrink-0" style={{ color: 'var(--accent)' }} />
+                <span>
+                  {dest.logradouro
+                    ? <>{dest.logradouro}{dest.numero ? `, ${dest.numero}` : ''}{dest.complemento ? ` — ${dest.complemento}` : ''}
+                        {dest.bairro ? <><br />{dest.bairro}</> : ''}
+                        {(dest.municipio || dest.uf) ? <><br />{dest.municipio}{dest.uf ? `/${dest.uf}` : ''}{dest.cep ? ` · CEP ${dest.cep}` : ''}</> : ''}</>
+                    : dest.endereco}
+                </span>
+              </div>
+            )}
           </Bloco>
 
           {/* Totais */}
@@ -1518,12 +1597,16 @@ function NfeDetalhe({ nota, onClose }) {
                 <div key={i} className="flex items-center gap-2 text-sm border-b last:border-0 pb-1.5" style={{ borderColor: 'var(--glass-border)' }}>
                   <div className="min-w-0 flex-1">
                     <div className="truncate">{it.descricao}</div>
-                    <div className="text-[10px] text-faint num">
-                      {it.codigo} · NCM {it.ncm || '—'} · CFOP {it.cfop || '—'}
-                      {Number(it.tributos_aprox) > 0 && <> · trib. aprox. {brl(it.tributos_aprox)}</>}
+                    <div className="text-[10px] text-faint num flex flex-wrap gap-x-1.5">
+                      <span>{it.codigo}</span>
+                      <span>· NCM {it.ncm || '—'}</span>
+                      <span>· CFOP {it.cfop || '—'}</span>
+                      {it.cest && <span>· CEST {it.cest}</span>}
+                      {Number(it.peso_bruto) > 0 && <span>· {it.peso_bruto} kg</span>}
+                      {Number(it.tributos_aprox) > 0 && <span>· trib. {brl(it.tributos_aprox)}</span>}
                     </div>
                   </div>
-                  <div className="text-xs text-dim num shrink-0">{it.quantidade}× {brl(it.valor)}</div>
+                  <div className="text-xs text-dim num shrink-0 text-right">{it.quantidade} {it.unidade || 'un'}<br /><span className="text-faint">{brl(it.valor)}</span></div>
                   <div className="num font-medium shrink-0 w-20 text-right">{brl(it.valor_total)}</div>
                 </div>
               ))}
@@ -1533,16 +1616,27 @@ function NfeDetalhe({ nota, onClose }) {
           {/* Transporte + Parcelas */}
           <div className="grid sm:grid-cols-2 gap-2">
             <Bloco titulo="Transporte" icon={<Truck size={14} />}>
-              <div className="text-xs text-dim">Frete: <span className="text-fg">{fretePorConta}</span></div>
-              <div className="text-xs text-dim mt-0.5">Transportadora: <span className="text-fg">{n.transporte?.transportador || '—'}</span></div>
+              <div className="text-xs text-dim">Frete: <span className="text-fg">{n.transporte?.frete_por_conta_label || fretePorConta}</span></div>
+              <div className="text-xs text-dim mt-0.5">Transportadora: <span className="text-fg">{n.transporte?.transportador || '—'}</span>{n.transporte?.transportador_documento ? <span className="text-faint num"> · {n.transporte.transportador_documento}</span> : ''}</div>
+              {Array.isArray(n.transporte?.volumes) && n.transporte.volumes.length > 0 && (
+                <div className="text-xs text-dim mt-1 flex items-center gap-1.5">
+                  <Package size={12} className="shrink-0" style={{ color: 'var(--accent2)' }} />
+                  {n.transporte.volumes.reduce((s, v) => s + (Number(v.quantidade) || 0), 0)} volume(s)
+                  {n.transporte.volumes[0]?.especie ? ` · ${n.transporte.volumes[0].especie}` : ''}
+                  {Number(n.transporte.volumes[0]?.peso_bruto) > 0 ? ` · ${n.transporte.volumes[0].peso_bruto} kg` : ''}
+                </div>
+              )}
             </Bloco>
             <Bloco titulo="Pagamento" icon={<CreditCard size={14} />}>
               {parcelas.length ? (
-                <div className="space-y-0.5">
+                <div className="space-y-1">
                   {parcelas.map((p, i) => (
-                    <div key={i} className="text-xs text-dim flex items-center justify-between">
-                      <span className="num">{p.data || `parcela ${i + 1}`}</span>
-                      <span className="num text-fg">{brl(p.valor)}</span>
+                    <div key={i} className="text-xs">
+                      <div className="text-dim flex items-center justify-between">
+                        <span className="num">{p.data || `parcela ${i + 1}`}</span>
+                        <span className="num text-fg">{brl(p.valor)}</span>
+                      </div>
+                      {(p.forma || p.observacoes) && <div className="text-[10px] text-faint truncate">{p.forma || p.observacoes}</div>}
                     </div>
                   ))}
                 </div>
