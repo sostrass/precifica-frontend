@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import {
   Bell, FileText, Package, ShoppingBag, Layers, User, CheckCircle2, AlertTriangle,
   X, RefreshCw, Eye, Clock, HelpCircle, PauseCircle, Sparkles, Inbox,
+  Star, TrendingUp, Tag, Radar as RadarIcon,
 } from 'lucide-react'
 import { api } from './api.js'
 
@@ -19,12 +20,17 @@ const fmtQuando = (iso) => {
 }
 
 const CAT = {
-  nfe:     { icon: FileText,     cor: 'var(--accent)' },
-  produto: { icon: Package,      cor: 'var(--accent2)' },
-  pedido:  { icon: ShoppingBag,  cor: '#6FA8FF' },
-  estoque: { icon: Layers,       cor: '#C792EA' },
-  contato: { icon: User,         cor: '#80CBC4' },
-  outro:   { icon: Bell,         cor: 'var(--faint)' },
+  nfe:          { icon: FileText,     cor: 'var(--accent)' },
+  precificacao: { icon: Tag,          cor: 'var(--accent)' },
+  avaliacao:    { icon: Star,         cor: '#E0A23C' },
+  radar:        { icon: RadarIcon,    cor: '#6FA8FF' },
+  concorrencia: { icon: TrendingUp,   cor: '#6FA8FF' },
+  agente:       { icon: Sparkles,     cor: 'var(--accent2)' },
+  produto:      { icon: Package,      cor: 'var(--accent2)' },
+  pedido:       { icon: ShoppingBag,  cor: '#6FA8FF' },
+  estoque:      { icon: Layers,       cor: '#C792EA' },
+  contato:      { icon: User,         cor: '#80CBC4' },
+  outro:        { icon: Bell,         cor: 'var(--faint)' },
 }
 
 function visual(n) {
@@ -41,8 +47,8 @@ export default function NotificacoesGlobais({ ativo, onIrParaNfe }) {
   const [itens, setItens] = useState(null)
   const [aberto, setAberto] = useState(false)
   const [push, setPush] = useState(null)
-  const [vistoAte, setVistoAte] = useState(0)
-  const maxRef = useRef(0)
+  const [vistoAte, setVistoAte] = useState('')
+  const maxRef = useRef('')
   const primeiraRef = useRef(true)
 
   const carregar = async () => {
@@ -56,23 +62,25 @@ export default function NotificacoesGlobais({ ativo, onIrParaNfe }) {
     return () => clearInterval(t)
   }, [ativo])
 
+  // "novas" são detectadas pelo horário (quando), já que os ids agora são strings (n*/w*)
+  const chave = (e) => e.quando || ''
   useEffect(() => {
     if (!Array.isArray(itens) || itens.length === 0) return
-    const maxId = Math.max(...itens.map((e) => e.id))
+    const maxKey = itens.reduce((m, e) => (chave(e) > m ? chave(e) : m), '')
     if (primeiraRef.current) {
       primeiraRef.current = false
-      maxRef.current = maxId
-      setVistoAte(maxId)
+      maxRef.current = maxKey
+      setVistoAte(maxKey)
       return
     }
-    if (maxId > maxRef.current) {
-      const novos = itens.filter((e) => e.id > maxRef.current)
-      maxRef.current = maxId
+    if (maxKey > maxRef.current) {
+      const novos = itens.filter((e) => chave(e) > maxRef.current)
+      maxRef.current = maxKey
       if (novos[0]) setPush(novos[0])
     }
   }, [itens])
 
-  const naoVistos = Array.isArray(itens) ? itens.filter((e) => e.id > vistoAte).length : 0
+  const naoVistos = Array.isArray(itens) ? itens.filter((e) => chave(e) > vistoAte).length : 0
   const abrir = () => { setAberto(true); setVistoAte(maxRef.current) }
   const verNota = (n) => {
     setPush(null); setAberto(false)
@@ -122,7 +130,7 @@ export default function NotificacoesGlobais({ ativo, onIrParaNfe }) {
                 <div className="text-center py-12">
                   <div className="h-12 w-12 rounded-2xl grid place-items-center mx-auto mb-3" style={{ background: 'var(--glass-hover)' }}><Inbox size={20} className="text-faint" /></div>
                   <div className="text-sm font-medium">Nenhuma notificação ainda</div>
-                  <div className="text-xs text-dim mt-1">Quando o Bling enviar eventos (notas, produtos, pedidos…), eles aparecem aqui.</div>
+                  <div className="text-xs text-dim mt-1">Avaliações respondidas, descontos aplicados, mudanças de concorrentes e eventos do Bling aparecem aqui.</div>
                 </div>
               ) : (
                 <div className="space-y-2">

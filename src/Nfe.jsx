@@ -10,6 +10,9 @@ import {
 const PLATAFORMA_COR = {
   'Shopee': '#EE4D2D', 'Mercado Livre': '#2D8CFF', 'Amazon': '#FF9900',
   'Magalu': '#0086FF', 'Americanas': '#E60014', 'TikTok Shop': '#FE2C55',
+  'NuvemShop': '#2D3277', 'Shein': '#000000', 'Olist': '#7B2D8E', 'Tray': '#00B2A9',
+  'WooCommerce': '#7F54B3', 'Loja Integrada': '#00A859', 'VTEX': '#F71963', 'Shopify': '#95BF47',
+  'Site próprio': '#7b2a8c',
 }
 function PlataformaBadge({ nome }) {
   if (!nome) return null
@@ -25,6 +28,13 @@ import { api } from './api.js'
 import { useToast } from './toast.jsx'
 
 const brl = (v) => 'R$ ' + Number(v ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const fmtQuando = (iso) => {
+  if (!iso) return ''
+  try {
+    const d = new Date(iso)
+    return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+  } catch { return '' }
+}
 
 export default function Nfe() {
   const notify = useToast()
@@ -71,8 +81,26 @@ export default function Nfe() {
   useEffect(() => {
     api.nfeConfig().then(setCfg).catch(() => {})
     carregarEventos()
+    api.nfeFaturamento().then(setFaturamento).catch(() => {})
   }, [])
   useEffect(() => { carregarNotas() /* eslint-disable-next-line */ }, [situacao])
+
+  const [faturamento, setFaturamento] = useState(null)
+  const [fatRecalc, setFatRecalc] = useState(false)
+  const recalcularFaturamento = async () => {
+    setFatRecalc(true)
+    try {
+      await api.nfeFaturamentoRecalcular()
+      notify('Recálculo iniciado. Pode levar alguns minutos — vou atualizar sozinho.', 'ok')
+      // tenta atualizar algumas vezes enquanto o job roda em background
+      let tentativas = 0
+      const t = setInterval(async () => {
+        tentativas += 1
+        try { const r = await api.nfeFaturamento(); if (r?.tem_dados) setFaturamento(r) } catch {}
+        if (tentativas >= 10) { clearInterval(t); setFatRecalc(false) }
+      }, 20000)
+    } catch (e) { notify(e.message, 'danger'); setFatRecalc(false) }
+  }
 
   const carregarEventos = async () => {
     try { setEventos(await api.nfeEventos()) } catch { setEventos([]) }
@@ -223,6 +251,9 @@ export default function Nfe() {
 
       {/* Inteligência fiscal: carga tributária (IBPT) + vendas por UF */}
       <InteligenciaFiscal notas={pendentes} carregando={carregandoValores} />
+
+      {/* Monitor do teto do Simples Nacional */}
+      <FaturamentoSimples dados={faturamento} recalc={fatRecalc} onRecalcular={recalcularFaturamento} />
 
       {/* Aviso fiscal compacto */}
       <div className="rounded-xl px-4 py-2.5 text-[11px] flex items-start gap-2 border border-glassb"
@@ -452,6 +483,109 @@ function InteligenciaFiscal({ notas, carregando }) {
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+/* ------------------ Monitor do teto do Simples Nacional ----------------- */
+const ALERTA_FAT = {
+  ok: { cor: 'var(--ok)', label: 'Dentro do limite', Icone: ShieldCheck },
+  atencao: { cor: 'var(--warn)', label: 'Atenção — aproximando do sublimite', Icone: AlertTriangle },
+  sublimite: { cor: 'var(--warn)', label: 'Acima do sublimite — ICMS/ISS fora do Simples', Icone: AlertTriangle },
+  critico: { cor: 'var(--danger)', label: 'Crítico — perto do teto do Simples', Icone: AlertTriangle },
+  estourou: { cor: 'var(--danger)', label: 'Teto do Simples ultrapassado', Icone: AlertTriangle },
+}
+
+function FaturamentoSimples({ dados, recalc, onRecalcular }) {
+  const [aberto, setAberto] = useState(false)
+  const tem = dados?.tem_dados
+  const al = ALERTA_FAT[dados?.alerta] || ALERTA_FAT.ok
+  const teto = dados?.teto || 4800000
+  const sub = dados?.sublimite || 3600000
+  const rbt12 = dados?.rbt12 || 0
+  const pctTeto = Math.min(100, dados?.pct_teto || 0)
+  const pctSub = (sub / teto) * 100
+  const maxMes = Math.max(1, ...((dados?.meses || []).map((m) => m.total_estimado || 0)))
+
+  return (
+    <div className="glass rounded-2xl p-5">
+      <button onClick={() => setAberto((v) => !v)} className="flex items-center gap-2 w-full text-left">
+        <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: 'color-mix(in srgb, var(--accent2) 18%, transparent)' }}>
+          <Landmark size={16} style={{ color: 'var(--accent2)' }} />
+        </div>
+        <div>
+          <div className="text-sm font-semibold">Teto do Simples Nacional</div>
+          <div className="text-[11px] text-dim">
+            {tem ? <>RBT12 {brl(rbt12)} · <span style={{ color: al.cor }}>{al.label}</span></> : 'Faturamento acumulado (12 meses) vs teto'}
+          </div>
+        </div>
+        <ChevronRight size={16} className={`ml-auto text-faint transition ${aberto ? 'rotate-90' : ''}`} />
+      </button>
+
+      {aberto && (
+        <div className="mt-4">
+          {!tem ? (
+            <div className="text-center py-4">
+              <div className="text-xs text-dim mb-3">Ainda não há dados. O cálculo lê suas notas autorizadas dos últimos 12 meses (pode levar alguns minutos).</div>
+              <button onClick={onRecalcular} disabled={recalc}
+                      className="rounded-xl px-4 py-2 text-sm font-medium text-white disabled:opacity-60 inline-flex items-center gap-2"
+                      style={{ background: 'var(--accent)' }}>
+                <RefreshCw size={14} className={recalc ? 'animate-spin' : ''} /> {recalc ? 'Calculando…' : 'Calcular faturamento'}
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="rounded-xl px-3 py-2 text-xs flex items-center gap-2 mb-3"
+                   style={{ background: `color-mix(in srgb, ${al.cor} 12%, transparent)`, color: al.cor }}>
+                <al.Icone size={14} /> {al.label}
+              </div>
+
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                <SimMini label="RBT12 (12 meses)" valor={brl(rbt12)} forte cor={al.cor} />
+                <SimMini label={`Acumulado ${dados.ano}`} valor={brl(dados.total_ano)} />
+                <SimMini label="Projeção do ano" valor={brl(dados.projecao_ano)} cor="var(--accent2)" />
+              </div>
+
+              <div className="mb-1 flex items-center justify-between text-[10px] text-dim">
+                <span>{pctTeto.toFixed(1)}% do teto</span>
+                <span className="num">teto {brl(teto)}</span>
+              </div>
+              <div className="relative h-4 rounded-lg overflow-hidden" style={{ background: 'var(--glass-hover)' }}>
+                <div className="h-full rounded-lg transition-all" style={{ width: `${pctTeto}%`, background: al.cor }} />
+                <div className="absolute top-0 bottom-0" style={{ left: `${pctSub}%`, width: '2px', background: 'var(--fg)', opacity: 0.5 }} title="Sublimite ICMS/ISS" />
+              </div>
+              <div className="text-[10px] text-faint mt-1">Marcador = sublimite {brl(sub)} (acima dele, ICMS/ISS sai do Simples)</div>
+
+              {dados.meses?.length > 0 && (
+                <div className="mt-4">
+                  <div className="text-[11px] text-dim mb-2">Faturamento estimado por mês</div>
+                  <div className="flex items-end gap-1 h-20">
+                    {dados.meses.map((m) => (
+                      <div key={`${m.ano}-${m.mes}`} className="flex-1 flex flex-col items-center gap-1" title={`${String(m.mes).padStart(2, '0')}/${m.ano} · ${m.qtd} notas · ${brl(m.total_estimado)}`}>
+                        <div className="w-full rounded-t" style={{ height: `${Math.max(4, (m.total_estimado / maxMes) * 64)}px`, background: 'var(--accent)', opacity: 0.85 }} />
+                        <span className="text-[9px] text-faint num">{String(m.mes).padStart(2, '0')}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between mt-4 pt-3 border-t border-glassb">
+                <span className="text-[10px] text-faint flex items-start gap-1 flex-1">
+                  <Info size={10} className="mt-0.5 shrink-0" />
+                  Estimativa: contagem de notas exata, valor por amostragem{dados.parcial ? ' (algum mês com muitas notas ficou parcial)' : ''}. Para o número oficial do DAS, use seu contador.
+                </span>
+                <button onClick={onRecalcular} disabled={recalc}
+                        className="ml-2 text-[11px] px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 shrink-0 disabled:opacity-60"
+                        style={{ background: 'var(--glass-hover)', color: 'var(--text-dim)' }}>
+                  <RefreshCw size={12} className={recalc ? 'animate-spin' : ''} /> {recalc ? 'Calculando…' : 'Atualizar'}
+                </button>
+              </div>
+              {dados.atualizado_em && <div className="text-[10px] text-faint mt-1.5">Atualizado em {fmtQuando(dados.atualizado_em)}</div>}
+            </>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -871,6 +1005,17 @@ function Editor({ nota, cfg, aplicada, onAplicado, onVerCompleta }) {
   const [diagLoad, setDiagLoad] = useState(false)
   const [concil, setConcil] = useState(null)
   const [concilLoad, setConcilLoad] = useState(false)
+  const [enviando, setEnviando] = useState(false)
+
+  const retransmitir = async () => {
+    if (!window.confirm('Retransmitir esta nota ao Sefaz?\n\nUse só depois de corrigir o motivo da rejeição. A transmissão é feita pelo Bling com seu certificado.')) return
+    setEnviando(true)
+    try {
+      await api.nfeEnviar(nota.id)
+      notify('Nota enviada ao Sefaz. Acompanhe a situação no Bling/lista.', 'ok')
+    } catch (e) { notify(e.message, 'danger') }
+    setEnviando(false)
+  }
 
   const conferirShopee = async () => {
     setConcilLoad(true); setConcil(null)
@@ -1037,6 +1182,16 @@ function Editor({ nota, cfg, aplicada, onAplicado, onVerCompleta }) {
             <Activity size={13} /> {diagLoad ? 'Analisando…' : 'Diagnosticar envio (não envia)'}
           </button>
           {diag && <DiagEdicao diag={diag} onFechar={() => setDiag(null)} />}
+
+          {nota.situacao === 4 && (
+            <button
+              onClick={retransmitir} disabled={enviando}
+              className="mt-2 rounded-xl py-2 text-xs font-medium disabled:opacity-60 flex items-center justify-center gap-2 border"
+              style={{ borderColor: 'var(--warn)', color: 'var(--warn)' }}
+            >
+              <Send size={13} /> {enviando ? 'Enviando…' : 'Retransmitir ao Sefaz'}
+            </button>
+          )}
 
           {nota.plataforma === 'Shopee' && nota.pedido_loja && (
             <button
@@ -1303,11 +1458,19 @@ function NfeDetalhe({ nota, onClose }) {
 
           {/* Totais */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            <Mini label="Produtos" valor={brl(totalProdutos)} />
+            <Mini label="Produtos" valor={brl(n.valor_produtos ?? totalProdutos)} />
             <Mini label="Frete" valor={brl(n.valor_frete)} />
-            <Mini label="Tributos aprox." valor={brl(totalTributos)} />
+            {Number(n.desconto_nota) > 0
+              ? <Mini label="Desconto da nota" valor={`- ${brl(n.desconto_nota)}`} />
+              : <Mini label="Tributos aprox." valor={brl(totalTributos)} />}
             <Mini label="Total da nota" valor={brl(n.valor_nota)} forte />
           </div>
+          {Number(n.desconto_nota) > 0 && (
+            <div className="text-[11px] text-dim flex items-center gap-1.5 -mt-2">
+              <Info size={11} className="shrink-0" />
+              {brl(n.valor_produtos ?? totalProdutos)} produtos + {brl(n.valor_frete)} frete − {brl(n.desconto_nota)} desconto = <b className="text-fg">{brl(n.valor_nota)}</b>. O desconto de pedido vem da plataforma.
+            </div>
+          )}
 
           {/* Itens */}
           <Bloco titulo={`Itens (${itens.length})`} icon={<Receipt size={14} />}>
@@ -1348,6 +1511,25 @@ function NfeDetalhe({ nota, onClose }) {
             </Bloco>
           </div>
 
+          {/* Informações fiscais extras */}
+          {(n.natureza_operacao || n.intermediador || n.vendedor || n.data_operacao) && (
+            <Bloco titulo="Informações" icon={<Landmark size={14} />}>
+              <div className="grid sm:grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                {n.natureza_operacao && <InfoLinha rotulo="Natureza" valor={n.natureza_operacao} />}
+                {n.intermediador && <InfoLinha rotulo="Intermediador" valor={n.intermediador} />}
+                {n.vendedor && <InfoLinha rotulo="Vendedor" valor={n.vendedor} />}
+                {n.data_operacao && <InfoLinha rotulo="Operação" valor={n.data_operacao} />}
+              </div>
+            </Bloco>
+          )}
+
+          {/* Observações */}
+          {n.observacoes && (
+            <Bloco titulo="Observações" icon={<FileText size={14} />}>
+              <div className="text-xs text-dim whitespace-pre-wrap break-words">{n.observacoes}</div>
+            </Bloco>
+          )}
+
           {/* Chave + documentos */}
           {n.chave_acesso && (
             <div className="rounded-xl border border-glassb px-3 py-2">
@@ -1380,6 +1562,14 @@ function Mini({ label, valor, forte }) {
     <div className="rounded-xl border border-glassb px-3 py-2">
       <div className="text-[10px] text-faint uppercase tracking-wide">{label}</div>
       <div className={'num ' + (forte ? 'font-bold text-accent' : 'font-medium')}>{valor}</div>
+    </div>
+  )
+}
+function InfoLinha({ rotulo, valor }) {
+  return (
+    <div className="flex items-baseline gap-1.5">
+      <span className="text-faint shrink-0">{rotulo}:</span>
+      <span className="text-fg break-words">{valor}</span>
     </div>
   )
 }
