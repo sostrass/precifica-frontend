@@ -1350,12 +1350,12 @@ function DiagEdicao({ diag, onFechar }) {
 
       {/* comparação: como está HOJE → como SERIA enviado */}
       <div className="rounded-lg p-2 mb-2" style={{ background: 'var(--bg)' }}>
-        <div className="text-[10px] text-faint uppercase tracking-wide mb-1">Nota hoje → Envio</div>
+        <div className="text-[10px] text-faint uppercase tracking-wide mb-1">Nota hoje → Envio (desconto na nota)</div>
         <Dado label="valorNota" de={orig.valorNota} para={env.valorNota} destaque />
+        <Dado label="NOTA · desconto" de={orig.desconto_nota} para={env.desconto_nota} destaque />
         <Dado label="valorFrete" de={orig.valorFrete} para={env.valorFrete} />
-        <Dado label="item · valor (preço)" de={itOrig.valor} para={itEnv.valor} />
+        <Dado label="item · valor (preço cheio)" de={itOrig.valor} para={itEnv.valor} />
         <Dado label="item · valorTotal (bruto)" de={itOrig.valorTotal} para={itEnv.valorTotal} />
-        <Dado label="item · desconto" de={itOrig.desconto} para={itEnv.desconto} destaque />
         <Dado label="item · tributo aprox." de={itOrig.valorAproximadoTotalTributos} para={itEnv.valorAproximadoTotalTributos} />
         <Dado label="parcela · valor" de={(orig.parcelas || [])[0]?.valor} para={(env.parcelas || [])[0]?.valor} destaque />
       </div>
@@ -1363,11 +1363,11 @@ function DiagEdicao({ diag, onFechar }) {
       <div className="grid grid-cols-2 gap-x-3 gap-y-1 num">
         <div>soma parcelas: <b className="text-fg">{diag.soma_parcelas_payload}</b></div>
         <div>valorNota envio: <b className="text-fg">{diag.total_calculado}</b></div>
-        <div>Σ(itens−desc)+frete: <b className="text-fg">{diag.soma_itens_payload}</b></div>
-        <div>itens consistentes: <b style={{ color: diag.consistente_itens ? 'var(--ok)' : 'var(--danger)' }}>{diag.consistente_itens ? 'sim' : 'não'}</b></div>
+        <div>desconto da nota: <b className="text-fg">{brl(env.desconto_nota)}</b></div>
+        <div>parcelas batem: <b style={{ color: diag.bate ? 'var(--ok)' : 'var(--danger)' }}>{diag.bate ? 'sim' : 'não'}</b></div>
       </div>
       <div className="mt-1 text-[10px] text-faint">
-        O desconto ({brl((diag.comparacao?.enviado?.itens || []).reduce((s, i) => s + (i.desconto || 0), 0))}) vai no <b>campo desconto do item</b> (vDesc). Item bruto − desconto = líquido; soma + frete = valorNota = parcelas.
+        O desconto ({brl(env.desconto_nota)}) vai no <b>campo desconto da NOTA</b> (preço do item fica cheio), igual a tela do Bling faz. valorNota = itens − desconto + frete = parcelas. Se a API recusar por total, o envio reaplica embutindo no preço automaticamente.
       </div>
 
       <button onClick={copiar}
