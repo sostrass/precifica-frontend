@@ -2,7 +2,7 @@ import qrcode from 'qrcode-generator'
 import { SPX_LOGO, ICONS } from './src/printAssets.js'
 import fs from 'fs'
 const LARANJA = '#EE4D2D'
-const localStorage = { getItem(){return null}, setItem(){} } // stub (não usado no render)
+const localStorage = { getItem(){return null}, setItem(){} }
 const STATUS_PT = {
   UNPAID: 'Não pago', READY_TO_SHIP: 'A enviar', PROCESSED: 'Processado', RETRY_SHIP: 'Reenviar',
   SHIPPED: 'Enviado', TO_CONFIRM_RECEIVE: 'A confirmar', COMPLETED: 'Concluído',
@@ -49,11 +49,36 @@ function barcodeSVG(valor, { height = 46, modulo = 1.5, texto = true } = {}) {
 }
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
 
+// A Shopee mascara dados pessoais (nome/endereço/tel) como "****". Detecta isso pra não imprimir lixo.
+const mascarado = (s) => { const t = String(s ?? '').replace(/[\s·\/\-.,]/g, ''); return !t || /^\*+$/.test(t) }
+
 /* ===== Helpers visuais para impressão (etiqueta + folha) ===== */
 // Dados do remetente/emitente — TODO: puxar da config da conta. Ajuste com os dados reais.
 const REMETENTE_NOME = 'Sóstrass Acessórios e Pedrarias'
 const REMETENTE_END = 'Rua Comendador, 120 · Limeira - SP · CEP 13480-000'
 const REMETENTE_CNPJ = '00.000.000/0000-00'
+
+// Config de impressão (Módulo 2). É preenchida pela conta via painel "Personalizar impressão".
+// As funções de impressão leem daqui por padrão; a prévia ao vivo passa um cfg explícito.
+const PRINT_CFG_PADRAO = {
+  emitente_nome: '', emitente_cnpj: '', emitente_endereco: '', emitente_cidade: '',
+  mostrar_timeline: true, mostrar_nfe: true, mostrar_rastreio: true, mostrar_destinatario: true,
+  mostrar_miniaturas: true, mostrar_complemento: true, mostrar_nota_comprador: true,
+  mostrar_codigo_barras: true, mostrar_qr: true,
+}
+let PRINT_CFG = { ...PRINT_CFG_PADRAO }
+function setPrintCfg(c) { PRINT_CFG = { ...PRINT_CFG_PADRAO, ...(c || {}) } }
+// resolve emitente: usa o que a conta configurou; cai no placeholder se vazio
+const emitNome = (cfg) => (cfg.emitente_nome || REMETENTE_NOME)
+const emitCnpjCidade = (cfg) => {
+  const cnpj = cfg.emitente_cnpj ? `CNPJ ${cfg.emitente_cnpj}` : `CNPJ ${REMETENTE_CNPJ}`
+  const cid = cfg.emitente_cidade || 'Limeira/SP'
+  return `${cnpj} · ${cid}`
+}
+const emitEndereco = (cfg) => {
+  const e = [cfg.emitente_endereco, cfg.emitente_cidade].filter(Boolean).join(' · ')
+  return e || REMETENTE_END
+}
 
 // Ícone lucide inline (paths em printAssets.ICONS)
 function ico(nome, size = 14, cor = '#14151a', sw = 2) {
@@ -93,45 +118,46 @@ function timelineHTML(status, compact = false) {
   }).join('')
   return `<div class="tl ${compact ? 'cmp' : ''}">${nodes}</div>`
 }
-// Folha de pedido (separação/conferência) — Enterprise, 1 por página
-function htmlFolhaPedido(p) {
+function htmlFolhaPedido(p, cfg = PRINT_CFG) {
   const end = p.endereco || {}
   const enderecoLinha = [end.completo, [end.cidade, end.uf].filter(Boolean).join('/'), end.cep ? 'CEP ' + end.cep : ''].filter(Boolean).join(' · ')
   const totU = (p.itens || []).reduce((s, i) => s + (i.qtd || 0), 0)
   const nItens = (p.itens || []).length
   const rows = (p.itens || []).map((it) => `
     <div class="row">
-      <div class="ph">${it.imagem ? `<img src="${esc(it.imagem)}">` : ico('image', 17, '#c2c5cd')}</div>
+      ${cfg.mostrar_miniaturas ? `<div class="ph">${it.imagem ? `<img src="${esc(it.imagem)}">` : ico('image', 17, '#c2c5cd')}</div>` : ''}
       <div class="cd">
         <div class="nm">${esc(it.nome) || '—'}</div>
-        <div class="mt">${it.variacao ? `${ico('palette', 12, '#7a7f8b')}<b>${esc(it.variacao)}</b>` : ''}${it.variacao && it.sku ? '<span class="dt2">·</span>' : ''}${it.sku ? `${ico('hash', 11, '#9aa0ab')}<span class="sku">${esc(it.sku)}</span>` : ''}${it.complemento ? `<span class="dt2">·</span>${ico('ruler', 11, '#aab0bb')}<span class="cp">${esc(it.complemento)}</span>` : ''}</div>
+        <div class="mt">${it.variacao ? `${ico('palette', 12, '#7a7f8b')}<b>${esc(it.variacao)}</b>` : ''}${it.variacao && it.sku ? '<span class="dt2">·</span>' : ''}${it.sku ? `${ico('hash', 11, '#9aa0ab')}<span class="sku">${esc(it.sku)}</span>` : ''}${cfg.mostrar_complemento && it.complemento ? `<span class="dt2">·</span>${ico('ruler', 11, '#aab0bb')}<span class="cp">${esc(it.complemento)}</span>` : ''}</div>
       </div>
       <div class="qt"><b>${it.qtd}</b><span>un</span></div>
       <div class="ck"></div>
     </div>`).join('')
   const tagPrazo = p.ship_by ? `<span class="tg w">${ico('clock', 12, '#F0C079')} enviar até ${new Date(p.ship_by * 1000).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>` : ''
   const nota = p.nota_comprador || p.observacao || ''
-  const notaComprador = nota ? `<div class="obsbar">${ico('message-square', 13, '#C2790F')} <b>Nota do comprador:</b> ${esc(nota)}</div>` : ''
+  const notaComprador = (cfg.mostrar_nota_comprador && nota) ? `<div class="obsbar">${ico('message-square', 13, '#C2790F')} <b>Nota do comprador:</b> ${esc(nota)}</div>` : ''
   const nomeDest = end.nome || p.cliente || p.comprador || '—'
   const iniciais = String(nomeDest).trim().split(/\s+/).slice(0, 2).map((x) => x[0] || '').join('').toUpperCase() || '·'
+  const destProtegido = mascarado(nomeDest)
+  const destcardHTML = !cfg.mostrar_destinatario ? '' : (destProtegido
+    ? `<div class="destcard"><div class="dlbl">${ico('map-pin', 11, '#9aa0ab')} DESTINATÁRIO</div><div class="drow"><div><div class="dnome" style="font-size:14px">Protegido pela Shopee</div><div class="dadr">endereço de envio na etiqueta Oficial SPX</div></div></div></div>`
+    : `<div class="destcard"><div class="dlbl">${ico('map-pin', 11, '#9aa0ab')} DESTINATÁRIO</div><div class="drow"><div class="dav">${esc(iniciais)}</div><div><div class="dnome">${esc(nomeDest)}</div><div class="dadr">${esc(enderecoLinha || '—')}</div>${end.telefone && !mascarado(end.telefone) ? `<div class="dadr">Tel ${esc(end.telefone)}</div>` : ''}</div></div></div>`)
   return `<section class="doc">
     <div class="band">
       <div class="bl"><div class="kick">PEDIDO DE VENDA · SEPARAÇÃO</div><div class="onum">#${esc(p.order_sn)}</div>
         <div class="tags"><span class="tg s">${ico('truck', 12, '#FF9576')} Shopee Xpress</span>${tagPrazo}</div></div>
-      <div class="br"><div class="bcwrap">${barcodeSVG(p.order_sn, { height: 38, modulo: 1.15 })}</div><div class="dt">impresso em ${new Date().toLocaleString('pt-BR')}</div></div>
+      <div class="br">${cfg.mostrar_codigo_barras ? `<div class="bcwrap">${barcodeSVG(p.order_sn, { height: 38, modulo: 1.15 })}</div>` : ''}<div class="dt">impresso em ${new Date().toLocaleString('pt-BR')}</div></div>
     </div>
-    <div class="emp"><div class="logo">${ico('store', 18, '#fff')}</div><div class="ei"><div class="en">${esc(REMETENTE_NOME)}</div><div class="ec">CNPJ ${esc(REMETENTE_CNPJ)} · Limeira/SP</div></div><img class="spxs" src="${SPX_LOGO}"></div>
-    ${timelineHTML(p.status)}
+    <div class="emp"><div class="logo">${ico('store', 18, '#fff')}</div><div class="ei"><div class="en">${esc(emitNome(cfg))}</div><div class="ec">${esc(emitCnpjCidade(cfg))}</div></div><img class="spxs" src="${SPX_LOGO}"></div>
+    ${cfg.mostrar_timeline ? timelineHTML(p.status) : ''}
     <div class="topcols">
       <div class="refs">
-        <div class="ref">${ico('file-text', 13, '#6b6f7a')}<div><span>NOTA FISCAL</span><b>${esc(p.nfe_numero || '—')}</b></div></div>
-        <div class="ref">${ico('barcode', 13, '#6b6f7a')}<div><span>RASTREIO</span><b class="mn">${esc(p.rastreio || '—')}</b></div></div>
+        ${cfg.mostrar_nfe ? `<div class="ref">${ico('file-text', 13, '#6b6f7a')}<div><span>NOTA FISCAL</span><b>${esc(p.nfe_numero || '—')}</b></div></div>` : ''}
+        ${cfg.mostrar_rastreio ? `<div class="ref">${ico('barcode', 13, '#6b6f7a')}<div><span>RASTREIO</span><b class="mn">${esc(p.rastreio || '—')}</b></div></div>` : ''}
         <div class="ref">${ico('truck', 13, '#6b6f7a')}<div><span>STATUS</span><b>${esc(statusPt(p.status))}</b></div></div>
         <div class="ref">${ico('package', 13, '#6b6f7a')}<div><span>VOLUME</span><b>1 caixa</b></div></div>
       </div>
-      <div class="destcard"><div class="dlbl">${ico('map-pin', 11, '#9aa0ab')} DESTINATÁRIO</div>
-        <div class="drow"><div class="dav">${esc(iniciais)}</div><div><div class="dnome">${esc(nomeDest)}</div>
-          <div class="dadr">${esc(enderecoLinha || '—')}</div>${end.telefone ? `<div class="dadr">Tel ${esc(end.telefone)}</div>` : ''}</div></div></div>
+      ${destcardHTML}
     </div>
     ${notaComprador}
     <div class="ith"><div class="itl">${ico('package', 14)}<span>CONFERÊNCIA DE ITENS</span></div><div class="itr"><span class="cnt"><b>${nItens}</b> itens · <b>${totU}</b> unidades</span><span class="den">descrição completa</span></div></div>
@@ -140,7 +166,8 @@ function htmlFolhaPedido(p) {
   </section>`
 }
 // CSS compartilhado entre folha e etiqueta (timeline + logo Precifica). .tn escopado em .tl (evita colisão com rastreio).
-const CSS_SHARED = `.pfl{display:inline-flex;align-items:center;gap:6px}.pfmark{border-radius:6px;background:linear-gradient(135deg,#d6007f,#7b2a8c);display:grid;place-items:center;flex-shrink:0}.pfwm{font-weight:800;color:#14151a;letter-spacing:-.2px}.pfwm b{color:#d6007f;font-weight:800}
+const CSS_SHARED = `*{-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important}
+.pfl{display:inline-flex;align-items:center;gap:6px}.pfmark{border-radius:6px;background:linear-gradient(135deg,#d6007f,#7b2a8c);display:grid;place-items:center;flex-shrink:0}.pfwm{font-weight:800;color:#14151a;letter-spacing:-.2px}.pfwm b{color:#d6007f;font-weight:800}
 .tl{display:flex;align-items:flex-start;padding:15px 30px 13px;background:#fff;border-bottom:1px solid #eef0f3}
 .tl .tn{flex:1;text-align:center;position:relative}.tl .tn::before{content:'';position:absolute;top:18px;left:-50%;width:100%;height:3px;background:#e3e5ea;z-index:0}.tl .tn:first-child::before{display:none}.tl .tn.done::before,.tl .tn.current::before{background:#16171c}
 .tcirc{width:38px;height:38px;border-radius:50%;display:grid;place-items:center;margin:0 auto;position:relative;z-index:1;background:#fff;border:2px solid #dcdfe5}.tl .tn.done .tcirc{background:#16171c;border-color:#16171c}.tl .tn.current .tcirc{background:#EE4D2D;border-color:#EE4D2D;box-shadow:0 0 0 4px rgba(238,77,45,.16)}
@@ -173,34 +200,40 @@ const CSS_FOLHA = CSS_SHARED + `*{box-sizing:border-box;margin:0;padding:0}body{
 @media print{@page{size:A4;margin:0}.doc:last-child{page-break-after:auto}}`
 
 // Etiqueta logística — desenho PAISAGEM (15x10) rotacionado 90° para encaixar no rótulo térmico 100x150mm
-function htmlEtiqueta(p, rem) {
+function htmlEtiqueta(p, rem, cfg = PRINT_CFG) {
   const end = p.endereco || {}
   const enderecoLinha = [end.completo].filter(Boolean).join('')
   const cidadeLinha = [[end.cidade, end.uf].filter(Boolean).join(' - '), end.cep ? 'CEP ' + end.cep : ''].filter(Boolean).join(' · ')
   const cpfTel = [end.telefone ? 'Tel ' + end.telefone : '', end.cpf ? 'CPF ' + end.cpf : ''].filter(Boolean).join(' · ')
-  const remNome = rem || REMETENTE_NOME
+  const remNome = rem || emitNome(cfg)
   const nItens = (p.itens || []).length
   const rastreio = p.rastreio || p.order_sn
   const espacar = (s) => String(s || '').replace(/(.{4})/g, '$1 ').trim()
   const litens = (p.itens || []).slice(0, 3).map((it) => `<tr><td class="q">${it.qtd}</td><td class="nmc"><b>${esc(it.nome)}</b><span class="sl">${[it.variacao, it.sku].filter(Boolean).map(esc).join(' · ')}</span></td></tr>`).join('')
   const more = nItens > 3 ? `<div class="more">+ ${nItens - 3} itens · lista completa na folha de separação</div>` : ''
   const temNfe = !!(p.nfe_numero && p.nfe_numero !== '—')
-  const danfe = temNfe ? `<div class="danfe"><div class="dh">${ico('file-text', 9, '#111')} DANFE SIMPLIFICADO — NF-e</div>
+  const danfe = (cfg.mostrar_nfe && temNfe) ? `<div class="danfe"><div class="dh">${ico('file-text', 9, '#111')} DANFE SIMPLIFICADO — NF-e</div>
       <div class="dg"><span>nº <b>${esc(p.nfe_numero)}</b></span>${p.nfe_serie ? `<span>Sér <b>${esc(p.nfe_serie)}</b></span>` : ''}${p.nfe_emissao ? `<span>Emis <b>${esc(p.nfe_emissao)}</b></span>` : ''}${p.valor_total != null ? `<span>R$ <b>${Number(p.valor_total).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</b></span>` : ''}</div>
-      <div class="em">Emitente: <b>${esc(REMETENTE_NOME)}</b> · CNPJ ${esc(REMETENTE_CNPJ)}</div>
+      <div class="em">Emitente: <b>${esc(emitNome(cfg))}</b> · CNPJ ${esc(cfg.emitente_cnpj || REMETENTE_CNPJ)}</div>
       ${p.nfe_chave ? `<div class="chave">${barcodeSVG(p.nfe_chave, { height: 26, modulo: 1.0, texto: false })}<div class="cl2">${esc(espacar(p.nfe_chave))}</div></div>` : ''}</div>` : ''
+  const destEtiqHTML = !cfg.mostrar_destinatario ? '' :
+    `<div class="dest"><div class="cap">${ico('map-pin', 9, '#111')} DESTINATÁRIO</div>${mascarado(end.nome || p.cliente || p.comprador)
+      ? `<div class="dn" style="font-size:11px">Protegido pela Shopee</div><div class="da">endereço de envio na etiqueta Oficial SPX</div>`
+      : `<div class="dn">${esc(end.nome || p.cliente || p.comprador || '—')}</div><div class="da">${esc(enderecoLinha || '—')}${cidadeLinha ? ' · ' + esc(cidadeLinha) : ''}</div>${cpfTel ? `<div class="da">${esc(cpfTel)}</div>` : ''}`}</div>`
+  const qrrowHTML = (cfg.mostrar_qr || cfg.mostrar_rastreio)
+    ? `<div class="qrrow">${cfg.mostrar_qr ? `<div class="qr">${qrSvg(rastreio)}</div>` : ''}${cfg.mostrar_rastreio ? `<div class="track"><span class="tlbl">RASTREIO SPX</span>${barcodeSVG(rastreio, { height: 40, modulo: 0.9, texto: false })}<div class="trk">${esc(espacar(rastreio))}</div></div>` : ''}</div>`
+    : ''
   return `<div class="page"><div class="labh"><div class="safe">
     <div class="xphd"><img class="spx" src="${SPX_LOGO}"><div class="xpr"><div class="svc">ENTREGA PADRÃO</div><div class="vol">Volume 1 / 1 · #${esc(String(p.order_sn).slice(-14))}</div></div></div>
     <div class="cols">
       <div class="cl">
         <div class="sortbox"><span class="sl">ESTAÇÃO / ROTA</span><div class="sb">${esc(p.estacao || '—')}</div>${p.rota ? `<span class="ss">${esc(p.rota)}</span>` : ''}</div>
         ${danfe}
-        <div class="dest"><div class="cap">${ico('map-pin', 9, '#111')} DESTINATÁRIO</div><div class="dn">${esc(end.nome || p.cliente || p.comprador || '—')}</div>
-          <div class="da">${esc(enderecoLinha || '—')}${cidadeLinha ? ' · ' + esc(cidadeLinha) : ''}</div>${cpfTel ? `<div class="da">${esc(cpfTel)}</div>` : ''}</div>
+        ${destEtiqHTML}
       </div>
       <div class="cr">
-        <div class="qrrow"><div class="qr">${qrSvg(rastreio)}</div><div class="track"><span class="tlbl">RASTREIO SPX</span>${barcodeSVG(rastreio, { height: 40, modulo: 0.9, texto: false })}<div class="trk">${esc(espacar(rastreio))}</div></div></div>
-        <div class="rem"><div class="cap">${ico('store', 9, '#111')} REMETENTE</div><span class="rn">${esc(remNome)}</span> · ${esc(REMETENTE_END)}</div>
+        ${qrrowHTML}
+        <div class="rem"><div class="cap">${ico('store', 9, '#111')} REMETENTE</div><span class="rn">${esc(remNome)}</span> · ${esc(emitEndereco(cfg))}</div>
         <div class="pk"><div class="pkh">${ico('package', 9, '#111')} ITENS DO PEDIDO<span class="oid">${nItens} itens</span></div>
           <table class="ci"><tbody>${litens}</tbody></table>${more}</div>
       </div>
@@ -232,43 +265,20 @@ table.ci{width:100%;table-layout:fixed;border-collapse:collapse}table.ci td{padd
 .lfl{display:flex;align-items:center;gap:6px}.gen{font-size:7.5px;color:#555}.lfr{font-size:7.5px;color:#555;display:flex;align-items:center;gap:3px}
 @media print{@page{size:100mm 150mm;margin:0}}`
 
-/* ===== Dados de exemplo (formato real do pedido Shopee) ===== */
-const pedidoCompleto = {
-  order_sn: '2506260ABCXYZ12',
-  rastreio: 'SPXBR04812773901',
-  nfe_numero: '12847', nfe_serie: '1', nfe_emissao: '26/06/2026',
-  valor_total: 137.9, nfe_chave: '35250600000000000001550010000128471234567890',
-  status: 'READY_TO_SHIP',
-  estacao: 'SP 07', rota: 'LIM-CENTRO',
-  ship_by: Math.floor(Date.now()/1000) + 86400*2,
-  nota_comprador: 'Por favor embalar com cuidado, é presente. Caprichar no papel!',
-  endereco: { nome: 'Maria Aparecida da Silva Santos', completo: 'Rua das Acácias, 1280, Apto 42B, Bloco 3 - Jardim Primavera',
-    cidade: 'Campinas', uf: 'SP', cep: '13085-420', telefone: '(19) 99876-5432', cpf: '123.456.789-00' },
+const pedido = {
+  order_sn: '260612V7CKNGG8', rastreio: 'BR2624032462420', status: 'COMPLETED',
+  nfe_numero: '12345', nfe_serie: '1', nfe_emissao: '26/06/2026', valor_total: 51.40,
+  ship_by: 1749781140, comprador: '****', cliente: '****',
+  endereco: { nome:'****', completo:'****', cidade:'****', uf:'****', cep:'****', telefone:'****' },
   itens: [
-    { imagem:'', nome:'Miçanga de Vidro Transparente Furta-Cor 6mm Pacote com 500 unidades para Bijuteria Artesanal', variacao:'Cristal AB', sku:'MIC-VD-6MM-CRAB', qtd:3, complemento:'fio 0,8mm' },
-    { imagem:'', nome:'Linha de Nylon Encerada 1mm Rolo 50 metros Premium', variacao:'Vermelho Ferrari', sku:'NYL-1MM-VERM', qtd:2 },
-    { imagem:'', nome:'Fecho Lagosta Banhado a Ouro 12mm', variacao:'Dourado', sku:'FEC-LAG-12-OUR', qtd:5, complemento:'com argola 8mm' },
-    { imagem:'', nome:'Tear Manual de Madeira para Pulseiras com 12 pinos', variacao:'Natural', sku:'TEAR-MAD-12', qtd:1 },
-    { imagem:'', nome:'Mostacilha Preciosa Czech Tamanho 10/0 Tubo 20g', variacao:'Azul Turquesa Opaco', sku:'MOST-PREC-10-AZTQ', qtd:4 },
+    { imagem:'', nome:'Meia Pérola ABS 14mm Branco · 500g — 780 peças', variacao:'Branco', sku:'5817140010000', qtd:11, complemento:'Embalagem com 500g' },
+    { imagem:'', nome:'Cola A Legítima 100ml | Ideal para Strass e Pedrarias', variacao:'', sku:'7500100000100', qtd:1, complemento:'Embalagem com 100ml' },
   ],
 }
-const pedidoSimples = {
-  order_sn: '2506260SIMPLES01', rastreio: 'SPXBR04899112233', status: 'UNPAID',
-  endereco: { nome:'João Pedro', completo:'Av. Brasil, 55 - Centro', cidade:'Limeira', uf:'SP', cep:'13480-000' },
-  itens: [
-    { nome:'Agulha de Tapeçaria Nº 18 Aço Inox', variacao:'Prata', sku:'AGU-TAP-18', qtd:2 },
-    { nome:'Botão de Resina 4 Furos 15mm', variacao:'Branco Perolado', sku:'BOT-RES-15-BRP', qtd:6 },
-  ],
-}
-
-const page = (titulo, css, corpo) =>
-`<!doctype html><html lang="pt-br"><head><meta charset="utf-8"><title>${titulo}</title>
-<link rel="preconnect" href="https://fonts.googleapis.com"><style>${css}</style></head><body>${corpo}</body></html>`
-
-fs.writeFileSync('/tmp/qa-folha.html',    page('Folha', CSS_FOLHA, htmlFolhaPedido(pedidoCompleto) + htmlFolhaPedido(pedidoSimples)))
-fs.writeFileSync('/tmp/qa-etiqueta.html', page('Etiqueta', CSS_ETIQ, htmlEtiqueta(pedidoCompleto) + htmlEtiqueta(pedidoSimples)))
-console.log('OK folha+etiqueta geradas')
-console.log('folha bytes:',   fs.statSync('/tmp/qa-folha.html').size)
-console.log('etiqueta bytes:',fs.statSync('/tmp/qa-etiqueta.html').size)
-console.log('SPX_LOGO ok?', SPX_LOGO.slice(0,30))
-console.log('ICONS keys:', Object.keys(ICONS).length)
+const cfgTeste = { ...PRINT_CFG_PADRAO,
+  emitente_nome:'Minha Loja LTDA', emitente_cnpj:'12.345.678/0001-90',
+  emitente_endereco:'Av. Teste, 500', emitente_cidade:'Campinas - SP · CEP 13000-000',
+  mostrar_timeline:false, mostrar_miniaturas:false, mostrar_codigo_barras:false }
+const page = (t, css, body) => `<!doctype html><html lang="pt-br"><head><meta charset="utf-8"><title>${t}</title><style>${css}</style></head><body>${body}</body></html>`
+fs.writeFileSync('/tmp/qa-folha-cfg.html', page('Folha', CSS_FOLHA, htmlFolhaPedido(pedido, cfgTeste)))
+console.log('OK — folha com cfg custom (sem timeline/miniaturas/barcode, emitente custom, NF ligada)')

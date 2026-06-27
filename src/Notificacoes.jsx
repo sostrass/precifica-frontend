@@ -74,7 +74,8 @@ export default function NotificacoesGlobais({ ativo, onNavegar }) {
   const primeiraRef = useRef(true)
 
   const carregar = async () => {
-    try { setItens(await api.notificacoes()) } catch { /* silencioso */ }
+    try { setItens(await api.notificacoes()) }
+    catch { setItens((prev) => (prev === null ? [] : prev)) }  // não trava no skeleton se a 1ª carga falhar
   }
   useEffect(() => {
     if (!ativo) return

@@ -9,7 +9,7 @@ import {
   Percent, Ticket, RotateCcw, ChevronDown, PlusCircle, Layers, Hourglass, Infinity as InfinityIcon,
   Wallet, Receipt, Coins, Truck, BadgePercent, Target,
   Printer, MapPin, FileText, ClipboardList, User as UserIcon,
-  Repeat, CreditCard, Phone, Hash, Barcode, CheckCheck, Box,
+  Repeat, CreditCard, Phone, Hash, Barcode, CheckCheck, Box, Info,
 } from 'lucide-react'
 import { api, setToken } from './api'
 import { useToast } from './toast.jsx'
@@ -326,7 +326,16 @@ function BoostCenter({ conectado, notify }) {
   const [addOpen, setAddOpen] = useState(false)
   const [sincNomes, setSincNomes] = useState(false)
   const [autoSel, setAutoSel] = useState(false)
+  const [desemp, setDesemp] = useState(null)        // {item_id: vendas 30d}
+  const [desempLoad, setDesempLoad] = useState(false)
   const editandoJanela = useRef(false)
+
+  const carregarDesemp = async () => {
+    setDesempLoad(true)
+    try { const r = await api.shopeeBoostDesempenho(); setDesemp(r.vendas || {}) }
+    catch (e) { notify(e.message, 'danger') }
+    setDesempLoad(false)
+  }
 
   const carregar = () => api.shopeeBoostStatus().then((d) => {
     // não sobrescreve a janela enquanto o usuário está mexendo nela
@@ -509,19 +518,39 @@ function BoostCenter({ conectado, notify }) {
 
       {/* Impulsionando agora */}
       <div className="glass rounded-2xl p-4">
-        <div className="text-sm font-medium mb-3 flex items-center gap-2"><Flame size={15} style={{ color: LARANJA }} /> Impulsionando agora <span className="text-faint">({ativos.length}/5)</span></div>
+        <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+          <div className="text-sm font-medium flex items-center gap-2"><Flame size={15} style={{ color: LARANJA }} /> Impulsionando agora <span className="text-faint">({ativos.length}/5)</span></div>
+          <button onClick={carregarDesemp} disabled={!conectado || desempLoad}
+                  className="rounded-lg px-3 py-1.5 text-xs font-medium flex items-center gap-1.5 disabled:opacity-60"
+                  style={{ background: 'var(--glass-hover)', color: 'var(--text-dim)' }}
+                  title="Mostra as vendas dos últimos 30 dias de cada produto, pra você ver se o impulso está convertendo">
+            {desempLoad ? <Loader2 size={14} className="animate-spin" /> : <TrendingUp size={14} />} {desemp ? 'Atualizar desempenho' : 'Ver desempenho'}
+          </button>
+        </div>
         {ativos.length === 0
           ? <div className="text-sm text-faint py-6 text-center">Nenhum produto impulsionado no momento.</div>
           : <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {ativos.map((i) => (
-                <div key={i.item_id} className="rounded-xl p-3 flex items-center gap-3"
+                <div key={i.item_id} className="rounded-xl p-3 flex items-start gap-3"
                      style={{ background: 'var(--glass-hover)', border: `1px solid ${LARANJA}33` }}>
                   <Countdown iso={i.termina_em} />
                   <div className="min-w-0 flex-1">
-                    <div className="text-sm font-medium truncate flex items-center gap-1">
-                      {i.fixo && <Pin size={11} style={{ color: LARANJA }} />}{i.nome || i.item_id}
+                    <div className="text-sm font-medium flex items-start gap-1">
+                      {i.fixo && <Pin size={11} style={{ color: LARANJA, flexShrink: 0, marginTop: 3 }} />}
+                      <span className="leading-snug" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{i.nome || `#${i.item_id}`}</span>
                     </div>
-                    <div className="text-[11px] text-faint num">{i.impulsos} impulso(s) • #{i.item_id}</div>
+                    <div className="text-[11px] text-faint num mt-0.5">{i.impulsos} impulso(s) • #{i.item_id}</div>
+                    {desemp && desemp[i.item_id] != null && (
+                      <div className="text-[11px] num mt-1 flex items-center gap-1" style={{ color: desemp[i.item_id] > 0 ? '#2DD4BF' : 'var(--text-faint)' }}>
+                        <TrendingUp size={11} /> {desemp[i.item_id]} venda(s) em 30 dias
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-1 flex-shrink-0">
+                    <button onClick={() => fixar(i.item_id, !i.fixo)} title={i.fixo ? 'Desafixar' : 'Fixar (sempre impulsionar)'}
+                            className="p-1" style={{ color: i.fixo ? LARANJA : 'var(--text-faint)' }}>{i.fixo ? <PinOff size={15} /> : <Pin size={15} />}</button>
+                    <button onClick={() => remover(i.item_id)} title="Tirar do rodízio (o impulso atual de 4h termina sozinho na Shopee; ele só não volta a ser impulsionado)"
+                            className="text-faint hover:text-danger p-1"><X size={15} /></button>
                   </div>
                 </div>
               ))}
@@ -552,18 +581,18 @@ function BoostCenter({ conectado, notify }) {
                 <div key={i.item_id} className="flex items-center gap-3 rounded-lg px-3 py-2" style={{ background: 'var(--glass-hover)' }}>
                   <span className="num text-xs text-faint w-5">{idx + 1}</span>
                   <div className="min-w-0 flex-1">
-                    <div className="text-sm truncate">{i.nome || i.item_id}</div>
-                    <div className="text-[11px] text-faint num">#{i.item_id} • {i.impulsos} impulso(s){i.prioridade ? ` • prioridade ${i.prioridade}` : ''}</div>
+                    <div className="text-sm leading-snug" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{i.nome || `#${i.item_id}`}</div>
+                    <div className="text-[11px] text-faint num">#{i.item_id} • {i.impulsos} impulso(s){i.prioridade ? ` • prioridade ${i.prioridade}` : ''}{desemp && desemp[i.item_id] != null ? ` • ${desemp[i.item_id]} venda(s)/30d` : ''}</div>
                   </div>
                   <button onClick={() => fixar(i.item_id, true)} title="Fixar (sempre impulsionar)"
                           className="text-faint hover:text-fg p-1"><Pin size={15} /></button>
-                  <button onClick={() => remover(i.item_id)} title="Remover" className="text-faint hover:text-danger p-1"><X size={15} /></button>
+                  <button onClick={() => remover(i.item_id)} title="Remover do rodízio" className="text-faint hover:text-danger p-1"><X size={15} /></button>
                 </div>
               ))}
             </div>}
       </div>
 
-      {addOpen && <AddProdutos onClose={() => setAddOpen(false)} onAdded={() => { setAddOpen(false); carregar() }} notify={notify} />}
+      {addOpen && <AddProdutos jaNoBoost={new Set(bs?.itens_ids || [...ativos, ...fila].map((i) => i.item_id))} onClose={() => setAddOpen(false)} onAdded={() => { setAddOpen(false); carregar() }} notify={notify} />}
     </div>
   )
 }
@@ -586,15 +615,18 @@ function HoraInput({ v, on }) {
   )
 }
 
-function AddProdutos({ onClose, onAdded, notify }) {
+function AddProdutos({ jaNoBoost, onClose, onAdded, notify }) {
   const { itens, carregando, completo } = useItensShopeeProg()
   const [busca, setBusca] = useState('')
   const [sel, setSel] = useState(() => new Set())
   const [salvando, setSalvando] = useState(false)
-  const filtrados = useMemo(() => filtrarItens(itens, busca), [itens, busca])
+  const ja = jaNoBoost instanceof Set ? jaNoBoost : new Set(jaNoBoost || [])
+  const disponiveis = useMemo(() => itens.filter((i) => !ja.has(i.item_id)), [itens, ja])
+  const ocultos = itens.length - disponiveis.length
+  const filtrados = useMemo(() => filtrarItens(disponiveis, busca), [disponiveis, busca])
   const toggle = (id) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
   const salvar = async () => {
-    const escolhidos = itens.filter((i) => sel.has(i.item_id))
+    const escolhidos = disponiveis.filter((i) => sel.has(i.item_id))
     if (!escolhidos.length) return
     setSalvando(true)
     try { await api.shopeeBoostAdd(escolhidos); notify(`${escolhidos.length} produto(s) na lista de boost`, 'ok'); onAdded() }
@@ -609,14 +641,21 @@ function AddProdutos({ onClose, onAdded, notify }) {
           <button onClick={onClose} className="text-faint hover:text-fg"><X size={18} /></button>
         </div>
         <div className="p-3 overflow-y-auto flex-1">
-          <BarraBusca valor={busca} onChange={setBusca} carregando={carregando} completo={completo} mostrando={filtrados.length} total={itens.length} />
+          <BarraBusca valor={busca} onChange={setBusca} carregando={carregando} completo={completo} mostrando={filtrados.length} total={disponiveis.length} />
+          {ocultos > 0 && (
+            <div className="text-[11px] text-faint flex items-center gap-1.5 px-1 mb-1.5">
+              <CheckCircle2 size={11} style={{ color: LARANJA }} /> {ocultos} produto(s) já no boost — ocultados desta lista
+            </div>
+          )}
           {itens.length === 0 && carregando
             ? <div className="py-10 text-center text-faint flex items-center justify-center gap-2"><Loader2 size={16} className="animate-spin" /> carregando seus anúncios…</div>
             : itens.length === 0
               ? <div className="py-10 text-center text-faint text-sm">Não consegui listar os anúncios da Shopee. Verifique a conexão da loja.</div>
-              : filtrados.length === 0
-                ? <div className="py-8 text-center text-faint text-sm">Nenhum anúncio para "{busca}".</div>
-                : <div className="space-y-1">
+              : disponiveis.length === 0
+                ? <div className="py-8 text-center text-faint text-sm">Todos os seus anúncios já estão no rodízio de boost.</div>
+                : filtrados.length === 0
+                  ? <div className="py-8 text-center text-faint text-sm">Nenhum anúncio para "{busca}".</div>
+                  : <div className="space-y-1">
                   {filtrados.map((i) => (
                     <button key={i.item_id} onClick={() => toggle(i.item_id)}
                             className="w-full flex items-center gap-3 rounded-lg px-3 py-2 text-left"
@@ -648,9 +687,9 @@ function AddProdutos({ onClose, onAdded, notify }) {
 
 /* ----------------------------- AVALIAÇÕES -------------------------------- */
 const TONS_UI = [
-  ['caloroso', 'Caloroso', '💛'],
-  ['profissional', 'Profissional', '🤝'],
-  ['descontraido', 'Descontraído', '😄'],
+  ['caloroso', 'Caloroso', ''],
+  ['profissional', 'Profissional', ''],
+  ['descontraido', 'Descontraído', ''],
 ]
 const CORES_AVATAR = ['#EE4D2D', '#d6007f', '#7b2a8c', '#8B7FE8', '#F08AAE', '#5BA3F0', '#6BCB77']
 function corAvatar(nome) {
@@ -1108,7 +1147,7 @@ function ReviewCard({ c, cfg, notify, onRespondida }) {
                       <span className="text-[10px] text-faint mr-0.5">tom:</span>
                       {TONS_UI.map(([id, t, e]) => (
                         <button key={id} onClick={() => gerar(id)} disabled={gerando} title={`Gerar ${t.toLowerCase()}`}
-                                className="text-[11px] px-2 py-1 rounded-md glass text-dim hover:text-fg disabled:opacity-50">{e} {t}</button>
+                                className="text-[11px] px-2 py-1 rounded-md glass text-dim hover:text-fg disabled:opacity-50">{t}</button>
                       ))}
                     </div>
                     <span className="text-[10px] num" style={{ color: rascunho.length > limite ? 'var(--danger)' : 'var(--faint)' }}>{rascunho.length}/{limite}</span>
@@ -1155,7 +1194,7 @@ function ConfigReviewIA({ cfg, onSalvar, onClose }) {
             <div className="flex gap-1.5">
               {TONS_UI.map(([id, t, e]) => (
                 <button key={id} onClick={() => up('tom', id)} className="flex-1 text-xs px-3 py-2 rounded-lg font-medium transition"
-                        style={f.tom === id ? { background: LARANJA, color: '#fff' } : { background: 'var(--glass-hover)', color: 'var(--text-dim)' }}>{e} {t}</button>
+                        style={f.tom === id ? { background: LARANJA, color: '#fff' } : { background: 'var(--glass-hover)', color: 'var(--text-dim)' }}>{t}</button>
               ))}
             </div>
           </div>
@@ -1325,6 +1364,72 @@ function DiagDescontoRaw({ d, onClose }) {
   )
 }
 
+function DiagFlashRaw({ d, onClose }) {
+  const AMBER = '#F59E0B'
+  if (d?.erro) return (
+    <div className="glass rounded-2xl p-4" style={{ borderLeft: '3px solid #FF6F6F' }}>
+      <div className="flex items-center justify-between mb-1">
+        <div className="text-sm font-medium flex items-center gap-2" style={{ color: '#FF6F6F' }}><AlertTriangle size={15} /> Diagnóstico falhou</div>
+        <button onClick={onClose} className="text-faint hover:text-fg"><X size={14} /></button>
+      </div>
+      <div className="text-xs text-dim">{d.erro}</div>
+    </div>
+  )
+  const semSlot = (d.slots_disponiveis || 0) === 0
+  const ok = d.ok
+  const cor = ok ? '#2DD4BF' : semSlot ? AMBER : '#d6007f'
+  return (
+    <div className="glass rounded-2xl p-4 space-y-3" style={{ borderLeft: `3px solid ${cor}` }}>
+      <div className="flex items-center justify-between">
+        <div className="text-sm font-medium flex items-center gap-2"><Flame size={15} style={{ color: AMBER }} /> Diagnóstico do relâmpago</div>
+        <button onClick={onClose} className="text-faint hover:text-fg"><X size={14} /></button>
+      </div>
+      {!d.produto ? (
+        <div className="text-xs text-dim">{d.motivo || 'Nenhum produto elegível para testar.'}</div>
+      ) : (
+        <>
+          <div className="flex items-center gap-2 rounded-xl px-3 py-2" style={{ background: 'var(--glass-hover)' }}>
+            <Clock size={14} style={{ color: semSlot ? AMBER : '#2DD4BF' }} />
+            <span className="text-xs text-dim">Horários (slots) de Flash Sale liberados pela Shopee para sua loja:</span>
+            <b className="num" style={{ color: semSlot ? AMBER : '#2DD4BF' }}>{d.slots_disponiveis ?? 0}</b>
+          </div>
+          {semSlot ? (
+            <div className="rounded-xl p-3" style={{ background: `color-mix(in srgb, ${AMBER} 12%, transparent)` }}>
+              <div className="text-xs font-semibold mb-1 flex items-center gap-1.5" style={{ color: AMBER }}><Info size={13} /> Por isso o relâmpago não é criado</div>
+              <div className="text-[11px] text-dim leading-relaxed">{d.motivo}</div>
+            </div>
+          ) : ok ? (
+            <div className="text-sm flex items-center gap-2" style={{ color: '#2DD4BF' }}>
+              <CheckCircle2 size={15} /> Funcionou — sua loja tem slots e o produto foi aceito. O agente consegue criar relâmpagos.
+            </div>
+          ) : (
+            <div className="rounded-xl p-3" style={{ background: 'color-mix(in srgb, #d6007f 10%, transparent)' }}>
+              <div className="text-xs font-semibold mb-1.5" style={{ color: '#d6007f' }}>Havia slot, mas o produto/oferta foi recusado. Motivo:</div>
+              <div className="text-[11px] text-dim leading-relaxed">{d.motivo || 'Veja as respostas cruas abaixo.'}</div>
+              {(d.failed_items || []).length > 0 && (
+                <pre className="mt-2 p-2 rounded-lg overflow-auto num" style={{ background: 'var(--glass)', maxHeight: 160, fontSize: 10 }}>
+{JSON.stringify(d.failed_items, null, 2)}
+                </pre>
+              )}
+            </div>
+          )}
+          <div className="text-[11px] text-faint flex items-center gap-1.5 flex-wrap">
+            <span>Produto testado:</span><b className="text-dim">{d.produto.nome}</b>
+            <span className="num">{brl(d.produto.preco_atual)} → <b style={{ color: AMBER }}>{brl(d.produto.preco_promo)}</b></span>
+          </div>
+          <details className="text-[11px]">
+            <summary className="cursor-pointer text-faint hover:text-fg">ver respostas cruas da Shopee (slots + cada etapa)</summary>
+            <pre className="mt-2 p-2 rounded-lg overflow-auto num" style={{ background: 'var(--glass-hover)', maxHeight: 320, fontSize: 10 }}>
+{JSON.stringify({ payload_enviado: d.payload_enviado, etapas: d.etapas }, null, 2)}
+            </pre>
+          </details>
+          {d.aviso && <div className="text-[10px] text-faint">{d.aviso}</div>}
+        </>
+      )}
+    </div>
+  )
+}
+
 function DiagnosticoPromo({ msg, diag }) {
   // funil: cada etapa com a contagem; a 1ª que zera é o ponto de quebra
   const etapas = diag ? [
@@ -1433,6 +1538,8 @@ function MotorPromocoes({ conectado, notify }) {
   const [resultado, setResultado] = useState(null)
   const [diagRaw, setDiagRaw] = useState(null)
   const [diagLoad, setDiagLoad] = useState(false)
+  const [diagFlashRaw, setDiagFlashRaw] = useState(null)
+  const [diagFlashLoad, setDiagFlashLoad] = useState(false)
   const [sel, setSel] = useState(() => new Set())
   const [gerando, setGerando] = useState(false)
   const [aplicando, setAplicando] = useState(false)
@@ -1680,6 +1787,21 @@ function MotorPromocoes({ conectado, notify }) {
 
       {diagRaw && <DiagDescontoRaw d={diagRaw} onClose={() => setDiagRaw(null)} />}
 
+      {(cfg.tipo === 'flash' || cfg.tipo === 'ambos') && (
+        <button onClick={async () => {
+                  setDiagFlashLoad(true); setDiagFlashRaw(null)
+                  try { setDiagFlashRaw(await api.shopeePromoDiagnosticarFlash()) }
+                  catch (e) { setDiagFlashRaw({ erro: e.message }) }
+                  finally { setDiagFlashLoad(false) }
+                }} disabled={diagFlashLoad}
+                className="w-full text-xs px-4 py-2 rounded-xl font-medium flex items-center justify-center gap-2 glass text-dim hover:text-fg disabled:opacity-60">
+          {diagFlashLoad ? <Loader2 size={13} className="animate-spin" /> : <Flame size={13} />}
+          {diagFlashLoad ? 'Testando relâmpago na Shopee…' : 'Diagnosticar relâmpago (mostra se sua loja tem slots de Flash Sale)'}
+        </button>
+      )}
+
+      {diagFlashRaw && <DiagFlashRaw d={diagFlashRaw} onClose={() => setDiagFlashRaw(null)} />}
+
       {/* Tabela de propostas */}
       {propostas?.acao === 'ok' && propostas.propostas.length > 0 && (
         <div className="glass rounded-2xl overflow-hidden">
@@ -1925,11 +2047,36 @@ function BarcodeInline({ valor, height = 40, modulo = 1.4, texto = false }) {
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
 
+// A Shopee mascara dados pessoais (nome/endereço/tel) como "****". Detecta isso pra não imprimir lixo.
+const mascarado = (s) => { const t = String(s ?? '').replace(/[\s·\/\-.,]/g, ''); return !t || /^\*+$/.test(t) }
+
 /* ===== Helpers visuais para impressão (etiqueta + folha) ===== */
 // Dados do remetente/emitente — TODO: puxar da config da conta. Ajuste com os dados reais.
 const REMETENTE_NOME = 'Sóstrass Acessórios e Pedrarias'
 const REMETENTE_END = 'Rua Comendador, 120 · Limeira - SP · CEP 13480-000'
 const REMETENTE_CNPJ = '00.000.000/0000-00'
+
+// Config de impressão (Módulo 2). É preenchida pela conta via painel "Personalizar impressão".
+// As funções de impressão leem daqui por padrão; a prévia ao vivo passa um cfg explícito.
+const PRINT_CFG_PADRAO = {
+  emitente_nome: '', emitente_cnpj: '', emitente_endereco: '', emitente_cidade: '',
+  mostrar_timeline: true, mostrar_nfe: true, mostrar_rastreio: true, mostrar_destinatario: true,
+  mostrar_miniaturas: true, mostrar_complemento: true, mostrar_nota_comprador: true,
+  mostrar_codigo_barras: true, mostrar_qr: true,
+}
+let PRINT_CFG = { ...PRINT_CFG_PADRAO }
+function setPrintCfg(c) { PRINT_CFG = { ...PRINT_CFG_PADRAO, ...(c || {}) } }
+// resolve emitente: usa o que a conta configurou; cai no placeholder se vazio
+const emitNome = (cfg) => (cfg.emitente_nome || REMETENTE_NOME)
+const emitCnpjCidade = (cfg) => {
+  const cnpj = cfg.emitente_cnpj ? `CNPJ ${cfg.emitente_cnpj}` : `CNPJ ${REMETENTE_CNPJ}`
+  const cid = cfg.emitente_cidade || 'Limeira/SP'
+  return `${cnpj} · ${cid}`
+}
+const emitEndereco = (cfg) => {
+  const e = [cfg.emitente_endereco, cfg.emitente_cidade].filter(Boolean).join(' · ')
+  return e || REMETENTE_END
+}
 
 // Ícone lucide inline (paths em printAssets.ICONS)
 function ico(nome, size = 14, cor = '#14151a', sw = 2) {
@@ -1978,44 +2125,46 @@ function abrirImpressao(titulo, css, corpo) {
 }
 
 // Folha de pedido (separação/conferência) — Enterprise, 1 por página
-function htmlFolhaPedido(p) {
+function htmlFolhaPedido(p, cfg = PRINT_CFG) {
   const end = p.endereco || {}
   const enderecoLinha = [end.completo, [end.cidade, end.uf].filter(Boolean).join('/'), end.cep ? 'CEP ' + end.cep : ''].filter(Boolean).join(' · ')
   const totU = (p.itens || []).reduce((s, i) => s + (i.qtd || 0), 0)
   const nItens = (p.itens || []).length
   const rows = (p.itens || []).map((it) => `
     <div class="row">
-      <div class="ph">${it.imagem ? `<img src="${esc(it.imagem)}">` : ico('image', 17, '#c2c5cd')}</div>
+      ${cfg.mostrar_miniaturas ? `<div class="ph">${it.imagem ? `<img src="${esc(it.imagem)}">` : ico('image', 17, '#c2c5cd')}</div>` : ''}
       <div class="cd">
         <div class="nm">${esc(it.nome) || '—'}</div>
-        <div class="mt">${it.variacao ? `${ico('palette', 12, '#7a7f8b')}<b>${esc(it.variacao)}</b>` : ''}${it.variacao && it.sku ? '<span class="dt2">·</span>' : ''}${it.sku ? `${ico('hash', 11, '#9aa0ab')}<span class="sku">${esc(it.sku)}</span>` : ''}${it.complemento ? `<span class="dt2">·</span>${ico('ruler', 11, '#aab0bb')}<span class="cp">${esc(it.complemento)}</span>` : ''}</div>
+        <div class="mt">${it.variacao ? `${ico('palette', 12, '#7a7f8b')}<b>${esc(it.variacao)}</b>` : ''}${it.variacao && it.sku ? '<span class="dt2">·</span>' : ''}${it.sku ? `${ico('hash', 11, '#9aa0ab')}<span class="sku">${esc(it.sku)}</span>` : ''}${cfg.mostrar_complemento && it.complemento ? `<span class="dt2">·</span>${ico('ruler', 11, '#aab0bb')}<span class="cp">${esc(it.complemento)}</span>` : ''}</div>
       </div>
       <div class="qt"><b>${it.qtd}</b><span>un</span></div>
       <div class="ck"></div>
     </div>`).join('')
   const tagPrazo = p.ship_by ? `<span class="tg w">${ico('clock', 12, '#F0C079')} enviar até ${new Date(p.ship_by * 1000).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>` : ''
   const nota = p.nota_comprador || p.observacao || ''
-  const notaComprador = nota ? `<div class="obsbar">${ico('message-square', 13, '#C2790F')} <b>Nota do comprador:</b> ${esc(nota)}</div>` : ''
+  const notaComprador = (cfg.mostrar_nota_comprador && nota) ? `<div class="obsbar">${ico('message-square', 13, '#C2790F')} <b>Nota do comprador:</b> ${esc(nota)}</div>` : ''
   const nomeDest = end.nome || p.cliente || p.comprador || '—'
   const iniciais = String(nomeDest).trim().split(/\s+/).slice(0, 2).map((x) => x[0] || '').join('').toUpperCase() || '·'
+  const destProtegido = mascarado(nomeDest)
+  const destcardHTML = !cfg.mostrar_destinatario ? '' : (destProtegido
+    ? `<div class="destcard"><div class="dlbl">${ico('map-pin', 11, '#9aa0ab')} DESTINATÁRIO</div><div class="drow"><div><div class="dnome" style="font-size:14px">Protegido pela Shopee</div><div class="dadr">endereço de envio na etiqueta Oficial SPX</div></div></div></div>`
+    : `<div class="destcard"><div class="dlbl">${ico('map-pin', 11, '#9aa0ab')} DESTINATÁRIO</div><div class="drow"><div class="dav">${esc(iniciais)}</div><div><div class="dnome">${esc(nomeDest)}</div><div class="dadr">${esc(enderecoLinha || '—')}</div>${end.telefone && !mascarado(end.telefone) ? `<div class="dadr">Tel ${esc(end.telefone)}</div>` : ''}</div></div></div>`)
   return `<section class="doc">
     <div class="band">
       <div class="bl"><div class="kick">PEDIDO DE VENDA · SEPARAÇÃO</div><div class="onum">#${esc(p.order_sn)}</div>
         <div class="tags"><span class="tg s">${ico('truck', 12, '#FF9576')} Shopee Xpress</span>${tagPrazo}</div></div>
-      <div class="br"><div class="bcwrap">${barcodeSVG(p.order_sn, { height: 38, modulo: 1.15 })}</div><div class="dt">impresso em ${new Date().toLocaleString('pt-BR')}</div></div>
+      <div class="br">${cfg.mostrar_codigo_barras ? `<div class="bcwrap">${barcodeSVG(p.order_sn, { height: 38, modulo: 1.15 })}</div>` : ''}<div class="dt">impresso em ${new Date().toLocaleString('pt-BR')}</div></div>
     </div>
-    <div class="emp"><div class="logo">${ico('store', 18, '#fff')}</div><div class="ei"><div class="en">${esc(REMETENTE_NOME)}</div><div class="ec">CNPJ ${esc(REMETENTE_CNPJ)} · Limeira/SP</div></div><img class="spxs" src="${SPX_LOGO}"></div>
-    ${timelineHTML(p.status)}
+    <div class="emp"><div class="logo">${ico('store', 18, '#fff')}</div><div class="ei"><div class="en">${esc(emitNome(cfg))}</div><div class="ec">${esc(emitCnpjCidade(cfg))}</div></div><img class="spxs" src="${SPX_LOGO}"></div>
+    ${cfg.mostrar_timeline ? timelineHTML(p.status) : ''}
     <div class="topcols">
       <div class="refs">
-        <div class="ref">${ico('file-text', 13, '#6b6f7a')}<div><span>NOTA FISCAL</span><b>${esc(p.nfe_numero || '—')}</b></div></div>
-        <div class="ref">${ico('barcode', 13, '#6b6f7a')}<div><span>RASTREIO</span><b class="mn">${esc(p.rastreio || '—')}</b></div></div>
+        ${cfg.mostrar_nfe ? `<div class="ref">${ico('file-text', 13, '#6b6f7a')}<div><span>NOTA FISCAL</span><b>${esc(p.nfe_numero || '—')}</b></div></div>` : ''}
+        ${cfg.mostrar_rastreio ? `<div class="ref">${ico('barcode', 13, '#6b6f7a')}<div><span>RASTREIO</span><b class="mn">${esc(p.rastreio || '—')}</b></div></div>` : ''}
         <div class="ref">${ico('truck', 13, '#6b6f7a')}<div><span>STATUS</span><b>${esc(statusPt(p.status))}</b></div></div>
         <div class="ref">${ico('package', 13, '#6b6f7a')}<div><span>VOLUME</span><b>1 caixa</b></div></div>
       </div>
-      <div class="destcard"><div class="dlbl">${ico('map-pin', 11, '#9aa0ab')} DESTINATÁRIO</div>
-        <div class="drow"><div class="dav">${esc(iniciais)}</div><div><div class="dnome">${esc(nomeDest)}</div>
-          <div class="dadr">${esc(enderecoLinha || '—')}</div>${end.telefone ? `<div class="dadr">Tel ${esc(end.telefone)}</div>` : ''}</div></div></div>
+      ${destcardHTML}
     </div>
     ${notaComprador}
     <div class="ith"><div class="itl">${ico('package', 14)}<span>CONFERÊNCIA DE ITENS</span></div><div class="itr"><span class="cnt"><b>${nItens}</b> itens · <b>${totU}</b> unidades</span><span class="den">descrição completa</span></div></div>
@@ -2024,7 +2173,8 @@ function htmlFolhaPedido(p) {
   </section>`
 }
 // CSS compartilhado entre folha e etiqueta (timeline + logo Precifica). .tn escopado em .tl (evita colisão com rastreio).
-const CSS_SHARED = `.pfl{display:inline-flex;align-items:center;gap:6px}.pfmark{border-radius:6px;background:linear-gradient(135deg,#d6007f,#7b2a8c);display:grid;place-items:center;flex-shrink:0}.pfwm{font-weight:800;color:#14151a;letter-spacing:-.2px}.pfwm b{color:#d6007f;font-weight:800}
+const CSS_SHARED = `*{-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important}
+.pfl{display:inline-flex;align-items:center;gap:6px}.pfmark{border-radius:6px;background:linear-gradient(135deg,#d6007f,#7b2a8c);display:grid;place-items:center;flex-shrink:0}.pfwm{font-weight:800;color:#14151a;letter-spacing:-.2px}.pfwm b{color:#d6007f;font-weight:800}
 .tl{display:flex;align-items:flex-start;padding:15px 30px 13px;background:#fff;border-bottom:1px solid #eef0f3}
 .tl .tn{flex:1;text-align:center;position:relative}.tl .tn::before{content:'';position:absolute;top:18px;left:-50%;width:100%;height:3px;background:#e3e5ea;z-index:0}.tl .tn:first-child::before{display:none}.tl .tn.done::before,.tl .tn.current::before{background:#16171c}
 .tcirc{width:38px;height:38px;border-radius:50%;display:grid;place-items:center;margin:0 auto;position:relative;z-index:1;background:#fff;border:2px solid #dcdfe5}.tl .tn.done .tcirc{background:#16171c;border-color:#16171c}.tl .tn.current .tcirc{background:#EE4D2D;border-color:#EE4D2D;box-shadow:0 0 0 4px rgba(238,77,45,.16)}
@@ -2057,34 +2207,40 @@ const CSS_FOLHA = CSS_SHARED + `*{box-sizing:border-box;margin:0;padding:0}body{
 @media print{@page{size:A4;margin:0}.doc:last-child{page-break-after:auto}}`
 
 // Etiqueta logística — desenho PAISAGEM (15x10) rotacionado 90° para encaixar no rótulo térmico 100x150mm
-function htmlEtiqueta(p, rem) {
+function htmlEtiqueta(p, rem, cfg = PRINT_CFG) {
   const end = p.endereco || {}
   const enderecoLinha = [end.completo].filter(Boolean).join('')
   const cidadeLinha = [[end.cidade, end.uf].filter(Boolean).join(' - '), end.cep ? 'CEP ' + end.cep : ''].filter(Boolean).join(' · ')
   const cpfTel = [end.telefone ? 'Tel ' + end.telefone : '', end.cpf ? 'CPF ' + end.cpf : ''].filter(Boolean).join(' · ')
-  const remNome = rem || REMETENTE_NOME
+  const remNome = rem || emitNome(cfg)
   const nItens = (p.itens || []).length
   const rastreio = p.rastreio || p.order_sn
   const espacar = (s) => String(s || '').replace(/(.{4})/g, '$1 ').trim()
   const litens = (p.itens || []).slice(0, 3).map((it) => `<tr><td class="q">${it.qtd}</td><td class="nmc"><b>${esc(it.nome)}</b><span class="sl">${[it.variacao, it.sku].filter(Boolean).map(esc).join(' · ')}</span></td></tr>`).join('')
   const more = nItens > 3 ? `<div class="more">+ ${nItens - 3} itens · lista completa na folha de separação</div>` : ''
   const temNfe = !!(p.nfe_numero && p.nfe_numero !== '—')
-  const danfe = temNfe ? `<div class="danfe"><div class="dh">${ico('file-text', 9, '#111')} DANFE SIMPLIFICADO — NF-e</div>
+  const danfe = (cfg.mostrar_nfe && temNfe) ? `<div class="danfe"><div class="dh">${ico('file-text', 9, '#111')} DANFE SIMPLIFICADO — NF-e</div>
       <div class="dg"><span>nº <b>${esc(p.nfe_numero)}</b></span>${p.nfe_serie ? `<span>Sér <b>${esc(p.nfe_serie)}</b></span>` : ''}${p.nfe_emissao ? `<span>Emis <b>${esc(p.nfe_emissao)}</b></span>` : ''}${p.valor_total != null ? `<span>R$ <b>${Number(p.valor_total).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</b></span>` : ''}</div>
-      <div class="em">Emitente: <b>${esc(REMETENTE_NOME)}</b> · CNPJ ${esc(REMETENTE_CNPJ)}</div>
+      <div class="em">Emitente: <b>${esc(emitNome(cfg))}</b> · CNPJ ${esc(cfg.emitente_cnpj || REMETENTE_CNPJ)}</div>
       ${p.nfe_chave ? `<div class="chave">${barcodeSVG(p.nfe_chave, { height: 26, modulo: 1.0, texto: false })}<div class="cl2">${esc(espacar(p.nfe_chave))}</div></div>` : ''}</div>` : ''
+  const destEtiqHTML = !cfg.mostrar_destinatario ? '' :
+    `<div class="dest"><div class="cap">${ico('map-pin', 9, '#111')} DESTINATÁRIO</div>${mascarado(end.nome || p.cliente || p.comprador)
+      ? `<div class="dn" style="font-size:11px">Protegido pela Shopee</div><div class="da">endereço de envio na etiqueta Oficial SPX</div>`
+      : `<div class="dn">${esc(end.nome || p.cliente || p.comprador || '—')}</div><div class="da">${esc(enderecoLinha || '—')}${cidadeLinha ? ' · ' + esc(cidadeLinha) : ''}</div>${cpfTel ? `<div class="da">${esc(cpfTel)}</div>` : ''}`}</div>`
+  const qrrowHTML = (cfg.mostrar_qr || cfg.mostrar_rastreio)
+    ? `<div class="qrrow">${cfg.mostrar_qr ? `<div class="qr">${qrSvg(rastreio)}</div>` : ''}${cfg.mostrar_rastreio ? `<div class="track"><span class="tlbl">RASTREIO SPX</span>${barcodeSVG(rastreio, { height: 40, modulo: 0.9, texto: false })}<div class="trk">${esc(espacar(rastreio))}</div></div>` : ''}</div>`
+    : ''
   return `<div class="page"><div class="labh"><div class="safe">
     <div class="xphd"><img class="spx" src="${SPX_LOGO}"><div class="xpr"><div class="svc">ENTREGA PADRÃO</div><div class="vol">Volume 1 / 1 · #${esc(String(p.order_sn).slice(-14))}</div></div></div>
     <div class="cols">
       <div class="cl">
         <div class="sortbox"><span class="sl">ESTAÇÃO / ROTA</span><div class="sb">${esc(p.estacao || '—')}</div>${p.rota ? `<span class="ss">${esc(p.rota)}</span>` : ''}</div>
         ${danfe}
-        <div class="dest"><div class="cap">${ico('map-pin', 9, '#111')} DESTINATÁRIO</div><div class="dn">${esc(end.nome || p.cliente || p.comprador || '—')}</div>
-          <div class="da">${esc(enderecoLinha || '—')}${cidadeLinha ? ' · ' + esc(cidadeLinha) : ''}</div>${cpfTel ? `<div class="da">${esc(cpfTel)}</div>` : ''}</div>
+        ${destEtiqHTML}
       </div>
       <div class="cr">
-        <div class="qrrow"><div class="qr">${qrSvg(rastreio)}</div><div class="track"><span class="tlbl">RASTREIO SPX</span>${barcodeSVG(rastreio, { height: 40, modulo: 0.9, texto: false })}<div class="trk">${esc(espacar(rastreio))}</div></div></div>
-        <div class="rem"><div class="cap">${ico('store', 9, '#111')} REMETENTE</div><span class="rn">${esc(remNome)}</span> · ${esc(REMETENTE_END)}</div>
+        ${qrrowHTML}
+        <div class="rem"><div class="cap">${ico('store', 9, '#111')} REMETENTE</div><span class="rn">${esc(remNome)}</span> · ${esc(emitEndereco(cfg))}</div>
         <div class="pk"><div class="pkh">${ico('package', 9, '#111')} ITENS DO PEDIDO<span class="oid">${nItens} itens</span></div>
           <table class="ci"><tbody>${litens}</tbody></table>${more}</div>
       </div>
@@ -2398,6 +2554,143 @@ function PedidoDetalhe({ orderSn, alvo, onClose, recorrente, onImpressa, rem }) 
   )
 }
 
+// ===================== MÓDULO 2 — Painel "Personalizar impressão" =====================
+const PEDIDO_AMOSTRA = {
+  order_sn: 'BR2604AMOSTRA01', status: 'READY_TO_SHIP', rastreio: 'BR2624032462420',
+  nfe_numero: '12345', nfe_serie: '1', nfe_emissao: '26/06/2026', valor_total: 51.40,
+  nfe_chave: '35260600000000000000550010000123451000000017',
+  ship_by: Math.floor(Date.now() / 1000) + 3 * 86400,
+  comprador: '****', cliente: '****',
+  endereco: { nome: '****', completo: '****', cidade: '****', uf: '****', cep: '****', telefone: '****' },
+  itens: [
+    { imagem: '', nome: 'Meia Pérola ABS 14mm Branco · 500g — 780 peças', variacao: 'Branco', sku: '5817140010000', qtd: 11, complemento: 'Embalagem com 500g' },
+    { imagem: '', nome: 'Cola A Legítima 100ml | Ideal para Strass e Pedrarias', variacao: '', sku: '7500100000100', qtd: 1, complemento: 'Embalagem com 100ml' },
+  ],
+}
+const TogglesImpr = [
+  ['mostrar_timeline', 'Linha do tempo (etapas)', 'Folha'],
+  ['mostrar_miniaturas', 'Miniaturas dos produtos', 'Folha'],
+  ['mostrar_codigo_barras', 'Código de barras do pedido', 'Folha'],
+  ['mostrar_nota_comprador', 'Nota do comprador', 'Folha'],
+  ['mostrar_complemento', 'Complemento do produto', 'Folha'],
+  ['mostrar_nfe', 'Nº da NF-e / DANFE', 'Folha + etiqueta'],
+  ['mostrar_rastreio', 'Rastreio', 'Folha + etiqueta'],
+  ['mostrar_destinatario', 'Destinatário', 'Folha + etiqueta'],
+  ['mostrar_qr', 'QR Code', 'Etiqueta'],
+]
+
+function ToggleLinha({ on, onClick, label, escopo }) {
+  return (
+    <button type="button" onClick={onClick} className="w-full flex items-center justify-between gap-3 py-2 px-1 text-left rounded-lg hover:bg-[var(--glass-hover)] transition-colors">
+      <div className="min-w-0">
+        <div className="text-xs">{label}</div>
+        <div className="text-[10px] text-faint">{escopo}</div>
+      </div>
+      <span className="shrink-0 w-9 h-5 rounded-full relative transition-colors" style={{ background: on ? LARANJA : 'var(--glass-border)' }}>
+        <span className="absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all" style={{ left: on ? '18px' : '2px' }} />
+      </span>
+    </button>
+  )
+}
+
+function PainelImpressao({ onClose, onSalvo }) {
+  const notify = useToast()
+  const [cfg, setCfg] = useState(null)
+  const [salvando, setSalvando] = useState(false)
+  const [preview, setPreview] = useState('folha')
+  useEffect(() => {
+    api.shopeeImpressaoConfig().then((c) => { setCfg(c); setPrintCfg(c) }).catch(() => setCfg({ ...PRINT_CFG_PADRAO }))
+  }, [])
+  const set = (k, v) => setCfg((c) => ({ ...c, [k]: v }))
+  const campo = (k, v) => set(k, v)
+  const salvar = async () => {
+    if (!cfg) return
+    setSalvando(true)
+    try {
+      const salvo = await api.shopeeImpressaoConfigSalvar(cfg)
+      setPrintCfg(salvo); onSalvo?.(salvo)
+      notify('Impressão personalizada salva.', 'ok'); onClose?.()
+    } catch (e) { notify(e.message || 'Falha ao salvar.', 'danger') }
+    setSalvando(false)
+  }
+  const W = preview === 'folha' ? 760 : 378
+  const H = preview === 'folha' ? 660 : 567
+  const k = 296 / W
+  const doc = !cfg ? '' : (preview === 'folha'
+    ? `<style>${CSS_FOLHA}</style>${htmlFolhaPedido(PEDIDO_AMOSTRA, cfg)}`
+    : `<style>${CSS_ETIQ}</style>${htmlEtiqueta(PEDIDO_AMOSTRA, '', cfg)}`)
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center p-4" style={{ background: 'rgba(0,0,0,.6)', backdropFilter: 'blur(3px)' }} onClick={onClose}>
+      <div className="glass rounded-2xl w-full max-w-3xl max-h-[92vh] flex flex-col" style={{ background: 'var(--bg, var(--glass))' }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2 p-4 border-b border-glassb shrink-0">
+          <SlidersHorizontal size={17} style={{ color: LARANJA }} />
+          <div className="flex-1 min-w-0">
+            <div className="font-display font-semibold">Personalizar impressão</div>
+            <div className="text-[11px] text-faint">Dados da sua empresa e o que aparece na folha e na etiqueta</div>
+          </div>
+          <button onClick={onClose} className="text-faint hover:text-fg p-1"><X size={18} /></button>
+        </div>
+
+        {!cfg ? (
+          <div className="py-16 text-center text-faint flex items-center justify-center gap-2"><Loader2 size={16} className="animate-spin" /> carregando…</div>
+        ) : (
+          <div className="grid md:grid-cols-2 gap-0 overflow-hidden flex-1">
+            {/* Configurações */}
+            <div className="p-4 overflow-y-auto space-y-4 border-r border-glassb">
+              <div>
+                <div className="text-xs font-semibold mb-2 flex items-center gap-1.5"><Settings size={13} style={{ color: LARANJA }} /> Dados da empresa (emitente)</div>
+                <div className="space-y-2">
+                  <label className="block"><span className="text-[10px] text-faint uppercase tracking-wide">Nome / Razão social</span>
+                    <input value={cfg.emitente_nome} onChange={(e) => campo('emitente_nome', e.target.value)} placeholder="Sóstrass Acessórios e Pedrarias" className="w-full mt-0.5 text-sm px-2.5 py-1.5 rounded-lg glass bg-transparent outline-none" /></label>
+                  <label className="block"><span className="text-[10px] text-faint uppercase tracking-wide">CNPJ</span>
+                    <input value={cfg.emitente_cnpj} onChange={(e) => campo('emitente_cnpj', e.target.value)} placeholder="00.000.000/0000-00" className="w-full mt-0.5 text-sm px-2.5 py-1.5 rounded-lg glass bg-transparent outline-none num" /></label>
+                  <label className="block"><span className="text-[10px] text-faint uppercase tracking-wide">Endereço</span>
+                    <input value={cfg.emitente_endereco} onChange={(e) => campo('emitente_endereco', e.target.value)} placeholder="Rua Comendador, 120" className="w-full mt-0.5 text-sm px-2.5 py-1.5 rounded-lg glass bg-transparent outline-none" /></label>
+                  <label className="block"><span className="text-[10px] text-faint uppercase tracking-wide">Cidade · UF · CEP</span>
+                    <input value={cfg.emitente_cidade} onChange={(e) => campo('emitente_cidade', e.target.value)} placeholder="Limeira - SP · CEP 13480-000" className="w-full mt-0.5 text-sm px-2.5 py-1.5 rounded-lg glass bg-transparent outline-none" /></label>
+                </div>
+              </div>
+              <div>
+                <div className="text-xs font-semibold mb-1 flex items-center gap-1.5"><Check size={13} style={{ color: LARANJA }} /> O que aparece</div>
+                <div className="divide-y divide-glassb">
+                  {TogglesImpr.map(([k, label, escopo]) => (
+                    <ToggleLinha key={k} on={!!cfg[k]} onClick={() => campo(k, !cfg[k])} label={label} escopo={escopo} />
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Prévia ao vivo */}
+            <div className="p-4 overflow-y-auto flex flex-col" style={{ background: 'var(--glass-hover)' }}>
+              <div className="flex items-center gap-1.5 mb-3 shrink-0">
+                <button onClick={() => setPreview('folha')} className="text-[11px] px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors" style={preview === 'folha' ? { background: LARANJA, color: '#fff' } : {}}>
+                  <FileText size={12} /> Folha</button>
+                <button onClick={() => setPreview('etiqueta')} className="text-[11px] px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors" style={preview === 'etiqueta' ? { background: LARANJA, color: '#fff' } : {}}>
+                  <Tag size={12} /> Etiqueta</button>
+                <span className="text-[10px] text-faint ml-auto">prévia ao vivo</span>
+              </div>
+              <div className="grid place-items-center flex-1">
+                <div style={{ width: W * k, height: H * k, overflow: 'hidden', borderRadius: 8, boxShadow: '0 6px 24px rgba(0,0,0,.16)' }}>
+                  <iframe title="prévia" srcDoc={doc} style={{ width: W, height: H, border: 0, transform: `scale(${k})`, transformOrigin: 'top left', background: '#fff' }} />
+                </div>
+              </div>
+              <div className="text-[10px] text-faint text-center mt-2 shrink-0">dados de exemplo · o destinatário fica protegido pela Shopee</div>
+            </div>
+          </div>
+        )}
+
+        <div className="flex items-center justify-end gap-2 p-3 border-t border-glassb shrink-0">
+          <button onClick={onClose} className="text-xs px-3 py-1.5 rounded-lg glass text-dim hover:text-fg">Cancelar</button>
+          <button onClick={salvar} disabled={salvando || !cfg} className="text-xs px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 font-medium disabled:opacity-50" style={{ background: LARANJA, color: '#fff' }}>
+            {salvando ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} {salvando ? 'Salvando…' : 'Salvar'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function PedidosPainel({ conectado }) {
   const notify = useToast()
   const agora = useAgora(1000)
@@ -2409,12 +2702,15 @@ function PedidosPainel({ conectado }) {
   const [imprimindo, setImprimindo] = useState(false)
   const [aberto, setAberto] = useState(null)
   const [impressas, setImpressas] = useState(lerImpressas)
+  const [editorImpr, setEditorImpr] = useState(false)
 
   const carregar = (st = status, dd = dias) => {
     setD(null); setSel(new Set())
     api.shopeePedidosPainel(st, dd).then(setD).catch((e) => setD({ erro: e.message || true }))
   }
   useEffect(() => { if (conectado) carregar() }, [conectado])
+  // carrega a config de impressão da conta (emitente + campos) e ativa no PRINT_CFG global
+  useEffect(() => { if (conectado) api.shopeeImpressaoConfig().then(setPrintCfg).catch(() => {}) }, [conectado])
 
   const pedidos = d?.pedidos || []
   const filtro = busca.trim().toLowerCase()
@@ -2430,7 +2726,7 @@ function PedidosPainel({ conectado }) {
     for (const p of pedidos) { const k = (p.cliente || p.comprador || '').toLowerCase(); if (k) m[k] = (m[k] || 0) + 1 }
     return m
   }, [pedidos])
-  const ehRecorrente = (p) => (freqComprador[(p.cliente || p.comprador || '').toLowerCase()] || 0) > 1
+  const ehRecorrente = (p) => { const k = (p.cliente || p.comprador || '').toLowerCase().trim(); return !!k && !mascarado(k) && (freqComprador[k] || 0) > 1 }
   const marcarImpressa = (sn) => setImpressas((s) => { const n = new Set(s); n.add(sn); gravarImpressas(n); return n })
 
   const toggleSel = (sn) => setSel((s) => { const n = new Set(s); n.has(sn) ? n.delete(sn) : n.add(sn); return n })
@@ -2513,6 +2809,9 @@ function PedidosPainel({ conectado }) {
               {imprimindo ? <span className="flex items-center gap-1"><Loader2 size={11} className="animate-spin" /> gerando…</span> : `${sel.size} selecionado(s)`}
             </span>
           )}
+          <button onClick={() => setEditorImpr(true)} className="text-xs px-2.5 py-1.5 rounded-lg glass text-dim hover:text-fg flex items-center gap-1.5" title="Personalizar impressão: dados da empresa e campos da folha/etiqueta">
+            <SlidersHorizontal size={13} /> Personalizar
+          </button>
           <button onClick={imprimirSeparacao} disabled={imprimindo || !pedidos.length} className="text-xs px-2.5 py-1.5 rounded-lg glass text-dim hover:text-fg flex items-center gap-1.5 disabled:opacity-40" title="Lista de separação (produtos A→Z)">
             <ClipboardList size={13} /> Separação
           </button>
@@ -2569,13 +2868,31 @@ function PedidosPainel({ conectado }) {
         : visiveis.length === 0 ? <div className="py-8 text-center text-sm text-faint">{filtro ? 'Nenhum pedido bate com a busca.' : `Nenhum pedido ${ROTULO_STATUS[status].toLowerCase()} no período.`}</div>
         : <div className="space-y-2">{visiveis.map((p) => <PedidoCard key={p.order_sn} p={p} agora={agora} alvo={d?.margem_alvo} sel={sel.has(p.order_sn)} onSel={toggleSel} onAbrir={setAberto} recorrente={ehRecorrente(p)} impressa={impressas.has(p.order_sn)} />)}</div>}
 
-      {aberto && <PedidoDetalhe orderSn={aberto} alvo={d?.margem_alvo} onClose={() => setAberto(null)}
-                                recorrente={ehRecorrente(pedidos.find((p) => p.order_sn === aberto) || {})}
-                                onImpressa={marcarImpressa} rem="Sóstrass Armarinhos" />}
+      {aberto && (
+        <LimiteErro fallback={
+          <div className="fixed inset-0 z-50 grid place-items-center p-4" style={{ background: 'rgba(0,0,0,.6)', backdropFilter: 'blur(3px)' }} onClick={() => setAberto(null)}>
+            <div className="glass rounded-2xl w-full max-w-sm p-6 text-center" style={{ background: 'var(--bg, var(--glass))' }} onClick={(e) => e.stopPropagation()}>
+              <AlertTriangle size={22} className="mx-auto mb-2" style={{ color: '#FF6F6F' }} />
+              <div className="text-sm text-dim mb-3">Não consegui abrir este pedido agora. Tente novamente.</div>
+              <button onClick={() => setAberto(null)} className="text-xs px-3 py-1.5 rounded-lg glass text-dim hover:text-fg">Fechar</button>
+            </div>
+          </div>
+        }>
+          <PedidoDetalhe orderSn={aberto} alvo={d?.margem_alvo} onClose={() => setAberto(null)}
+                         recorrente={ehRecorrente(pedidos.find((p) => p.order_sn === aberto) || {})}
+                         onImpressa={marcarImpressa} rem="Sóstrass Armarinhos" />
+        </LimiteErro>
+      )}
+
+      {editorImpr && (
+        <LimiteErro fallback={<div className="fixed inset-0 z-50 grid place-items-center p-4" style={{ background: 'rgba(0,0,0,.6)' }} onClick={() => setEditorImpr(false)}><div className="glass rounded-2xl p-6 text-center text-sm text-dim" onClick={(e) => e.stopPropagation()}>Não consegui abrir o personalizador. <button onClick={() => setEditorImpr(false)} className="underline ml-1">Fechar</button></div></div>}>
+          <PainelImpressao onClose={() => setEditorImpr(false)} onSalvo={() => {}} />
+        </LimiteErro>
+      )}
 
       <div className="text-[10px] text-faint mt-3 flex items-start gap-1.5">
         <FileText size={11} className="mt-0.5 shrink-0" />
-        <span><b>Folha de pedido</b> e <b>etiqueta 100×150mm</b> já imprimem (selecione os pedidos ou use os visíveis). O <b>nº da NF-e na etiqueta</b> e o <b>PDF oficial de logística da Shopee</b> são a próxima etapa — precisam do cruzamento com o Bling / validação na sua conta.</span>
+        <span><b>Folha de separação</b> e <b>etiqueta 100×150mm</b> imprimem com o visual da sua loja — use <b>Personalizar</b> pra ajustar os dados da empresa e o que aparece. A <b>Oficial SPX</b> é a etiqueta de envio real da Shopee (com o endereço, que a API mascara nas outras).</span>
       </div>
     </div>
   )
@@ -3142,7 +3459,7 @@ function Perguntas({ conectado, notify }) {
     catch (e) { notify(e.message, 'danger') }
     setResp(null)
   }
-  return qs.length === 0 ? <Vazio txt="Nenhuma pergunta sem resposta. 🎉" />
+  return qs.length === 0 ? <Vazio txt="Nenhuma pergunta sem resposta." />
     : <div className="space-y-2">{qs.map((q) => (
         <div key={q.qa_id} className="glass rounded-xl p-3">
           <div className="text-sm flex items-start gap-2"><HelpCircle size={15} className="mt-0.5 shrink-0" style={{ color: LARANJA }} /> {q.question}</div>
@@ -3165,7 +3482,7 @@ function Devolucoes({ conectado }) {
   return (
     <div className="space-y-3">
       <div className="text-sm text-dim">Devoluções e reembolsos dos últimos 30 dias. A taxa de retorno alta derruba a saúde da loja — vale monitorar.</div>
-      {lista.length === 0 ? <Vazio txt="Nenhuma devolução no período. 🎉" />
+      {lista.length === 0 ? <Vazio txt="Nenhuma devolução no período." />
         : <div className="space-y-1.5">{lista.slice(0, 30).map((r) => (
             <div key={r.return_sn} className="glass rounded-xl px-4 py-2.5 flex items-center justify-between">
               <div className="flex items-center gap-2"><Undo2 size={15} className="text-dim" /> <span className="num text-sm">#{r.return_sn}</span></div>
