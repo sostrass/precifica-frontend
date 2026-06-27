@@ -102,7 +102,18 @@ export const api = {
   shopeePromoQueda: () => req('/api/shopee/promo/queda'),
   shopeePromoHistorico: () => req('/api/shopee/promo/historico'),
   shopeePedidos: (dias = 7) => req(`/api/shopee/pedidos?dias=${dias}`),
-  shopeePedidosPainel: (status = 'A_ENVIAR', dias = 15) => req(`/api/shopee/pedidos/painel?status=${status}&dias=${dias}`),
+  shopeePedidosPainel: (status = 'A_ENVIAR', dias = 15, opts = {}) => {
+    const q = new URLSearchParams({ status, dias: String(dias) })
+    if (opts.page) q.set('page', String(opts.page))
+    if (opts.page_size) q.set('page_size', String(opts.page_size))
+    if (opts.busca) q.set('busca', opts.busca)
+    if (opts.busca_tipo) q.set('busca_tipo', opts.busca_tipo)
+    if (opts.grupo) q.set('grupo', opts.grupo)
+    if (opts.nf) q.set('nf', opts.nf)
+    return req(`/api/shopee/pedidos/painel?${q.toString()}`)
+  },
+  shopeePedidosContagens: (dias = 15) => req(`/api/shopee/pedidos/contagens?dias=${dias}`),
+  shopeePedidosContagensNf: (status = 'TODOS', dias = 15) => req(`/api/shopee/pedidos/contagens-nf?status=${status}&dias=${dias}`),
   shopeePedidoDetalhe: (orderSn) => req(`/api/shopee/pedidos/${orderSn}/detalhe`),
   shopeePedidosSeparacao: (status = 'A_ENVIAR', dias = 15) => req(`/api/shopee/pedidos/separacao?status=${status}&dias=${dias}`),
   shopeeEnriquecerImpressao: (order_sns, skus) => req('/api/shopee/pedidos/enriquecer-impressao', { method: 'POST', body: { order_sns, skus } }),

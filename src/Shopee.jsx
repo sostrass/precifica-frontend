@@ -2,7 +2,7 @@ import { Component, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Rocket, Star, Activity, ShoppingBag, Tag, Megaphone, Package,
   Plus, X, Pin, PinOff, Play, Square, Loader2, Zap, Clock, CheckCircle2,
-  AlertTriangle, Plug, RefreshCw, Wand2, ChevronRight, Flame,
+  AlertTriangle, Plug, RefreshCw, Wand2, ChevronRight, ChevronLeft, Filter, Flame,
   HelpCircle, GitCompareArrows, Undo2, TrendingUp, TrendingDown, Trash2, Calendar,
   Stethoscope, XCircle, ShieldAlert, CircleDot, Bot, Search,
   Send, Sparkles, SlidersHorizontal, MessageSquare, ImageIcon, Settings2, Smile, ThumbsUp,
@@ -2183,12 +2183,13 @@ function htmlFolhaPedido(p, cfg = PRINT_CFG) {
   const tagPrazo = p.ship_by ? `<span class="tg w">${ico('clock', 12, '#F0C079')} enviar até ${new Date(p.ship_by * 1000).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>` : ''
   const nota = p.nota_comprador || p.observacao || ''
   const notaComprador = (cfg.mostrar_nota_comprador && nota) ? `<div class="obsbar">${ico('message-square', 13, '#C2790F')} <b>Nota do comprador:</b> ${esc(nota)}</div>` : ''
-  const nomeDest = end.nome || p.cliente || p.comprador || '—'
-  const iniciais = String(nomeDest).trim().split(/\s+/).slice(0, 2).map((x) => x[0] || '').join('').toUpperCase() || '·'
-  const destProtegido = mascarado(nomeDest)
-  const destcardHTML = !cfg.mostrar_destinatario ? '' : (destProtegido
-    ? `<div class="destcard"><div class="dlbl">${ico('map-pin', 11, '#9aa0ab')} DESTINATÁRIO</div><div class="drow"><div><div class="dnome" style="font-size:14px">Protegido pela Shopee</div><div class="dadr">endereço de envio na etiqueta Oficial SPX</div></div></div></div>`
-    : `<div class="destcard"><div class="dlbl">${ico('map-pin', 11, '#9aa0ab')} DESTINATÁRIO</div><div class="drow"><div class="dav">${esc(iniciais)}</div><div><div class="dnome">${esc(nomeDest)}</div><div class="dadr">${esc(enderecoLinha || '—')}</div>${end.telefone && !mascarado(end.telefone) ? `<div class="dadr">Tel ${esc(end.telefone)}</div>` : ''}</div></div></div>`)
+  const limpoF = (x) => (x && !mascarado(x)) ? String(x) : ''
+  const endLimpo = [limpoF(end.completo), [limpoF(end.cidade), limpoF(end.uf)].filter(Boolean).join('/'), limpoF(end.cep) ? 'CEP ' + limpoF(end.cep) : ''].filter(Boolean).join(' · ')
+  const nomeRealF = [end.nome, p.cliente, p.comprador].map(limpoF).find(Boolean) || ''
+  const iniciais = String(nomeRealF || '·').trim().split(/\s+/).slice(0, 2).map((x) => x[0] || '').join('').toUpperCase() || '·'
+  const destcardHTML = !cfg.mostrar_destinatario ? '' : (nomeRealF
+    ? `<div class="destcard"><div class="dlbl">${ico('map-pin', 11, '#9aa0ab')} DESTINATÁRIO</div><div class="drow"><div class="dav">${esc(iniciais)}</div><div><div class="dnome">${esc(nomeRealF)}</div><div class="dadr">${endLimpo ? esc(endLimpo) : 'comprador na Shopee · endereço completo na etiqueta Oficial SPX'}</div>${limpoF(end.telefone) ? `<div class="dadr">Tel ${esc(limpoF(end.telefone))}</div>` : ''}</div></div></div>`
+    : `<div class="destcard"><div class="dlbl">${ico('map-pin', 11, '#9aa0ab')} DESTINATÁRIO</div><div class="drow"><div><div class="dnome" style="font-size:14px">Protegido pela Shopee</div><div class="dadr">endereço de envio na etiqueta Oficial SPX</div></div></div></div>`)
   return `<section class="doc">
     <div class="band">
       <div class="bl"><div class="kick">PEDIDO DE VENDA · SEPARAÇÃO</div><div class="onum">#${esc(p.order_sn)}</div>
@@ -2251,9 +2252,12 @@ const CSS_FOLHA = CSS_SHARED + `*{box-sizing:border-box;margin:0;padding:0}body{
 // Etiqueta logística — desenho PAISAGEM (15x10) rotacionado 90° para encaixar no rótulo térmico 100x150mm
 function htmlEtiqueta(p, rem, cfg = PRINT_CFG) {
   const end = p.endereco || {}
-  const enderecoLinha = [end.completo].filter(Boolean).join('')
-  const cidadeLinha = [[end.cidade, end.uf].filter(Boolean).join(' - '), end.cep ? 'CEP ' + end.cep : ''].filter(Boolean).join(' · ')
-  const cpfTel = [end.telefone ? 'Tel ' + end.telefone : '', end.cpf ? 'CPF ' + end.cpf : ''].filter(Boolean).join(' · ')
+  const limpo = (x) => (x && !mascarado(x)) ? String(x) : ''
+  const enderecoLinha = [limpo(end.completo)].filter(Boolean).join('')
+  const cidadeLinha = [[limpo(end.cidade), limpo(end.uf)].filter(Boolean).join(' - '), limpo(end.cep) ? 'CEP ' + limpo(end.cep) : ''].filter(Boolean).join(' · ')
+  const cpfTel = [limpo(end.telefone) ? 'Tel ' + limpo(end.telefone) : '', limpo(end.cpf) ? 'CPF ' + limpo(end.cpf) : ''].filter(Boolean).join(' · ')
+  const nomeReal = [end.nome, p.cliente, p.comprador].map(limpo).find(Boolean) || ''
+  const temEndereco = !!(enderecoLinha || cidadeLinha)
   const remNome = rem || emitNome(cfg)
   const nItens = (p.itens || []).length
   const rastreio = p.rastreio || p.order_sn
@@ -2266,9 +2270,11 @@ function htmlEtiqueta(p, rem, cfg = PRINT_CFG) {
       <div class="em">Emitente: <b>${esc(emitNome(cfg))}</b> · CNPJ ${esc(cfg.emitente_cnpj || REMETENTE_CNPJ)}</div>
       ${p.nfe_chave ? `<div class="chave">${barcodeSVG(p.nfe_chave, { height: 26, modulo: 1.0, texto: false })}<div class="cl2">${esc(espacar(p.nfe_chave))}</div></div>` : ''}</div>` : ''
   const destEtiqHTML = !cfg.mostrar_destinatario ? '' :
-    `<div class="dest"><div class="cap">${ico('map-pin', 9, '#111')} DESTINATÁRIO</div>${mascarado(end.nome || p.cliente || p.comprador)
-      ? `<div class="dn" style="font-size:11px">Protegido pela Shopee</div><div class="da">endereço de envio na etiqueta Oficial SPX</div>`
-      : `<div class="dn">${esc(end.nome || p.cliente || p.comprador || '—')}</div><div class="da">${esc(enderecoLinha || '—')}${cidadeLinha ? ' · ' + esc(cidadeLinha) : ''}</div>${cpfTel ? `<div class="da">${esc(cpfTel)}</div>` : ''}`}</div>`
+    `<div class="dest"><div class="cap">${ico('map-pin', 9, '#111')} DESTINATÁRIO</div>${nomeReal
+      ? `<div class="dn">${esc(nomeReal)}</div>${temEndereco
+          ? `<div class="da">${esc(enderecoLinha || '—')}${cidadeLinha ? ' · ' + esc(cidadeLinha) : ''}</div>${cpfTel ? `<div class="da">${esc(cpfTel)}</div>` : ''}`
+          : `<div class="da">comprador na Shopee · endereço completo na etiqueta Oficial SPX</div>`}`
+      : `<div class="dn" style="font-size:11px">Protegido pela Shopee</div><div class="da">endereço de envio na etiqueta Oficial SPX</div>`}</div>`
   const qrrowHTML = (cfg.mostrar_qr || cfg.mostrar_rastreio)
     ? `<div class="qrrow">${cfg.mostrar_qr ? `<div class="qr">${qrSvg(rastreio)}</div>` : ''}${cfg.mostrar_rastreio ? `<div class="track"><span class="tlbl">RASTREIO SPX</span>${barcodeSVG(rastreio, { height: 40, modulo: 0.9, texto: false })}<div class="trk">${esc(espacar(rastreio))}</div></div>` : ''}</div>`
     : ''
@@ -2276,7 +2282,7 @@ function htmlEtiqueta(p, rem, cfg = PRINT_CFG) {
     <div class="xphd"><img class="spx" src="${SPX_LOGO}"><div class="xpr"><div class="svc">ENTREGA PADRÃO</div><div class="vol">Volume 1 / 1 · #${esc(String(p.order_sn).slice(-14))}</div></div></div>
     <div class="cols">
       <div class="cl">
-        <div class="sortbox"><span class="sl">ESTAÇÃO / ROTA</span><div class="sb">${esc(p.estacao || '—')}</div>${p.rota ? `<span class="ss">${esc(p.rota)}</span>` : ''}</div>
+        ${(limpo(p.estacao) || limpo(p.rota)) ? `<div class="sortbox"><span class="sl">ESTAÇÃO / ROTA</span><div class="sb">${esc(limpo(p.estacao) || '—')}</div>${limpo(p.rota) ? `<span class="ss">${esc(p.rota)}</span>` : ''}</div>` : ''}
         ${danfe}
         ${destEtiqHTML}
       </div>
@@ -2332,12 +2338,14 @@ function MiniBadge({ children, cor, icon: Ic }) {
   )
 }
 
-function PedidoCard({ p, agora, alvo, sel, onSel, onAbrir, recorrente, impressa }) {
+function PedidoCard({ p, agora, alvo, sel, onSel, onAbrir, recorrente, impressa, nfSelo }) {
   const prazo = prazoInfo(p.ship_by, agora)
   const corPrazo = !prazo ? 'var(--text-faint)' : prazo.atrasado ? '#FF6F6F' : prazo.urgente ? '#d6007f' : '#2DD4BF'
   const cancelado = ehCancelado(p.status)
   const corBorda = cancelado ? '#FF6F6F' : p.prejuizo ? '#FF6F6F' : p.abaixo_meta ? '#d6007f' : 'transparent'
-  const nome = p.cliente || p.comprador
+  const nome = [p.cliente, p.comprador].find((x) => x && !mascarado(x)) || 'Comprador protegido'
+  const NF_INFO = { pendente: ['#F59E0B', 'NF pendente'], recusado: ['#FF6F6F', 'NF recusada'], autorizado: ['#2DD4BF', 'NF autorizada'] }
+  const nfCor = nfSelo && NF_INFO[nfSelo.grupo]
   return (
     <div onClick={() => onAbrir && onAbrir(p.order_sn)} className="glass rounded-xl p-3 transition-colors hover:bg-[var(--glass-hover)]"
          style={{ borderLeft: `3px solid ${corBorda}`, cursor: 'pointer', opacity: cancelado ? 0.78 : 1 }}>
@@ -2352,6 +2360,7 @@ function PedidoCard({ p, agora, alvo, sel, onSel, onAbrir, recorrente, impressa 
             {cancelado && <MiniBadge cor="#FF6F6F" icon={XCircle}>cancelado</MiniBadge>}
             {recorrente && !cancelado && <MiniBadge cor="#7b2a8c" icon={Repeat}>recorrente</MiniBadge>}
             {impressa && !cancelado && <MiniBadge cor="#2DD4BF" icon={Printer}>etiqueta</MiniBadge>}
+            {nfCor && <MiniBadge cor={nfCor[0]} icon={FileText}>{nfCor[1]}</MiniBadge>}
           </div>
           <div className="flex items-center gap-1.5 mt-0.5">
             {p.cidade && <span className="text-[10px] text-faint flex items-center gap-0.5"><MapPin size={9} />{p.cidade}/{p.uf}</span>}
@@ -2733,36 +2742,95 @@ function PainelImpressao({ onClose, onSalvo }) {
   )
 }
 
+// Abas (grupos) do painel de pedidos. 3a coluna = chave do contador (selo "(xxx)").
+const ABAS_PEDIDO = [
+  ['TODOS', 'Todos', null],
+  ['NAO_PAGO', 'Não pago', 'nao_pago'],
+  ['A_ENVIAR', 'A enviar', 'a_enviar'],
+  ['ENVIADO', 'Enviado', 'enviado'],
+  ['CONCLUIDO', 'Concluído', 'concluido'],
+  ['RETORNOS', 'Retornos e cancelados', 'retornos'],
+]
+const ABAS_GRUPO = [['todos', 'Todos', null], ['aberto', 'Em aberto', 'em_aberto'], ['concluido', 'Concluído', 'concluido']]
+const ABAS_NF = [['todos', 'Todos', null], ['pendente', 'Pendente', 'pendente'], ['recusado', 'Recusado', 'recusado'], ['autorizado', 'Autorizado', 'autorizado']]
+const TIPOS_BUSCA = [['tudo', 'Tudo'], ['pedido', '# Pedido'], ['comprador', 'Comprador'], ['produto', 'Produto / SKU']]
+const LABEL_ABA = { TODOS: 'Todos', NAO_PAGO: 'não pago', A_ENVIAR: 'a enviar', ENVIADO: 'enviado', CONCLUIDO: 'concluído', RETORNOS: 'retornos e cancelados' }
+// Bling: 1/3/8=pendente · 4/9=recusado · 5/6/7=autorizado (espelha _nf_situacao_grupo do backend)
+const grupoNfCod = (cod) => { const c = parseInt(cod, 10); if ([1, 3, 8].includes(c)) return 'pendente'; if ([4, 9].includes(c)) return 'recusado'; if ([5, 6, 7].includes(c)) return 'autorizado'; return null }
+
+function Aba({ ativo, onClick, label, count, cor = LARANJA }) {
+  return (
+    <button onClick={onClick} className="text-xs px-3 py-1.5 rounded-lg font-medium flex items-center gap-1.5 transition-colors"
+      style={ativo ? { background: cor, color: '#fff' } : { background: 'var(--glass)', color: 'var(--text-dim)', border: '1px solid var(--glass-border)' }}>
+      {label}
+      {count != null && (
+        <span className="text-[10px] num px-1.5 rounded-full leading-[1.4]" style={{ background: ativo ? 'rgba(255,255,255,.28)' : 'var(--glass-hover)', color: ativo ? '#fff' : 'var(--text-faint)' }}>{count}</span>
+      )}
+    </button>
+  )
+}
+
 function PedidosPainel({ conectado }) {
   const notify = useToast()
   const agora = useAgora(1000)
   const [status, setStatus] = useState('A_ENVIAR')
+  const [grupo, setGrupo] = useState('todos')
+  const [nf, setNf] = useState('todos')
+  const [busca, setBusca] = useState('')
+  const [buscaTipo, setBuscaTipo] = useState('tudo')
+  const [page, setPage] = useState(1)
+  const pageSize = 20
   const [dias, setDias] = useState(15)
   const [d, setD] = useState(null)
-  const [busca, setBusca] = useState('')
+  const [contagens, setContagens] = useState(null)
+  const [contagensNf, setContagensNf] = useState(null)
   const [sel, setSel] = useState(() => new Set())
   const [imprimindo, setImprimindo] = useState(false)
   const [aberto, setAberto] = useState(null)
   const [impressas, setImpressas] = useState(lerImpressas)
   const [editorImpr, setEditorImpr] = useState(false)
 
-  const carregar = (st = status, dd = dias) => {
+  const carregar = (over = {}) => {
+    const st = over.status ?? status, gr = over.grupo ?? grupo, nfv = over.nf ?? nf
+    const bz = over.busca ?? busca, bt = over.buscaTipo ?? buscaTipo
+    const pg = over.page ?? page, dd = over.dias ?? dias
     setD(null); setSel(new Set())
-    api.shopeePedidosPainel(st, dd).then(setD).catch((e) => setD({ erro: e.message || true }))
+    api.shopeePedidosPainel(st, dd, { page: pg, page_size: pageSize, busca: bz, busca_tipo: bt, grupo: gr, nf: nfv })
+      .then(setD).catch((e) => setD({ erro: e.message || true }))
   }
-  useEffect(() => { if (conectado) carregar() }, [conectado])
-  // carrega a config de impressão da conta (emitente + campos) e ativa no PRINT_CFG global
+  const carregarContagens = (dd = dias) => { api.shopeePedidosContagens(dd).then(setContagens).catch(() => setContagens(null)) }
+  const carregarContagensNf = (st = status, dd = dias) => { setContagensNf(null); api.shopeePedidosContagensNf(st, dd).then(setContagensNf).catch(() => setContagensNf(null)) }
+
+  useEffect(() => { if (conectado) { carregar(); carregarContagens(); carregarContagensNf() } }, [conectado])
   useEffect(() => { if (conectado) api.shopeeImpressaoConfig().then(setPrintCfg).catch(() => {}) }, [conectado])
+  // busca com debounce: volta pra página 1 e recarrega no servidor
+  const primeiraBusca = useRef(true)
+  useEffect(() => {
+    if (!conectado) return
+    if (primeiraBusca.current) { primeiraBusca.current = false; return }
+    const t = setTimeout(() => { setPage(1); carregar({ page: 1 }) }, 450)
+    return () => clearTimeout(t)
+  }, [busca, buscaTipo])
+
+  const mudar = (campo, valor) => {
+    const setters = { status: setStatus, grupo: setGrupo, nf: setNf, dias: setDias }
+    setters[campo](valor); setPage(1)
+    carregar({ [campo]: valor, page: 1 })
+    if (campo === 'dias') { carregarContagens(valor); carregarContagensNf(status, valor) }
+    if (campo === 'status') carregarContagensNf(valor, dias)
+  }
+  const irPagina = (pg) => { if (pg < 1) return; setPage(pg); carregar({ page: pg }) }
 
   const pedidos = d?.pedidos || []
-  const filtro = busca.trim().toLowerCase()
-  const visiveis = filtro ? pedidos.filter((p) =>
-    String(p.order_sn).toLowerCase().includes(filtro) ||
-    (p.comprador || '').toLowerCase().includes(filtro) ||
-    (p.itens || []).some((i) => (i.nome || '').toLowerCase().includes(filtro) || (i.sku || '').toLowerCase().includes(filtro))) : pedidos
   const res = d?.resumo
+  const selosNf = contagensNf?.selos || {}
+  const seloDe = (p) => {
+    if (p.nfe_situacao != null) { const g = grupoNfCod(p.nfe_situacao); if (g) return { grupo: g, numero: p.nfe_numero } }
+    return selosNf[p.order_sn] || null
+  }
+  const cnt = (chave) => (contagens && chave ? contagens[chave] : null)
+  const cntNf = (chave) => (contagensNf && chave ? (contagensNf.contagens || {})[chave] : null)
 
-  // comprador recorrente: mesmo cliente aparece em mais de um pedido no período carregado
   const freqComprador = useMemo(() => {
     const m = {}
     for (const p of pedidos) { const k = (p.cliente || p.comprador || '').toLowerCase(); if (k) m[k] = (m[k] || 0) + 1 }
@@ -2772,11 +2840,10 @@ function PedidosPainel({ conectado }) {
   const marcarImpressa = (sn) => setImpressas((s) => { const n = new Set(s); n.add(sn); gravarImpressas(n); return n })
 
   const toggleSel = (sn) => setSel((s) => { const n = new Set(s); n.has(sn) ? n.delete(sn) : n.add(sn); return n })
-  const selTodos = () => setSel((s) => s.size === visiveis.length ? new Set() : new Set(visiveis.map((p) => p.order_sn)))
-  const alvoImpressao = () => (sel.size ? pedidos.filter((p) => sel.has(p.order_sn)) : visiveis)
+  const selTodos = () => setSel((s) => s.size === pedidos.length && pedidos.length ? new Set() : new Set(pedidos.map((p) => p.order_sn)))
+  const alvoImpressao = () => (sel.size ? pedidos.filter((p) => sel.has(p.order_sn)) : pedidos)
 
   const enriquecerPedidos = async (lista) => {
-    // clona (sem mutar o estado) e já aproveita o rastreio que veio no detalhe
     const clones = lista.map((p) => ({ ...p, itens: (p.itens || []).map((it) => ({ ...it })) }))
     clones.forEach((p) => { if (!p.rastreio && p.logistica && p.logistica.rastreio) p.rastreio = p.logistica.rastreio })
     try {
@@ -2788,11 +2855,9 @@ function PedidosPainel({ conectado }) {
       clones.forEach((p) => {
         const patch = patches[p.order_sn]
         if (patch) Object.assign(p, patch)
-        ;(p.itens || []).forEach((it) => {
-          if (it.sku && complementos[it.sku] && !it.complemento) it.complemento = complementos[it.sku]
-        })
+        ;(p.itens || []).forEach((it) => { if (it.sku && complementos[it.sku] && !it.complemento) it.complemento = complementos[it.sku] })
       })
-    } catch (_) { /* degradação graciosa: imprime com o que já tem */ }
+    } catch (_) { /* degradação graciosa */ }
     return clones
   }
 
@@ -2822,9 +2887,7 @@ function PedidosPainel({ conectado }) {
       if (!w) { notify('Permita pop-ups para abrir o PDF da etiqueta oficial.', 'danger') }
       else { lista.forEach((p) => marcarImpressa(p.order_sn)); notify(`Etiqueta oficial gerada (${sns.length} pedido${sns.length > 1 ? 's' : ''}).`, 'ok') }
       setTimeout(() => URL.revokeObjectURL(url), 60000)
-    } catch (e) {
-      notify(e.message || 'Falha ao gerar a etiqueta oficial da Shopee.', 'danger')
-    }
+    } catch (e) { notify(e.message || 'Falha ao gerar a etiqueta oficial da Shopee.', 'danger') }
     setImprimindo(false)
   }
 
@@ -2834,12 +2897,14 @@ function PedidosPainel({ conectado }) {
       const sep = await api.shopeePedidosSeparacao(status, dias)
       const linhas = (sep.itens || []).map((l) =>
         `<tr><td class="chk">☐</td><td>${l.nome || ''}</td><td class="sku">${l.sku || ''}</td><td class="q">${l.qtd}</td><td class="c">${l.pedidos}</td></tr>`).join('')
-      imprimirDoc('Lista de separação', `<h1>Lista de separação — ${ROTULO_STATUS[status]}</h1>
+      imprimirDoc('Lista de separação', `<h1>Lista de separação — ${LABEL_ABA[status] || status}</h1>
         <div class="sub">${sep.skus} produtos · ${sep.total_unidades} unidades · ${sep.pedidos} pedidos · ${new Date().toLocaleString('pt-BR')}</div>
         <table><thead><tr><th class="chk"></th><th>Produto</th><th>SKU</th><th class="q">Qtd</th><th class="c">Pedidos</th></tr></thead><tbody>${linhas}</tbody></table>`)
     } catch (e) { notify(e.message || 'Falha ao gerar', 'danger') }
     setImprimindo(false)
   }
+
+  const btnTxt = 'text-xs px-2.5 py-1.5 rounded-lg glass text-dim hover:text-fg flex items-center gap-1.5 disabled:opacity-40'
 
   return (
     <div className="glass rounded-2xl p-4">
@@ -2851,64 +2916,93 @@ function PedidosPainel({ conectado }) {
               {imprimindo ? <span className="flex items-center gap-1"><Loader2 size={11} className="animate-spin" /> gerando…</span> : `${sel.size} selecionado(s)`}
             </span>
           )}
-          <button onClick={() => setEditorImpr(true)} className="text-xs px-2.5 py-1.5 rounded-lg glass text-dim hover:text-fg flex items-center gap-1.5" title="Personalizar impressão: dados da empresa e campos da folha/etiqueta">
-            <SlidersHorizontal size={13} /> Personalizar
-          </button>
-          <button onClick={imprimirSeparacao} disabled={imprimindo || !pedidos.length} className="text-xs px-2.5 py-1.5 rounded-lg glass text-dim hover:text-fg flex items-center gap-1.5 disabled:opacity-40" title="Lista de separação (produtos A→Z)">
-            <ClipboardList size={13} /> Separação
-          </button>
-          <button onClick={imprimirPedidosRich} disabled={imprimindo || !pedidos.length} className="text-xs px-2.5 py-1.5 rounded-lg glass text-dim hover:text-fg flex items-center gap-1.5 disabled:opacity-40" title="Folha de pedido (com endereço e itens)">
-            <Printer size={13} /> Pedidos{sel.size ? ` (${sel.size})` : ''}
-          </button>
-          <button onClick={imprimirEtiquetasRich} disabled={imprimindo || !pedidos.length} className="text-xs px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 disabled:opacity-40 font-medium" style={{ background: LARANJA, color: '#fff' }} title="Etiquetas de envio 100×150mm (modelo Precifica AI)">
-            <Tag size={13} /> Etiquetas{sel.size ? ` (${sel.size})` : ''}
-          </button>
-          <button onClick={imprimirEtiquetaOficial} disabled={imprimindo || !pedidos.length} className="text-xs px-2.5 py-1.5 rounded-lg glass text-dim hover:text-fg flex items-center gap-1.5 disabled:opacity-40" title="Etiqueta OFICIAL da Shopee em PDF (waybill do SPX). Requer conta de vendedor validada.">
-            <Receipt size={13} /> Oficial SPX{sel.size ? ` (${sel.size})` : ''}
-          </button>
-          <button disabled title="Imprimir NF-e — precisa vincular a nota do Bling (em breve)" className="text-xs px-2.5 py-1.5 rounded-lg glass text-faint flex items-center gap-1.5 opacity-50 cursor-not-allowed">
-            <FileText size={13} /> NF-e
-          </button>
+          <button onClick={() => setEditorImpr(true)} className={btnTxt} title="Personalizar impressão: dados da empresa e campos da folha/etiqueta"><SlidersHorizontal size={13} /> Personalizar</button>
+          <button onClick={imprimirSeparacao} disabled={imprimindo || !pedidos.length} className={btnTxt} title="Lista de separação (produtos A→Z, todos os pedidos do status)"><ClipboardList size={13} /> Separação</button>
+          <button onClick={imprimirPedidosRich} disabled={imprimindo || !pedidos.length} className={btnTxt} title="Folha de pedido (com endereço e itens)"><Printer size={13} /> Pedidos{sel.size ? ` (${sel.size})` : ''}</button>
+          <button onClick={imprimirEtiquetasRich} disabled={imprimindo || !pedidos.length} className="text-xs px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 disabled:opacity-40 font-medium" style={{ background: LARANJA, color: '#fff' }} title="Etiquetas de envio 100×150mm (modelo Precifica AI)"><Tag size={13} /> Etiquetas{sel.size ? ` (${sel.size})` : ''}</button>
+          <button onClick={imprimirEtiquetaOficial} disabled={imprimindo || !pedidos.length} className={btnTxt} title="Etiqueta OFICIAL da Shopee em PDF (waybill do SPX). Tem a estação/rota e o endereço."><Receipt size={13} /> Oficial SPX{sel.size ? ` (${sel.size})` : ''}</button>
+          <button disabled title="Imprimir NF-e — precisa vincular a nota do Bling (em breve)" className="text-xs px-2.5 py-1.5 rounded-lg glass text-faint flex items-center gap-1.5 opacity-50 cursor-not-allowed"><FileText size={13} /> NF-e</button>
         </div>
       </div>
 
-      <div className="flex items-center gap-1.5 flex-wrap mb-3">
-        {Object.entries(ROTULO_STATUS).map(([id, t]) => (
-          <button key={id} onClick={() => { setStatus(id); carregar(id, dias) }} className="text-xs px-3 py-1.5 rounded-lg font-medium"
-                  style={status === id ? { background: LARANJA, color: '#fff' } : { background: 'var(--glass)', color: 'var(--text-dim)', border: '1px solid var(--glass-border)' }}>{t}</button>
-        ))}
-        <div className="flex-1" />
-        {[7, 15, 30].map((dd) => (
-          <button key={dd} onClick={() => { setDias(dd); carregar(status, dd) }} className="text-xs px-2 py-1.5 rounded-lg"
-                  style={dias === dd ? { background: 'var(--glass-hover)', color: 'var(--text)' } : { color: 'var(--text-faint)' }}>{dd}d</button>
-        ))}
+      {/* Grupo 1 — Meus Pedidos */}
+      <div className="mb-2.5">
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-[10px] uppercase tracking-wider text-faint font-bold">Meus pedidos</span>
+          <div className="flex items-center gap-1">
+            {[7, 15, 30].map((dd) => (
+              <button key={dd} onClick={() => mudar('dias', dd)} className="text-[11px] px-2 py-1 rounded-lg"
+                style={dias === dd ? { background: 'var(--glass-hover)', color: 'var(--text)' } : { color: 'var(--text-faint)' }}>{dd}d</button>
+            ))}
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {ABAS_PEDIDO.map(([id, label, ck]) => <Aba key={id} ativo={status === id} onClick={() => mudar('status', id)} label={label} count={cnt(ck)} />)}
+        </div>
+      </div>
+
+      {/* Grupo 2 — Status do Pedido */}
+      <div className="mb-2.5">
+        <span className="text-[10px] uppercase tracking-wider text-faint font-bold block mb-1">Status do pedido</span>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {ABAS_GRUPO.map(([id, label, ck]) => <Aba key={id} ativo={grupo === id} onClick={() => mudar('grupo', id)} label={label} count={cnt(ck)} cor="#7b2a8c" />)}
+        </div>
+      </div>
+
+      {/* Grupo 3 — Status da Nota Fiscal */}
+      <div className="mb-3">
+        <span className="text-[10px] uppercase tracking-wider text-faint font-bold flex items-center gap-1 mb-1">
+          Status da nota fiscal
+          {contagensNf === null && <Loader2 size={9} className="animate-spin" />}
+        </span>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {ABAS_NF.map(([id, label, ck]) => <Aba key={id} ativo={nf === id} onClick={() => mudar('nf', id)} label={label} count={cntNf(ck)} cor="#d6007f" />)}
+        </div>
       </div>
 
       {res && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
-          <FinMetric icon={Package} rotulo="Pedidos" valor={res.total} />
-          <FinMetric icon={Wallet} rotulo="Receita" valor={brl(res.receita)} />
-          <FinMetric icon={TrendingUp} rotulo="Lucro real" valor={res.lucro_real != null ? brl(res.lucro_real) : '—'} cor="#2DD4BF" sub={res.lucro_real != null ? `${res.cobertura_lucro} c/ custo` : 'cadastre custos'} />
+          <FinMetric icon={Package} rotulo="Pedidos no total" valor={res.total} sub={d?.paginas > 1 ? `${res.total_pagina} nesta página` : null} />
+          <FinMetric icon={Wallet} rotulo="Receita" valor={brl(res.receita)} sub="nesta página" />
+          <FinMetric icon={TrendingUp} rotulo="Lucro real" valor={res.lucro_real != null ? brl(res.lucro_real) : '—'} cor="#2DD4BF" sub={res.lucro_real != null ? `${res.cobertura_lucro} c/ custo · página` : 'cadastre custos'} />
           <FinMetric icon={AlertTriangle} rotulo="Abaixo da meta" valor={res.abaixo_meta} cor={res.abaixo_meta > 0 ? '#d6007f' : '#2DD4BF'} sub={res.prejuizo > 0 ? `${res.prejuizo} em prejuízo` : (res.margem_alvo ? `meta ${res.margem_alvo}%` : null)} />
         </div>
       )}
 
-      {pedidos.length > 0 && (
-        <div className="flex items-center gap-2 mb-2">
-          <div className="flex-1 flex items-center gap-1.5 rounded-lg px-2.5 py-1.5" style={{ background: 'var(--glass-hover)' }}>
-            <Search size={13} className="text-faint" />
-            <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="buscar por comprador, produto, SKU ou #pedido" className="bg-transparent text-xs flex-1 outline-none" />
-          </div>
-          <button onClick={selTodos} className="text-[11px] px-2 py-1.5 rounded-lg glass text-dim hover:text-fg">
-            {sel.size === visiveis.length && visiveis.length ? 'limpar' : 'todos'}{sel.size ? ` (${sel.size})` : ''}
-          </button>
+      {/* Busca + tipo de busca */}
+      <div className="flex items-center gap-2 mb-2 flex-wrap">
+        <div className="flex-1 min-w-[180px] flex items-center gap-1.5 rounded-lg px-2.5 py-1.5" style={{ background: 'var(--glass-hover)' }}>
+          <Search size={13} className="text-faint" />
+          <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder={`buscar em ${(TIPOS_BUSCA.find((t) => t[0] === buscaTipo) || ['', 'tudo'])[1].toLowerCase()}…`} className="bg-transparent text-xs flex-1 outline-none" />
+          {busca && <button onClick={() => setBusca('')} className="text-faint hover:text-fg" title="Limpar"><X size={12} /></button>}
         </div>
-      )}
+        <div className="flex items-center gap-1">
+          <Filter size={12} className="text-faint" />
+          {TIPOS_BUSCA.map(([id, label]) => (
+            <button key={id} onClick={() => setBuscaTipo(id)} className="text-[11px] px-2 py-1.5 rounded-lg"
+              style={buscaTipo === id ? { background: 'var(--glass-hover)', color: 'var(--text)' } : { color: 'var(--text-faint)' }}>{label}</button>
+          ))}
+        </div>
+        {pedidos.length > 0 && (
+          <button onClick={selTodos} className="text-[11px] px-2 py-1.5 rounded-lg glass text-dim hover:text-fg">
+            {sel.size === pedidos.length && pedidos.length ? 'limpar' : 'pág.'}{sel.size ? ` (${sel.size})` : ''}
+          </button>
+        )}
+      </div>
 
       {d === null ? <div className="py-10 text-center text-faint flex items-center justify-center gap-2"><Loader2 size={16} className="animate-spin" /> carregando pedidos…</div>
         : d?.erro ? <div className="py-6 text-center text-sm" style={{ color: '#FF6F6F' }}>{typeof d.erro === 'string' ? d.erro : 'Falha ao carregar pedidos.'}</div>
-        : visiveis.length === 0 ? <div className="py-8 text-center text-sm text-faint">{filtro ? 'Nenhum pedido bate com a busca.' : `Nenhum pedido ${ROTULO_STATUS[status].toLowerCase()} no período.`}</div>
-        : <div className="space-y-2">{visiveis.map((p) => <PedidoCard key={p.order_sn} p={p} agora={agora} alvo={d?.margem_alvo} sel={sel.has(p.order_sn)} onSel={toggleSel} onAbrir={setAberto} recorrente={ehRecorrente(p)} impressa={impressas.has(p.order_sn)} />)}</div>}
+        : pedidos.length === 0 ? <div className="py-8 text-center text-sm text-faint">{busca ? 'Nenhum pedido bate com a busca.' : `Nenhum pedido ${LABEL_ABA[status] || ''} no período.`}</div>
+        : <div className="space-y-2">{pedidos.map((p) => <PedidoCard key={p.order_sn} p={p} agora={agora} alvo={d?.margem_alvo} sel={sel.has(p.order_sn)} onSel={toggleSel} onAbrir={setAberto} recorrente={ehRecorrente(p)} impressa={impressas.has(p.order_sn)} nfSelo={seloDe(p)} />)}</div>}
+
+      {/* Paginação */}
+      {d && !d.erro && d.paginas > 1 && (
+        <div className="flex items-center justify-center gap-3 mt-4">
+          <button onClick={() => irPagina(page - 1)} disabled={page <= 1} className="text-xs px-3 py-1.5 rounded-lg glass text-dim hover:text-fg flex items-center gap-1 disabled:opacity-40"><ChevronLeft size={14} /> anterior</button>
+          <span className="text-xs text-dim num">página <b>{d.page}</b> de <b>{d.paginas}</b> · {d.total} pedidos</span>
+          <button onClick={() => irPagina(page + 1)} disabled={!d.tem_mais} className="text-xs px-3 py-1.5 rounded-lg glass text-dim hover:text-fg flex items-center gap-1 disabled:opacity-40">próxima <ChevronRight size={14} /></button>
+        </div>
+      )}
 
       {aberto && (
         <LimiteErro fallback={
@@ -2921,8 +3015,8 @@ function PedidosPainel({ conectado }) {
           </div>
         }>
           <PedidoDetalhe orderSn={aberto} alvo={d?.margem_alvo} onClose={() => setAberto(null)}
-                         recorrente={ehRecorrente(pedidos.find((p) => p.order_sn === aberto) || {})}
-                         onImpressa={marcarImpressa} rem="Sóstrass Armarinhos" />
+            recorrente={ehRecorrente(pedidos.find((p) => p.order_sn === aberto) || {})}
+            onImpressa={marcarImpressa} rem="Sóstrass Armarinhos" />
         </LimiteErro>
       )}
 
@@ -2934,7 +3028,7 @@ function PedidosPainel({ conectado }) {
 
       <div className="text-[10px] text-faint mt-3 flex items-start gap-1.5">
         <FileText size={11} className="mt-0.5 shrink-0" />
-        <span><b>Folha de separação</b> e <b>etiqueta 100×150mm</b> imprimem com o visual da sua loja — use <b>Personalizar</b> pra ajustar os dados da empresa e o que aparece. A <b>Oficial SPX</b> é a etiqueta de envio real da Shopee (com o endereço, que a API mascara nas outras).</span>
+        <span>O cliente aparece pelo <b>usuário da Shopee</b> (a API esconde nome/endereço reais — o endereço completo e a <b>estação/rota</b> só vêm na <b>Oficial SPX</b>). A <b>folha de separação</b> agrega todos os pedidos do status; as <b>etiquetas/folhas</b> imprimem os pedidos da página atual ou os selecionados.</span>
       </div>
     </div>
   )
