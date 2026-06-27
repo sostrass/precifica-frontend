@@ -5,7 +5,7 @@ import {
   AlertTriangle, Plug, RefreshCw, Wand2, ChevronRight, ChevronLeft, Filter, Flame,
   HelpCircle, GitCompareArrows, Undo2, TrendingUp, TrendingDown, Trash2, Calendar,
   Stethoscope, XCircle, ShieldAlert, CircleDot, Bot, Search,
-  Send, Sparkles, SlidersHorizontal, MessageSquare, ImageIcon, Settings2, Smile, ThumbsUp,
+  Send, Sparkles, SlidersHorizontal, MessageSquare, ImageIcon, Check, Settings, Settings2, Smile, ThumbsUp,
   Percent, Ticket, RotateCcw, ChevronDown, PlusCircle, Layers, Hourglass, Infinity as InfinityIcon,
   Wallet, Receipt, Coins, Truck, BadgePercent, Target,
   Printer, MapPin, FileText, ClipboardList, User as UserIcon,
@@ -2346,12 +2346,13 @@ function PedidoCard({ p, agora, alvo, sel, onSel, onAbrir, recorrente, impressa,
   const nome = [p.cliente, p.comprador].find((x) => x && !mascarado(x)) || 'Comprador protegido'
   const NF_INFO = { pendente: ['#F59E0B', 'NF pendente'], recusado: ['#FF6F6F', 'NF recusada'], autorizado: ['#2DD4BF', 'NF autorizada'] }
   const nfCor = nfSelo && NF_INFO[nfSelo.grupo]
+  const custoRealPedido = (p.itens || []).length > 0 && (p.itens || []).every((it) => it.tem_cadastro && it.custo > 0)
   return (
     <div onClick={() => onAbrir && onAbrir(p.order_sn)} className="glass rounded-xl p-3 transition-colors hover:bg-[var(--glass-hover)]"
          style={{ borderLeft: `3px solid ${corBorda}`, cursor: 'pointer', opacity: cancelado ? 0.78 : 1 }}>
       <div className="flex items-center gap-2 mb-2">
-        <button onClick={(e) => { e.stopPropagation(); onSel(p.order_sn) }} className="h-4 w-4 rounded border grid place-items-center shrink-0" style={{ borderColor: sel ? LARANJA : 'var(--glass-border)', background: sel ? LARANJA : 'transparent' }} title="Selecionar">
-          {sel && <CheckCheck size={11} className="text-white" />}
+        <button onClick={(e) => { e.stopPropagation(); onSel(p.order_sn) }} className="h-[18px] w-[18px] rounded-[5px] grid place-items-center shrink-0 transition-colors" style={{ border: `2px solid ${sel ? LARANJA : 'var(--faint)'}`, background: sel ? LARANJA : 'rgba(255,255,255,.04)' }} title="Selecionar para impressão em lote">
+          {sel && <CheckCheck size={12} className="text-white" />}
         </button>
         <span className="h-7 w-7 rounded-full grid place-items-center shrink-0 text-[10px] font-bold text-white" style={{ background: corAvatar(nome) }}>{iniciais(nome)}</span>
         <div className="min-w-0 flex-1">
@@ -2361,6 +2362,7 @@ function PedidoCard({ p, agora, alvo, sel, onSel, onAbrir, recorrente, impressa,
             {recorrente && !cancelado && <MiniBadge cor="#7b2a8c" icon={Repeat}>recorrente</MiniBadge>}
             {impressa && !cancelado && <MiniBadge cor="#2DD4BF" icon={Printer}>etiqueta</MiniBadge>}
             {nfCor && <MiniBadge cor={nfCor[0]} icon={FileText}>{nfCor[1]}</MiniBadge>}
+            {p.cod ? <MiniBadge cor="#E0A23C" icon={Coins}>na entrega</MiniBadge> : p.pagamento && <MiniBadge cor="#9b8fa6" icon={CreditCard}>{String(p.pagamento).split(' ')[0]}</MiniBadge>}
           </div>
           <div className="flex items-center gap-1.5 mt-0.5">
             {p.cidade && <span className="text-[10px] text-faint flex items-center gap-0.5"><MapPin size={9} />{p.cidade}/{p.uf}</span>}
@@ -2396,7 +2398,7 @@ function PedidoCard({ p, agora, alvo, sel, onSel, onAbrir, recorrente, impressa,
               <Clock size={11} />{prazo.atrasado ? 'envio atrasado' : `enviar em ${fmtDur(prazo.ms)}`}</span>
             : <span className="text-[11px] text-faint">{statusPt(p.status)}</span>}
         <div className="flex items-center gap-2">
-          {p.lucro_real != null && <span className="text-[10px] num" style={{ color: '#2DD4BF' }}>lucro {brl(p.lucro_real)}</span>}
+          {p.lucro_real != null && <span className="text-[10px] num" style={{ color: custoRealPedido ? '#2DD4BF' : '#F59E0B' }}>{custoRealPedido ? 'lucro' : 'margem'} {brl(p.lucro_real)}</span>}
           <span className="text-xs font-semibold num">{brl(p.total_pago)}</span>
         </div>
       </div>
@@ -2503,10 +2505,8 @@ function PedidoDetalhe({ orderSn, alvo, onClose, recorrente, onImpressa, rem }) 
   }
 
   return (
-    <div className="fixed inset-0 z-50" onClick={onClose}>
-      <div className="absolute inset-0" style={{ background: 'rgba(8,5,12,.46)', backdropFilter: 'blur(2px)' }} />
-      <div className="absolute inset-y-0 right-0 w-full max-w-[524px] flex flex-col drawer-in" style={{ background: 'var(--surface)', borderLeft: '1px solid rgba(214,0,127,.28)', boxShadow: '-24px 0 60px rgba(0,0,0,.5)' }} onClick={(e) => e.stopPropagation()}>
-        <span aria-hidden style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: 'linear-gradient(180deg, var(--accent), var(--accent2))' }} />
+    <div className="rounded-2xl flex flex-col overflow-hidden drawer-in" style={{ background: 'var(--surface)', border: '1px solid rgba(214,0,127,.24)', maxHeight: 'calc(100vh - 96px)', position: 'relative' }}>
+        <span aria-hidden style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: 'linear-gradient(180deg, var(--accent), var(--accent2))', zIndex: 1 }} />
         {/* Cabeçalho */}
         <div className="flex items-start gap-3 p-4 border-b border-glassb shrink-0">
           <span className="h-10 w-10 rounded-full grid place-items-center shrink-0 text-xs font-bold text-white" style={{ background: ok ? corAvatar(nome) : 'var(--glass-hover)' }}>
@@ -2600,14 +2600,23 @@ function PedidoDetalhe({ orderSn, alvo, onClose, recorrente, onImpressa, rem }) 
                     {f.frete !== 0 && <LinhaFin rotulo="Frete" valor={f.frete} negativo={f.frete > 0} />}
                     <div className="border-t my-1" style={{ borderColor: 'var(--glass-border)' }} />
                     <LinhaFin rotulo="Você recebe (líquido)" valor={f.liquido} forte cor="#2DD4BF" />
-                    {f.custo_completo ? <>
-                      <LinhaFin rotulo="Custo dos produtos" valor={f.custo} negativo />
+                    {(f.custo_completo && f.custo > 0) ? <>
+                      <LinhaFin rotulo="Custo dos produtos (Bling)" valor={f.custo} negativo />
                       <div className="border-t my-1" style={{ borderColor: 'var(--glass-border)' }} />
                       <div className="flex items-center justify-between">
-                        <span className="text-sm font-semibold">Lucro real</span>
+                        <span className="text-sm font-semibold flex items-center gap-1.5"><TrendingUp size={14} style={{ color: corMargemReal(f.margem_pct, alvo) }} /> Lucro real</span>
                         <span className="num text-base font-bold" style={{ color: corMargemReal(f.margem_pct, alvo) }}>{brl(f.lucro)} <span className="text-xs">({f.margem_pct}%)</span></span>
                       </div>
-                    </> : <div className="text-[10px] text-faint mt-1 flex items-center gap-1"><AlertTriangle size={10} style={{ color: '#d6007f' }} /> Algum produto sem custo no catálogo — lucro não calculado.</div>}
+                    </> : <>
+                      <div className="flex items-center justify-between text-xs py-1"><span className="text-dim">Custo dos produtos (Bling)</span><span className="num text-faint">— sem custo</span></div>
+                      <div className="mt-1.5 pt-2 border-t" style={{ borderColor: 'color-mix(in srgb, #F59E0B 32%, transparent)' }}>
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-bold flex items-center gap-1.5"><TrendingUp size={14} style={{ color: '#F59E0B' }} /> Margem após taxas <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'color-mix(in srgb, #F59E0B 16%, transparent)', color: '#F59E0B' }}>indicador</span></span>
+                          <span className="num text-base font-extrabold" style={{ color: '#F59E0B' }}>{brl(f.liquido)} <span className="text-xs">({f.receita ? Math.round((f.liquido / f.receita) * 100) : 0}%)</span></span>
+                        </div>
+                        <div className="text-[10px] text-faint mt-1 flex items-start gap-1"><Info size={11} className="shrink-0 mt-0.5" /> Não é lucro: {f.custo_completo ? 'custo R$ 0,00 no Bling' : 'há SKU sem custo no Bling'}. Cadastre o custo pra ver o lucro real.</div>
+                      </div>
+                    </>}
                   </> : <div className="text-xs text-faint">A Shopee ainda não liberou o repasse (escrow) deste pedido — normalmente fica disponível após o envio/conclusão.</div>}
                 </div>
 
@@ -2636,7 +2645,6 @@ function PedidoDetalhe({ orderSn, alvo, onClose, recorrente, onImpressa, rem }) 
           </LimiteErro>
         </div>
       </div>
-    </div>
   )
 }
 
@@ -2802,6 +2810,35 @@ function Aba({ ativo, onClick, label, count, cor = LARANJA }) {
         <span className="text-[10px] num px-1.5 rounded-full leading-[1.4]" style={{ background: ativo ? 'rgba(255,255,255,.28)' : 'var(--glass-hover)', color: ativo ? '#fff' : 'var(--text-faint)' }}>{count}</span>
       )}
     </button>
+  )
+}
+
+// Janela de páginas: 1 … p-1 p p+1 … N (mostra tudo se forem poucas)
+function janelaPaginas(page, total) {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1)
+  const out = [1]
+  let ini = Math.max(2, page - 1), fim = Math.min(total - 1, page + 1)
+  if (page <= 3) { ini = 2; fim = 4 }
+  if (page >= total - 2) { ini = total - 3; fim = total - 1 }
+  if (ini > 2) out.push('…')
+  for (let i = ini; i <= fim; i++) out.push(i)
+  if (fim < total - 1) out.push('…')
+  out.push(total)
+  return out
+}
+function Paginacao({ page, total, onIr }) {
+  if (!total || total <= 1) return null
+  const cls = 'min-w-[34px] h-[34px] px-2 rounded-lg text-xs font-medium num grid place-items-center transition-colors disabled:opacity-35 disabled:cursor-default'
+  const off = { background: 'var(--glass-bg)', color: 'var(--text-dim)', border: '1px solid var(--glass-border)' }
+  const on = { background: 'var(--accent)', color: '#fff', border: '1px solid var(--accent)' }
+  return (
+    <div className="flex items-center justify-center gap-1.5 mt-4 flex-wrap">
+      <button onClick={() => onIr(page - 1)} disabled={page <= 1} className={cls} style={off} aria-label="Página anterior"><ChevronLeft size={15} /></button>
+      {janelaPaginas(page, total).map((p, i) => p === '…'
+        ? <span key={'e' + i} className="px-1 text-faint text-xs select-none">…</span>
+        : <button key={p} onClick={() => onIr(p)} aria-current={p === page ? 'page' : undefined} className={cls} style={p === page ? on : off}>{p}</button>)}
+      <button onClick={() => onIr(page + 1)} disabled={page >= total} className={cls} style={off} aria-label="Próxima página"><ChevronRight size={15} /></button>
+    </div>
   )
 }
 
@@ -3001,7 +3038,7 @@ function PedidosPainel({ conectado }) {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
           <FinMetric icon={Package} rotulo="Pedidos no total" valor={res.total} sub={d?.paginas > 1 ? `${res.total_pagina} nesta página` : null} />
           <FinMetric icon={Wallet} rotulo="Receita" valor={brl(res.receita)} sub="nesta página" />
-          <FinMetric icon={TrendingUp} rotulo="Lucro real" valor={res.lucro_real != null ? brl(res.lucro_real) : '—'} cor="#2DD4BF" sub={res.lucro_real != null ? `${res.cobertura_lucro} c/ custo · página` : 'cadastre custos'} />
+          <FinMetric icon={TrendingUp} rotulo="Margem após taxas" valor={res.lucro_real != null ? brl(res.lucro_real) : '—'} cor="#2DD4BF" sub={res.lucro_real != null ? `${res.cobertura_lucro} c/ custo · indicador` : 'cadastre custos no Bling'} />
           <FinMetric icon={AlertTriangle} rotulo="Abaixo da meta" valor={res.abaixo_meta} cor={res.abaixo_meta > 0 ? '#d6007f' : '#2DD4BF'} sub={res.prejuizo > 0 ? `${res.prejuizo} em prejuízo` : (res.margem_alvo ? `meta ${res.margem_alvo}%` : null)} />
         </div>
       )}
@@ -3039,35 +3076,44 @@ function PedidosPainel({ conectado }) {
         )}
       </div>
 
+      {/* faixa de instrução p/ seleção em lote */}
+      {pedidos.length > 0 && (
+        <div className="flex items-center gap-2 mb-3 rounded-xl px-3 py-2 text-[11px]" style={{ color: 'var(--dim)', background: 'color-mix(in srgb, var(--accent2) 10%, transparent)', border: '1px solid var(--glass-border)' }}>
+          <CheckCheck size={14} style={{ color: LARANJA }} className="shrink-0" />
+          <span><b className="text-fg">Marque os pedidos</b> no quadradinho à esquerda para imprimir em lote — depois use <b className="text-fg">Etiquetas</b>, <b className="text-fg">Pedidos</b> ou <b className="text-fg">Oficial SPX</b>.</span>
+        </div>
+      )}
+
+      <div className={aberto ? 'grid grid-cols-1 xl:grid-cols-[minmax(0,1.32fr)_minmax(0,1fr)] gap-4 items-start' : ''}>
+       <div className="min-w-0">
       {d === null ? <div className="py-10 text-center text-faint flex items-center justify-center gap-2"><Loader2 size={16} className="animate-spin" /> carregando pedidos…</div>
         : d?.erro ? <div className="py-6 text-center text-sm" style={{ color: '#FF6F6F' }}>{typeof d.erro === 'string' ? d.erro : 'Falha ao carregar pedidos.'}</div>
         : pedidos.length === 0 ? <div className="py-8 text-center text-sm text-faint">{busca ? 'Nenhum pedido bate com a busca.' : `Nenhum pedido ${LABEL_ABA[status] || ''} no período.`}</div>
         : <div className="space-y-2">{pedidos.map((p) => <PedidoCard key={p.order_sn} p={p} agora={agora} alvo={d?.margem_alvo} sel={sel.has(p.order_sn)} onSel={toggleSel} onAbrir={setAberto} recorrente={ehRecorrente(p)} impressa={impressas.has(p.order_sn)} nfSelo={seloDe(p)} />)}</div>}
 
       {/* Paginação */}
-      {d && !d.erro && d.paginas > 1 && (
-        <div className="flex items-center justify-center gap-3 mt-4">
-          <button onClick={() => irPagina(page - 1)} disabled={page <= 1} className="text-xs px-3 py-1.5 rounded-lg glass text-dim hover:text-fg flex items-center gap-1 disabled:opacity-40"><ChevronLeft size={14} /> anterior</button>
-          <span className="text-xs text-dim num">página <b>{d.page}</b> de <b>{d.paginas}</b> · {d.total} pedidos</span>
-          <button onClick={() => irPagina(page + 1)} disabled={!d.tem_mais} className="text-xs px-3 py-1.5 rounded-lg glass text-dim hover:text-fg flex items-center gap-1 disabled:opacity-40">próxima <ChevronRight size={14} /></button>
-        </div>
-      )}
+      {d && !d.erro && d.paginas > 1 && (<>
+        <Paginacao page={d.page} total={d.paginas} onIr={irPagina} />
+        <div className="text-center text-[11px] text-faint num mt-2">{d.total} pedidos · página {d.page} de {d.paginas}</div>
+      </>)}
+       </div>
 
       {aberto && (
+        <div className="min-w-0 xl:sticky xl:top-2">
         <LimiteErro fallback={
-          <div className="fixed inset-0 z-50 grid place-items-center p-4" style={{ background: 'rgba(0,0,0,.6)', backdropFilter: 'blur(3px)' }} onClick={() => setAberto(null)}>
-            <div className="glass rounded-2xl w-full max-w-sm p-6 text-center" style={{ background: 'var(--bg, var(--glass))' }} onClick={(e) => e.stopPropagation()}>
+          <div className="rounded-2xl p-6 text-center" style={{ background: 'var(--surface)', border: '1px solid var(--glass-border)' }}>
               <AlertTriangle size={22} className="mx-auto mb-2" style={{ color: '#FF6F6F' }} />
               <div className="text-sm text-dim mb-3">Não consegui abrir este pedido agora. Tente novamente.</div>
               <button onClick={() => setAberto(null)} className="text-xs px-3 py-1.5 rounded-lg glass text-dim hover:text-fg">Fechar</button>
-            </div>
           </div>
         }>
           <PedidoDetalhe orderSn={aberto} alvo={d?.margem_alvo} onClose={() => setAberto(null)}
             recorrente={ehRecorrente(pedidos.find((p) => p.order_sn === aberto) || {})}
             onImpressa={marcarImpressa} rem="Sóstrass Armarinhos" />
         </LimiteErro>
+        </div>
       )}
+      </div>
 
       {editorImpr && (
         <LimiteErro fallback={<div className="fixed inset-0 z-50 grid place-items-center p-4" style={{ background: 'rgba(0,0,0,.6)' }} onClick={() => setEditorImpr(false)}><div className="glass rounded-2xl p-6 text-center text-sm text-dim" onClick={(e) => e.stopPropagation()}>Não consegui abrir o personalizador. <button onClick={() => setEditorImpr(false)} className="underline ml-1">Fechar</button></div></div>}>
