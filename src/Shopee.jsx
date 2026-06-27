@@ -2424,6 +2424,36 @@ function DataLinha({ icon: Ic, rotulo, valor }) {
   )
 }
 
+// Timeline de logística na tela (mesma lógica do estagiosTimeline que já imprime)
+const TL_ICON = { 'receipt': Receipt, 'dollar-sign': CreditCard, 'package': Package, 'truck': Truck, 'map-pin': MapPin }
+function TimelineLog({ status }) {
+  const estagios = estagiosTimeline(status)
+  return (
+    <div>
+      {estagios.map((e, i) => {
+        const Ic = TL_ICON[e.icon] || CircleDot
+        const done = e.estado === 'done', cur = e.estado === 'current'
+        const cor = cur ? 'var(--accent)' : done ? '#2DD4BF' : 'var(--faint)'
+        const last = i === estagios.length - 1
+        return (
+          <div key={i} className="flex gap-2.5">
+            <div className="flex flex-col items-center">
+              <span className="h-6 w-6 rounded-full grid place-items-center shrink-0" style={{ background: (done || cur) ? `color-mix(in srgb, ${cor} 18%, transparent)` : 'transparent', border: `1.5px solid ${cor}`, color: cor }}>
+                <Ic size={12} />
+              </span>
+              {!last && <span style={{ width: 2, flex: 1, minHeight: 12, background: done ? '#2DD4BF' : 'var(--glass-border)' }} />}
+            </div>
+            <div className={last ? '' : 'pb-2'}>
+              <div className="text-xs font-medium" style={{ color: (done || cur) ? 'var(--text)' : 'var(--faint)' }}>{e.label}</div>
+              {cur && <div className="text-[10px]" style={{ color: 'var(--accent)' }}>em andamento</div>}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 function PedidoDetalhe({ orderSn, alvo, onClose, recorrente, onImpressa, rem }) {
   const notify = useToast()
   const [d, setD] = useState(null)
@@ -2473,8 +2503,10 @@ function PedidoDetalhe({ orderSn, alvo, onClose, recorrente, onImpressa, rem }) 
   }
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center p-4" style={{ background: 'rgba(0,0,0,.6)', backdropFilter: 'blur(3px)' }} onClick={onClose}>
-      <div className="glass rounded-2xl w-full max-w-lg max-h-[90vh] flex flex-col" style={{ background: 'var(--bg, var(--glass))' }} onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50" onClick={onClose}>
+      <div className="absolute inset-0" style={{ background: 'rgba(8,5,12,.46)', backdropFilter: 'blur(2px)' }} />
+      <div className="absolute inset-y-0 right-0 w-full max-w-[524px] flex flex-col drawer-in" style={{ background: 'var(--surface)', borderLeft: '1px solid rgba(214,0,127,.28)', boxShadow: '-24px 0 60px rgba(0,0,0,.5)' }} onClick={(e) => e.stopPropagation()}>
+        <span aria-hidden style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: 'linear-gradient(180deg, var(--accent), var(--accent2))' }} />
         {/* Cabeçalho */}
         <div className="flex items-start gap-3 p-4 border-b border-glassb shrink-0">
           <span className="h-10 w-10 rounded-full grid place-items-center shrink-0 text-xs font-bold text-white" style={{ background: ok ? corAvatar(nome) : 'var(--glass-hover)' }}>
@@ -2530,7 +2562,7 @@ function PedidoDetalhe({ orderSn, alvo, onClose, recorrente, onImpressa, rem }) 
                 {d.nota_comprador && (
                   <div className="rounded-xl px-3 py-2.5 flex items-start gap-2" style={{ background: 'color-mix(in srgb, #E0A23C 12%, transparent)', border: '1px solid color-mix(in srgb, #E0A23C 30%, transparent)' }}>
                     <MessageSquare size={13} className="mt-0.5 shrink-0" style={{ color: '#E0A23C' }} />
-                    <div><div className="text-[10px] uppercase tracking-wide text-faint">Observação do comprador</div><div className="text-xs text-dim mt-0.5">{d.nota_comprador}</div></div>
+                    <div><div className="text-[10px] uppercase tracking-wide text-faint">Mensagem do comprador</div><div className="text-xs text-dim mt-0.5">{d.nota_comprador}</div></div>
                   </div>
                 )}
 
@@ -2579,18 +2611,21 @@ function PedidoDetalhe({ orderSn, alvo, onClose, recorrente, onImpressa, rem }) 
                   </> : <div className="text-xs text-faint">A Shopee ainda não liberou o repasse (escrow) deste pedido — normalmente fica disponível após o envio/conclusão.</div>}
                 </div>
 
-                {/* Entrega + Logística */}
-                <div className="grid sm:grid-cols-2 gap-2">
-                  <div className="rounded-xl p-3" style={{ background: 'var(--glass-hover)' }}>
-                    <div className="text-[10px] text-faint uppercase tracking-wide mb-1 flex items-center gap-1"><MapPin size={11} /> Entrega</div>
-                    <div className="text-xs font-medium">{nome}</div>
-                    {end.completo && <div className="text-[11px] text-faint mt-0.5">{end.completo}</div>}
-                    <div className="text-[11px] text-faint">{[end.cidade, end.uf].filter(Boolean).join('/')} {end.cep || ''}</div>
-                    {end.telefone && <div className="text-[11px] text-faint num flex items-center gap-1 mt-0.5"><Phone size={10} />{end.telefone}</div>}
-                  </div>
-                  <div className="rounded-xl p-3" style={{ background: 'var(--glass-hover)' }}>
-                    <div className="text-[10px] text-faint uppercase tracking-wide mb-1 flex items-center gap-1"><Truck size={11} /> Logística</div>
-                    <div className="text-xs">{log.transportadora || '—'}</div>
+                {/* Entrega */}
+                <div className="rounded-xl p-3" style={{ background: 'var(--glass-hover)' }}>
+                  <div className="text-[10px] text-faint uppercase tracking-wide mb-1 flex items-center gap-1"><MapPin size={11} /> Entrega</div>
+                  <div className="text-xs font-medium">{nome}</div>
+                  {end.completo && <div className="text-[11px] text-faint mt-0.5">{end.completo}</div>}
+                  <div className="text-[11px] text-faint">{[end.cidade, end.uf].filter(Boolean).join('/')} {end.cep || ''}</div>
+                  {end.telefone && <div className="text-[11px] text-faint num flex items-center gap-1 mt-0.5"><Phone size={10} />{end.telefone}</div>}
+                </div>
+
+                {/* Informação de logística */}
+                <div className="rounded-xl p-3" style={{ background: 'var(--glass-hover)' }}>
+                  <div className="text-[10px] text-faint uppercase tracking-wide mb-2 flex items-center gap-1"><Truck size={11} /> Informação de logística</div>
+                  <TimelineLog status={d.status} />
+                  <div className="border-t mt-1 pt-2" style={{ borderColor: 'var(--glass-border)' }}>
+                    <div className="text-xs">{log.transportadora || 'Shopee Xpress'}</div>
                     {log.rastreio && <>
                       <div className="text-[11px] num text-faint mt-0.5 flex items-center gap-1"><Barcode size={10} /> {log.rastreio}</div>
                       <div className="mt-1.5 bg-white rounded p-1 inline-block"><BarcodeInline valor={log.rastreio} height={34} /></div>
@@ -2842,6 +2877,8 @@ function PedidosPainel({ conectado }) {
   const toggleSel = (sn) => setSel((s) => { const n = new Set(s); n.has(sn) ? n.delete(sn) : n.add(sn); return n })
   const selTodos = () => setSel((s) => s.size === pedidos.length && pedidos.length ? new Set() : new Set(pedidos.map((p) => p.order_sn)))
   const alvoImpressao = () => (sel.size ? pedidos.filter((p) => sel.has(p.order_sn)) : pedidos)
+  const aprovadoStatus = (s) => s === 'READY_TO_SHIP' || s === 'PROCESSED'
+  const aprovadosComNota = pedidos.filter((p) => aprovadoStatus(p.status) && seloDe(p)?.grupo === 'autorizado')
 
   const enriquecerPedidos = async (lista) => {
     const clones = lista.map((p) => ({ ...p, itens: (p.itens || []).map((it) => ({ ...it })) }))
@@ -2983,6 +3020,18 @@ function PedidosPainel({ conectado }) {
               style={buscaTipo === id ? { background: 'var(--glass-hover)', color: 'var(--text)' } : { color: 'var(--text-faint)' }}>{label}</button>
           ))}
         </div>
+        {aprovadosComNota.length > 0 && (() => {
+          const alvos = aprovadosComNota.map((p) => p.order_sn)
+          const todos = alvos.every((sn) => sel.has(sn))
+          return (
+            <button onClick={() => setSel((s) => { const n = new Set(s); alvos.forEach((sn) => todos ? n.delete(sn) : n.add(sn)); return n })}
+              className="text-[11px] px-2 py-1.5 rounded-lg flex items-center gap-1 glass hover:text-fg"
+              style={{ color: todos ? '#2DD4BF' : 'var(--text-dim)', borderColor: todos ? '#2DD4BF' : undefined }}
+              title="Marca de uma vez todos os pedidos aprovados (a enviar / processado) que já têm NF-e autorizada — prontos para imprimir">
+              <CheckCheck size={12} /> Aprovados c/ nota <span className="num">({alvos.length})</span>
+            </button>
+          )
+        })()}
         {pedidos.length > 0 && (
           <button onClick={selTodos} className="text-[11px] px-2 py-1.5 rounded-lg glass text-dim hover:text-fg">
             {sel.size === pedidos.length && pedidos.length ? 'limpar' : 'pág.'}{sel.size ? ` (${sel.size})` : ''}
