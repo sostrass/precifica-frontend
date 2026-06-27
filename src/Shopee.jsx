@@ -67,6 +67,14 @@ const TABS = [
   { id: 'saude', label: 'Saúde da loja', icon: Activity },
 ]
 
+// Navegação em 2 níveis: grupos (nível 1) → abas (nível 2). Reduz a poluição de 11 abas soltas.
+const GRUPOS = [
+  { id: 'campanhas', label: 'Campanhas', icon: Megaphone, abas: ['promocoes', 'motor', 'boost', 'ads'] },
+  { id: 'financeiro', label: 'Pedidos & Financeiro', icon: ShoppingBag, abas: ['pedidos', 'devolucoes', 'catalogo'] },
+  { id: 'servico', label: 'Status do serviço', icon: Activity, abas: ['diagnostico', 'saude', 'avaliacoes', 'qa'] },
+]
+const TAB_META = Object.fromEntries(TABS.map((t) => [t.id, t]))
+
 export default function Shopee() {
   const notify = useToast()
   const [aba, setAba] = useState('diagnostico')
@@ -100,29 +108,57 @@ export default function Shopee() {
 
       {!carregando && !status?.ok && <ConectarShopee status={status} onSaved={() => api.shopeeStatus().then(setStatus)} />}
 
-      {/* Abas */}
-      <div className="flex gap-1.5 flex-wrap">
-        {TABS.map((t) => {
-          const on = aba === t.id
-          const Ic = t.icon
-          return (
-            <button key={t.id} onClick={() => setAba(t.id)}
-                    className="rounded-xl px-3.5 py-2 text-sm font-medium flex items-center gap-2 transition-all"
-                    style={on
-                      ? { background: LARANJA, color: '#fff' }
-                      : { background: 'var(--glass)', color: 'var(--text-dim)', border: '1px solid var(--glass-border)' }}>
-              <Ic size={15} />{t.label}
-              {t.destaque && !on && <span className="text-[9px] px-1 rounded" style={{ background: 'rgba(238,77,45,.15)', color: LARANJA }}>auto</span>}
-            </button>
-          )
-        })}
-      </div>
+      {/* Navegação em 2 níveis — grupos + sub-abas */}
+      {(() => {
+        const grupoAtivo = GRUPOS.find((g) => g.abas.includes(aba)) || GRUPOS[0]
+        return (
+          <div className="space-y-2.5">
+            {/* Nível 1 — grupos */}
+            <div className="flex gap-1.5 flex-wrap">
+              {GRUPOS.map((g) => {
+                const on = grupoAtivo.id === g.id
+                const Ic = g.icon
+                const temAuto = g.abas.some((id) => TAB_META[id]?.destaque)
+                return (
+                  <button key={g.id} onClick={() => { if (!g.abas.includes(aba)) setAba(g.abas[0]) }}
+                          className="rounded-xl px-4 py-2 text-sm font-semibold flex items-center gap-2 transition-all"
+                          style={on
+                            ? { background: LARANJA, color: '#fff' }
+                            : { background: 'var(--glass)', color: 'var(--text-dim)', border: '1px solid var(--glass-border)' }}>
+                    <Ic size={16} />{g.label}
+                    {temAuto && !on && <span className="h-1.5 w-1.5 rounded-full" style={{ background: LARANJA }} title="tem agente automático" />}
+                  </button>
+                )
+              })}
+            </div>
+            {/* Nível 2 — sub-abas do grupo ativo */}
+            <div className="flex gap-1.5 flex-wrap pl-0.5">
+              {grupoAtivo.abas.map((id) => {
+                const t = TAB_META[id]
+                if (!t) return null
+                const on = aba === id
+                const Ic = t.icon
+                return (
+                  <button key={id} onClick={() => setAba(id)}
+                          className="rounded-lg px-3 py-1.5 text-[13px] font-medium flex items-center gap-1.5 transition-all"
+                          style={on
+                            ? { background: `color-mix(in srgb, ${LARANJA} 16%, transparent)`, color: LARANJA, border: `1px solid ${LARANJA}` }
+                            : { background: 'transparent', color: 'var(--text-faint)', border: '1px solid var(--glass-border)' }}>
+                    <Ic size={14} />{t.label}
+                    {t.destaque && !on && <span className="text-[9px] px-1 rounded" style={{ background: 'rgba(238,77,45,.15)', color: LARANJA }}>auto</span>}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })()}
 
       {aba === 'diagnostico' && <Diagnostico status={status} />}
       {aba === 'boost' && <BoostCenter conectado={status?.ok} notify={notify} />}
       {aba === 'avaliacoes' && <Avaliacoes conectado={status?.ok} notify={notify} />}
       {aba === 'qa' && <Perguntas conectado={status?.ok} notify={notify} />}
-      {aba === 'catalogo' && <Divergencia conectado={status?.ok} />}
+      {aba === 'catalogo' && <Divergencia conectado={status?.ok} notify={notify} />}
       {aba === 'promocoes' && <Promocoes conectado={status?.ok} notify={notify} />}
       {aba === 'motor' && <MotorPromocoes conectado={status?.ok} notify={notify} />}
       {aba === 'ads' && <Ads conectado={status?.ok} />}
@@ -2088,11 +2124,15 @@ function logoPrecifica(scale = 1) {
   const s = scale
   return `<span class="pfl"><span class="pfmark" style="width:${Math.round(18 * s)}px;height:${Math.round(18 * s)}px">${ico('sparkles', Math.round(11 * s), '#fff', 2.2)}</span><span class="pfwm" style="font-size:${Math.round(13 * s)}px">Precifica<b>AI</b></span></span>`
 }
-// QR vetorial (scalable) — tamanho controlado por CSS no container
+// QR vetorial — viewBox p/ escalar + width/height explícitos p/ navegadores antigos (Safari High Sierra não dimensiona SVG só-viewBox)
 function qrSvg(texto) {
   try {
     const qr = qrcode(0, 'M'); qr.addData(String(texto || '')); qr.make()
-    return qr.createSvgTag({ cellSize: 1, margin: 0, scalable: true })
+    let svg = qr.createSvgTag({ cellSize: 1, margin: 0, scalable: true })
+    const m = svg.match(/viewBox="0 0 (\d+)/)
+    const px = m ? parseInt(m[1], 10) * 4 : 120
+    if (!/<svg[^>]*\swidth=/.test(svg)) svg = svg.replace('<svg ', `<svg width="${px}" height="${px}" `)
+    return svg
   } catch (_) { return '' }
 }
 // Status Shopee → estágios da timeline (com qual está em andamento)
@@ -2174,7 +2214,7 @@ function htmlFolhaPedido(p, cfg = PRINT_CFG) {
 }
 // CSS compartilhado entre folha e etiqueta (timeline + logo Precifica). .tn escopado em .tl (evita colisão com rastreio).
 const CSS_SHARED = `*{-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important}
-.pfl{display:inline-flex;align-items:center;gap:6px}.pfmark{border-radius:6px;background:linear-gradient(135deg,#d6007f,#7b2a8c);display:grid;place-items:center;flex-shrink:0}.pfwm{font-weight:800;color:#14151a;letter-spacing:-.2px}.pfwm b{color:#d6007f;font-weight:800}
+.pfl{display:inline-flex;align-items:center}.pfmark{border-radius:6px;background:linear-gradient(135deg,#d6007f,#7b2a8c);display:grid;place-items:center;flex-shrink:0;margin-right:6px}.pfwm{font-weight:800;color:#14151a;letter-spacing:-.2px}.pfwm b{color:#d6007f;font-weight:800}
 .tl{display:flex;align-items:flex-start;padding:15px 30px 13px;background:#fff;border-bottom:1px solid #eef0f3}
 .tl .tn{flex:1;text-align:center;position:relative}.tl .tn::before{content:'';position:absolute;top:18px;left:-50%;width:100%;height:3px;background:#e3e5ea;z-index:0}.tl .tn:first-child::before{display:none}.tl .tn.done::before,.tl .tn.current::before{background:#16171c}
 .tcirc{width:38px;height:38px;border-radius:50%;display:grid;place-items:center;margin:0 auto;position:relative;z-index:1;background:#fff;border:2px solid #dcdfe5}.tl .tn.done .tcirc{background:#16171c;border-color:#16171c}.tl .tn.current .tcirc{background:#EE4D2D;border-color:#EE4D2D;box-shadow:0 0 0 4px rgba(238,77,45,.16)}
@@ -2185,25 +2225,27 @@ const CSS_FOLHA = CSS_SHARED + `*{box-sizing:border-box;margin:0;padding:0}body{
 .doc{background:#fff;page-break-after:always}
 .band{background:linear-gradient(120deg,#16171c,#23252e);color:#fff;padding:16px 30px;display:flex;justify-content:space-between;align-items:flex-start}
 .kick{font-size:10px;letter-spacing:.16em;color:#EE6A45;font-weight:800}.onum{font-size:25px;font-weight:800;font-family:ui-monospace,monospace;margin:2px 0 7px;word-break:break-all}
-.tags{display:flex;gap:8px;flex-wrap:wrap}.tg{font-size:11px;font-weight:600;padding:4px 10px;border-radius:20px;display:inline-flex;align-items:center;gap:5px}.tg.s{background:rgba(238,77,45,.18);color:#FF9576}.tg.w{background:rgba(224,162,60,.16);color:#F0C079}
+.tags{display:flex;flex-wrap:wrap}.tg{font-size:11px;font-weight:600;padding:4px 10px;border-radius:20px;display:inline-flex;align-items:center}.tg.s{background:rgba(238,77,45,.18);color:#FF9576}.tg.w{background:rgba(224,162,60,.16);color:#F0C079}
 .br{text-align:right;flex-shrink:0;margin-left:14px}.bcwrap{background:#fff;padding:5px 7px;border-radius:5px;display:inline-block}.bcwrap svg{display:block}.dt{font-size:10px;color:#9a9da6;margin-top:5px}
-.emp{display:flex;align-items:center;gap:12px;padding:11px 30px;background:#FAFAFB;border-bottom:1px solid #eef0f3}
+.emp{display:flex;align-items:center;padding:11px 30px;background:#FAFAFB;border-bottom:1px solid #eef0f3}
 .logo{width:36px;height:36px;border-radius:9px;background:linear-gradient(135deg,#d6007f,#7b2a8c);display:grid;place-items:center;flex-shrink:0}.ei{flex:1}.en{font-size:15px;font-weight:800}.ec{font-size:11px;color:#8a8f9b}.spxs{height:7mm}
 .topcols{display:flex;border-bottom:1px solid #eef0f3}
 .refs{display:grid;grid-template-columns:1fr 1fr;flex:1;border-right:1px solid #eef0f3}
-.ref{padding:11px 22px;display:flex;gap:9px;align-items:flex-start;border-bottom:1px solid #f3f4f6;border-right:1px solid #f3f4f6}.ref:nth-child(2n){border-right:0}.ref:nth-last-child(-n+2){border-bottom:0}
+.ref{padding:11px 22px;display:flex;align-items:flex-start;border-bottom:1px solid #f3f4f6;border-right:1px solid #f3f4f6}.ref:nth-child(2n){border-right:0}.ref:nth-last-child(-n+2){border-bottom:0}
 .ref span{font-size:9px;letter-spacing:.05em;color:#9aa0ab;font-weight:700;display:block}.ref b{font-size:13.5px;display:block;margin-top:2px;word-break:break-all}.mn{font-family:ui-monospace,monospace;font-size:12px}
-.destcard{width:42%;padding:12px 26px}.dlbl{font-size:9px;letter-spacing:.06em;color:#9aa0ab;font-weight:700;display:flex;align-items:center;gap:4px}
-.drow{display:flex;gap:12px;align-items:center;margin-top:6px}.dav{width:38px;height:38px;border-radius:50%;background:#16171c;color:#fff;display:grid;place-items:center;font-weight:800;font-size:13px;flex-shrink:0}.dnome{font-size:17px;font-weight:800;line-height:1.1}.dadr{font-size:12px;color:#5a5f6b;line-height:1.4;margin-top:2px}
-.obsbar{margin:13px 30px 0;background:#FFF8EE;border:1px solid #F3E2C4;border-radius:9px;padding:9px 13px;font-size:12px;color:#7a5a1e;display:flex;gap:7px;align-items:flex-start}
-.ith{display:flex;align-items:center;justify-content:space-between;padding:14px 30px 9px}.itl{display:flex;align-items:center;gap:7px}.itl span{font-size:12px;font-weight:800;letter-spacing:.04em}.itr{display:flex;align-items:center;gap:14px}.cnt{font-size:12px;color:#3a3f4b}.cnt b{font-weight:800}.den{font-size:10.5px;color:#9aa0ab}
+.destcard{width:42%;padding:12px 26px}.dlbl{font-size:9px;letter-spacing:.06em;color:#9aa0ab;font-weight:700;display:flex;align-items:center}
+.drow{display:flex;align-items:center;margin-top:6px}.dav{width:38px;height:38px;border-radius:50%;background:#16171c;color:#fff;display:grid;place-items:center;font-weight:800;font-size:13px;flex-shrink:0}.dnome{font-size:17px;font-weight:800;line-height:1.1}.dadr{font-size:12px;color:#5a5f6b;line-height:1.4;margin-top:2px}
+.obsbar{margin:13px 30px 0;background:#FFF8EE;border:1px solid #F3E2C4;border-radius:9px;padding:9px 13px;font-size:12px;color:#7a5a1e;display:flex;align-items:flex-start}
+.ith{display:flex;align-items:center;justify-content:space-between;padding:14px 30px 9px}.itl{display:flex;align-items:center}.itl span{font-size:12px;font-weight:800;letter-spacing:.04em}.itr{display:flex;align-items:center}.cnt{font-size:12px;color:#3a3f4b}.cnt b{font-weight:800}.den{font-size:10.5px;color:#9aa0ab}
 .list{border-top:1px solid #eef0f3}
-.row{display:flex;gap:13px;align-items:flex-start;padding:11px 30px;border-bottom:1px solid #f1f2f5;page-break-inside:avoid}
+.row{display:flex;align-items:flex-start;padding:11px 30px;border-bottom:1px solid #f1f2f5;page-break-inside:avoid}
 .row .ph{width:44px;height:44px;border-radius:9px;background:linear-gradient(135deg,#f4f5f7,#e9ebef);border:1px solid #e8eaef;display:grid;place-items:center;flex-shrink:0;overflow:hidden}.row .ph img{width:100%;height:100%;object-fit:cover}
 .cd{flex:1;min-width:0}.nm{font-size:14px;font-weight:700;line-height:1.3}
-.mt{font-size:12px;color:#3a3f4b;margin-top:4px;display:flex;align-items:center;gap:4px;flex-wrap:wrap}.sku{font-family:ui-monospace,monospace;color:#7a7f8b}.dt2{color:#ccc}.cp{color:#8a8f9b}
+.mt{font-size:12px;color:#3a3f4b;margin-top:4px;display:flex;align-items:center;flex-wrap:wrap}.sku{font-family:ui-monospace,monospace;color:#7a7f8b}.dt2{color:#ccc}.cp{color:#8a8f9b}
 .qt{text-align:center;flex-shrink:0;width:46px}.qt b{font-size:20px;font-weight:800;display:block;line-height:1}.qt span{font-size:9px;color:#aab0bb}.ck{width:18px;height:18px;border:1.5px solid #ccd;border-radius:4px;flex-shrink:0;margin-top:3px}
-.foot{padding:13px 30px;border-top:2px solid #14151a;display:flex;justify-content:space-between;align-items:center}.fl{display:flex;align-items:center;gap:8px}.genf{font-size:12px;color:#5a5f6b}.genf b{color:#EE4D2D}.pgn{font-size:10.5px;color:#9aa0ab}
+.foot{padding:13px 30px;border-top:2px solid #14151a;display:flex;justify-content:space-between;align-items:center}.fl{display:flex;align-items:center}.genf{font-size:12px;color:#5a5f6b}.genf b{color:#EE4D2D}.pgn{font-size:10.5px;color:#9aa0ab}
+
+.tags>*+*{margin-left:8px}.tg>*+*{margin-left:5px}.emp>*+*{margin-left:12px}.ref>*+*{margin-left:9px}.dlbl>*+*{margin-left:4px}.drow>*+*{margin-left:12px}.obsbar>*+*{margin-left:7px}.itl>*+*{margin-left:7px}.itr>*+*{margin-left:14px}.row>*+*{margin-left:13px}.mt>*+*{margin-left:4px}.fl>*+*{margin-left:8px}
 @media print{@page{size:A4;margin:0}.doc:last-child{page-break-after:auto}}`
 
 // Etiqueta logística — desenho PAISAGEM (15x10) rotacionado 90° para encaixar no rótulo térmico 100x150mm
@@ -2251,26 +2293,26 @@ function htmlEtiqueta(p, rem, cfg = PRINT_CFG) {
 const CSS_ETIQ = CSS_SHARED + `*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Inter',system-ui,-apple-system,Segoe UI,Arial,sans-serif;color:#14151a}
 .page{width:100mm;height:150mm;position:relative;page-break-after:always;overflow:hidden}.page:last-child{page-break-after:auto}
 .labh{width:150mm;height:100mm;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(90deg);background:#fff}
-.safe{height:100%;margin:3mm;border:2px solid #111;padding:2mm;display:flex;flex-direction:column;background:#fff}
+.safe{position:absolute;top:3mm;left:3mm;right:3mm;bottom:3mm;border:2px solid #111;padding:2mm;display:flex;flex-direction:column;background:#fff;overflow:hidden}
 .xphd{display:flex;justify-content:space-between;align-items:center;border-bottom:2.5px solid #111;padding-bottom:1.5mm}
 .spx{height:7mm}.xpr{text-align:right}.svc{font-size:11px;font-weight:800}.vol{font-size:8px;color:#333;font-family:ui-monospace,monospace}
-.cols{display:flex;gap:3mm;flex:1;padding:2mm 0;min-height:0}
-.cl{width:50%;display:flex;flex-direction:column;gap:1.8mm;border-right:1.5px solid #111;padding-right:3mm}
-.cr{width:50%;display:flex;flex-direction:column;gap:1.8mm}
+.cols{display:flex;flex:1;padding:2mm 0;min-height:0}
+.cl{width:50%;display:flex;flex-direction:column;border-right:1.5px solid #111;padding-right:3mm}.cl>*+*{margin-top:1.8mm}
+.cr{width:50%;display:flex;flex-direction:column;padding-left:3mm}.cr>*+*{margin-top:1.8mm}
 .sortbox{border:1.5px solid #111;border-radius:2px;text-align:center;padding:1mm}.sortbox .sl{font-size:6.5px;font-weight:800;letter-spacing:.08em;color:#444}.sb{font-size:26px;font-weight:900;letter-spacing:2px;line-height:1.05}.ss{font-size:7px;font-weight:700}
-.danfe{border:1px solid #111;padding:1.2mm}.dh{font-size:7px;font-weight:800;display:flex;align-items:center;gap:3px;border-bottom:.5px solid #999;padding-bottom:.6mm;margin-bottom:.6mm}
-.dg{display:flex;flex-wrap:wrap;gap:0 3mm;font-size:8px}.dg b{font-family:ui-monospace,monospace}.em{font-size:7.5px;margin-top:.6mm}
+.danfe{border:1px solid #111;padding:1.2mm}.dh{font-size:7px;font-weight:800;display:flex;align-items:center;border-bottom:.5px solid #999;padding-bottom:.6mm;margin-bottom:.6mm}
+.dg{display:flex;flex-wrap:wrap;font-size:8px}.dg>span{margin-right:3mm}.dg b{font-family:ui-monospace,monospace}.em{font-size:7.5px;margin-top:.6mm}
 .chave{text-align:center;margin-top:.8mm}.chave svg{max-width:100%}.cl2{font-size:6px;font-family:ui-monospace,monospace;letter-spacing:.3px}
-.dest{border-top:1px dashed #bbb;padding-top:1.3mm}.cap{font-size:7px;font-weight:800;display:flex;align-items:center;gap:3px;color:#333}
+.dest{border-top:1px dashed #bbb;padding-top:1.3mm}.cap{font-size:7px;font-weight:800;display:flex;align-items:center;color:#333}
 .dn{font-size:14px;font-weight:800;line-height:1.05;margin:.5mm 0}.da{font-size:9px;line-height:1.35}
-.qrrow{display:flex;gap:2.5mm;align-items:center;border-bottom:1.5px solid #111;padding-bottom:1.5mm}
-.qr{width:27mm;height:27mm;flex-shrink:0}.qr svg{width:100%;height:100%;display:block}.track{flex:1;text-align:center}.tlbl{font-size:7px;font-weight:800;letter-spacing:.1em;color:#444;display:block;margin-bottom:.5mm}.track svg{max-width:100%}.trk{font-size:10px;font-family:ui-monospace,monospace;font-weight:800;letter-spacing:.6px;margin-top:.8mm;white-space:nowrap;display:block;text-align:center}
+.qrrow{display:flex;align-items:center;border-bottom:1.5px solid #111;padding-bottom:1.5mm}
+.qr{width:27mm;height:27mm;flex-shrink:0;margin-right:2.5mm}.qr svg{width:27mm;height:27mm;display:block}.track{flex:1;text-align:center}.tlbl{font-size:7px;font-weight:800;letter-spacing:.1em;color:#444;display:block;margin-bottom:.5mm}.track svg{max-width:100%}.trk{font-size:10px;font-family:ui-monospace,monospace;font-weight:800;letter-spacing:.6px;margin-top:.8mm;white-space:nowrap;display:block;text-align:center}
 .rem{font-size:8px;border-bottom:1px dashed #bbb;padding-bottom:1.2mm}.rn{font-weight:700;font-size:9px}
-.pk{flex:1;min-height:0;overflow:hidden}.pkh{font-size:7.5px;font-weight:800;display:flex;align-items:center;gap:3px;margin-bottom:.8mm}.oid{margin-left:auto;font-family:ui-monospace,monospace;font-weight:600;color:#555}
+.pk{flex:1;min-height:0;overflow:hidden}.pkh{font-size:7.5px;font-weight:800;display:flex;align-items:center;margin-bottom:.8mm}.oid{margin-left:auto;font-family:ui-monospace,monospace;font-weight:600;color:#555}
 table.ci{width:100%;table-layout:fixed;border-collapse:collapse}table.ci td{padding:.6mm 0;border-bottom:.5px dashed #ccc;vertical-align:top;font-size:8.5px}.ci .q{width:6mm;font-weight:900;font-size:10px}.ci .q::after{content:"x";font-size:7px}.ci .nmc{overflow:hidden}.ci .nmc b{font-size:9px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sl{font-size:7px;color:#555;font-family:ui-monospace,monospace;display:block}.more{font-size:7px;color:#666;font-style:italic;margin-top:.5mm}
-.lfoot{display:flex;justify-content:space-between;align-items:center;border-top:2px solid #111;padding-top:1.3mm}
-.lfl{display:flex;align-items:center;gap:6px}.gen{font-size:7.5px;color:#555}.lfr{font-size:7.5px;color:#555;display:flex;align-items:center;gap:3px}
-@media print{@page{size:100mm 150mm;margin:0}}`
+.lfoot{display:flex;justify-content:space-between;align-items:center;border-top:2px solid #111;padding-top:1.3mm;margin-top:auto}
+.lfl{display:flex;align-items:center}.lfl .gen{margin-left:6px}.gen{font-size:7.5px;color:#555}.lfr{font-size:7.5px;color:#555;display:flex;align-items:center}.lfr svg{margin-right:3px}
+.dh>svg,.cap>svg,.pkh>svg{margin-right:3px}@media print{@page{size:100mm 150mm;margin:0}}`
 
 function imprimirFolhasPedido(pedidos) {
   if (!pedidos.length) return
@@ -3047,53 +3089,154 @@ function EmBreve({ titulo, desc, icon: Ic }) {
 }
 
 /* --------------------- BLING × SHOPEE (divergência) ---------------------- */
-function Divergencia({ conectado }) {
+function Divergencia({ conectado, notify }) {
   const [d, setD] = useState(null)
-  const [filtro, setFiltro] = useState('divergentes')
+  const [filtro, setFiltro] = useState('prejuizo')
+  const [ajustando, setAjustando] = useState(null)
   const carregar = () => { setD(null); api.shopeeDivergencia().then(setD).catch(() => setD({ erro: true })) }
   useEffect(() => { if (conectado) carregar() }, [conectado])
-  if (!conectado) return <Vazio txt="Conecte a loja Shopee para comparar preços com o Bling." />
-  if (d === null) return <Carregando txt="cruzando anúncios da Shopee com o catálogo do Bling…" />
+  if (!conectado) return <Vazio txt="Conecte a loja Shopee para ver a margem real dos seus produtos." />
+  if (d === null) return <Carregando txt="calculando a margem real de cada anúncio (preço − taxas da Shopee − custo)…" />
   if (d.erro) return <Vazio txt="Não consegui ler o catálogo da Shopee. Verifique a conexão." />
+  const alvo = d.alvo || 0
+
+  const ajustar = async (l) => {
+    const novo = l.preco_alvo || l.preco_min
+    if (!novo) return
+    if (!window.confirm(`Atualizar o preço de "${l.nome}" na Shopee de ${brl(l.preco)} para ${brl(novo)}?\n\nIsso altera o preço do anúncio AO VIVO na Shopee.`)) return
+    setAjustando(l.item_id)
+    try {
+      await api.shopeeItemPreco(l.item_id, novo)
+      const usouAlvo = !!l.preco_alvo
+      setD((cur) => {
+        const itens = cur.itens.map((x) => x.item_id !== l.item_id ? x : ({
+          ...x, preco: novo, ajustado: true,
+          margem_real: usouAlvo ? alvo : 0,
+          lucro_real: usouAlvo ? Math.round(novo * alvo) / 100 : 0,
+          prejuizo: false, margem_baixa: false, saudavel: true,
+        }))
+        return { ...cur, itens,
+          prejuizo: itens.filter((x) => x.prejuizo).length,
+          margem_baixa: itens.filter((x) => x.margem_baixa).length,
+          saudavel: itens.filter((x) => x.saudavel).length }
+      })
+      notify?.(`Preço de "${l.nome}" ajustado para ${brl(novo)} na Shopee`, 'ok')
+    } catch (e) { notify?.('Não consegui atualizar: ' + e.message, 'danger') }
+    setAjustando(null)
+  }
+
+  const filtros = [
+    ['prejuizo', 'Prejuízo', d.prejuizo],
+    ['margem_baixa', `Abaixo de ${alvo || '—'}%`, d.margem_baixa],
+    ['saudavel', 'Saudável', d.saudavel],
+    ['sem_custo', 'Sem custo', d.sem_custo],
+    ['todos', 'Todos', d.casados],
+  ]
   const itens = (d.itens || []).filter((l) =>
-    filtro === 'divergentes' ? l.divergente : filtro === 'prejuizo' ? l.prejuizo : true)
+    filtro === 'prejuizo' ? l.prejuizo
+      : filtro === 'margem_baixa' ? l.margem_baixa
+        : filtro === 'saudavel' ? l.saudavel
+          : filtro === 'sem_custo' ? l.sem_custo
+            : true)
+
   return (
     <div className="space-y-3">
+      <div className="glass rounded-2xl p-4">
+        <div className="text-sm font-medium flex items-center gap-2"><Wallet size={15} style={{ color: LARANJA }} /> Margem real na Shopee</div>
+        <div className="text-xs text-faint mt-1" style={{ maxWidth: '42rem' }}>
+          Calculo o lucro de verdade de cada anúncio: <b>preço − comissão/taxa da Shopee − imposto − embalagem − custo (Bling)</b>. Vender acima do custo ainda pode dar prejuízo depois que a Shopee tira a parte dela — é isso que aparece aqui (não é só "preço diferente do Bling").
+        </div>
+      </div>
+
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <Metric n={d.casados} sub="casados por SKU" icon={GitCompareArrows} />
-        <Metric n={d.divergentes} sub="preço divergente" cor="var(--warn)" icon={AlertTriangle} />
-        <Metric n={d.prejuizo} sub="prejuízo" cor="var(--danger)" icon={TrendingDown} />
-        <Metric n={d.sem_match} sub="sem match no Bling" icon={X} />
+        <Metric n={d.saudavel} sub="saudável" cor="#2DD4BF" icon={CheckCircle2} />
+        <Metric n={d.margem_baixa} sub={`abaixo de ${alvo || '—'}%`} cor="#d6007f" icon={TrendingDown} />
+        <Metric n={d.prejuizo} sub="no prejuízo" cor="#FF6F6F" icon={AlertTriangle} />
+        <Metric n={(d.sem_custo || 0) + (d.sem_match || 0)} sub="sem custo / sem match" cor="var(--text-faint)" icon={HelpCircle} />
       </div>
-      <div className="flex gap-1.5">
-        {[['divergentes', 'Divergentes'], ['prejuizo', 'Prejuízo'], ['todos', 'Todos']].map(([id, t]) => (
-          <button key={id} onClick={() => setFiltro(id)} className="text-xs px-3 py-1.5 rounded-lg font-medium"
-                  style={filtro === id ? { background: LARANJA, color: '#fff' } : { background: 'var(--glass)', color: 'var(--text-dim)', border: '1px solid var(--glass-border)' }}>{t}</button>
+
+      <div className="flex gap-1.5 flex-wrap items-center">
+        {filtros.map(([id, t, n]) => (
+          <button key={id} onClick={() => setFiltro(id)} className="text-xs px-3 py-1.5 rounded-lg font-medium flex items-center gap-1.5"
+                  style={filtro === id ? { background: LARANJA, color: '#fff' } : { background: 'var(--glass)', color: 'var(--text-dim)', border: '1px solid var(--glass-border)' }}>
+            {t} <span className="num" style={{ opacity: .75 }}>{n ?? 0}</span>
+          </button>
         ))}
-        <button onClick={carregar} className="text-xs px-3 py-1.5 rounded-lg text-dim hover:text-fg flex items-center gap-1 ml-auto"><RefreshCw size={12} /> atualizar</button>
+        <button onClick={carregar} className="text-xs px-3 py-1.5 rounded-lg text-dim hover:text-fg flex items-center gap-1 ml-auto"><RefreshCw size={12} /> recalcular</button>
       </div>
+
+      {alvo === 0 && (
+        <div className="text-[11px] text-faint flex items-center gap-1.5 px-1">
+          <Info size={12} /> Defina uma <b className="mx-1">margem alvo</b> na Precificação para destacar os produtos abaixo do alvo e sugerir o preço ideal.
+        </div>
+      )}
+
       {itens.length === 0
-        ? <Vazio txt="Nenhum item nesse filtro." />
-        : <div className="glass rounded-2xl overflow-hidden">
-            {itens.map((l) => (
-              <div key={l.item_id} className="flex items-center gap-3 px-4 py-2.5 border-b border-glassb last:border-0">
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm truncate">{l.nome}</div>
-                  <div className="text-[11px] text-faint num">SKU {l.sku} • #{l.item_id}</div>
-                </div>
-                <div className="text-right shrink-0">
-                  <div className="text-[10px] text-faint uppercase">Bling</div>
-                  <div className="num text-sm">{brl(l.preco_bling)}</div>
-                </div>
-                <ChevronRight size={14} className="text-faint shrink-0" />
-                <div className="text-right shrink-0">
-                  <div className="text-[10px] text-faint uppercase">Shopee</div>
-                  <div className="num text-sm font-semibold" style={{ color: l.prejuizo ? 'var(--danger)' : l.divergente ? 'var(--warn)' : 'var(--text)' }}>{brl(l.preco_shopee)}</div>
-                </div>
-                {l.prejuizo && <span className="text-[10px] px-1.5 py-0.5 rounded shrink-0" style={{ background: 'rgba(239,68,68,.12)', color: 'var(--danger)' }}>prejuízo</span>}
-              </div>
-            ))}
+        ? <Vazio txt={filtro === 'prejuizo' ? 'Nenhum produto no prejuízo.' : 'Nenhum produto neste filtro.'} />
+        : <div className="space-y-2">
+            {itens.map((l) => <LinhaMargem key={l.item_id} l={l} alvo={alvo} ajustar={ajustar} ajustando={ajustando === l.item_id} />)}
           </div>}
+    </div>
+  )
+}
+
+function LinhaMargem({ l, alvo, ajustar, ajustando }) {
+  const [aberto, setAberto] = useState(false)
+  const cor = l.sem_custo ? 'var(--text-faint)' : corMargemReal(l.margem_real, alvo)
+  const sugerido = l.preco_alvo || l.preco_min
+  const problema = l.prejuizo || l.margem_baixa
+  return (
+    <div className="glass rounded-xl overflow-hidden" style={{ borderLeft: `3px solid ${cor}` }}>
+      <button onClick={() => setAberto((v) => !v)} className="w-full flex items-center gap-3 px-4 py-2.5 text-left">
+        <div className="min-w-0 flex-1">
+          <div className="text-sm leading-snug" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{l.nome || `#${l.item_id}`}</div>
+          <div className="text-[11px] text-faint num">SKU {l.sku} · {brl(l.preco)} na Shopee{l.ajustado ? ' · ajustado ✓' : ''}</div>
+        </div>
+        {l.sem_custo
+          ? <span className="text-[10px] px-2 py-1 rounded shrink-0" style={{ background: 'var(--glass-hover)', color: 'var(--text-faint)' }}>sem custo no Bling</span>
+          : <div className="text-right shrink-0 leading-tight">
+              <div className="num text-sm font-bold" style={{ color: cor }}>{l.margem_real}%</div>
+              <div className="num text-[11px]" style={{ color: cor }}>{brl(l.lucro_real)}</div>
+            </div>}
+        {problema && !aberto && <span className="text-[10px] px-1.5 py-0.5 rounded shrink-0 hidden sm:block" style={{ background: `color-mix(in srgb, ${cor} 16%, transparent)`, color: cor }}>{l.prejuizo ? 'prejuízo' : 'baixa'}</span>}
+        <ChevronDown size={15} className="text-faint shrink-0" style={{ transform: aberto ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }} />
+      </button>
+      {aberto && (
+        <div className="px-4 pb-3 pt-2 text-[11px] space-y-1" style={{ borderTop: '1px solid var(--glass-border)' }}>
+          {l.sem_custo
+            ? <div className="text-faint">Sem custo cadastrado no Bling para este SKU, então não dá pra calcular a margem. Cadastre o custo no Bling e recalcule.</div>
+            : <>
+                <Quebra label="Preço na Shopee" v={brl(l.preco)} forte />
+                <Quebra label="− Comissão / taxa Shopee" v={'− ' + brl(l.taxa_shopee)} neg />
+                {l.imposto > 0 && <Quebra label="− Imposto" v={'− ' + brl(l.imposto)} neg />}
+                {l.embalagem > 0 && <Quebra label="− Embalagem" v={'− ' + brl(l.embalagem)} neg />}
+                <Quebra label="− Custo (Bling)" v={'− ' + brl(l.custo)} neg />
+                <div className="h-px my-1" style={{ background: 'var(--glass-border)' }} />
+                <Quebra label="= Lucro real" v={`${brl(l.lucro_real)} · ${l.margem_real}%`} forte cor={cor} />
+                {problema && sugerido && (
+                  <div className="mt-2 flex items-center justify-between gap-2 rounded-lg px-3 py-2 flex-wrap" style={{ background: `color-mix(in srgb, ${cor} 10%, transparent)` }}>
+                    <div className="text-faint">
+                      Equilíbrio: <b className="num" style={{ color: 'var(--text-dim)' }}>{brl(l.preco_min)}</b>
+                      {l.preco_alvo ? <> · p/ {alvo}%: <b className="num" style={{ color: '#2DD4BF' }}>{brl(l.preco_alvo)}</b></> : null}
+                    </div>
+                    <button onClick={() => ajustar(l)} disabled={ajustando}
+                            className="text-xs px-3 py-1.5 rounded-lg font-medium text-white flex items-center gap-1.5 disabled:opacity-60 shrink-0" style={{ background: LARANJA }}>
+                      {ajustando ? <Loader2 size={13} className="animate-spin" /> : <TrendingUp size={13} />} Ajustar p/ {brl(sugerido)} na Shopee
+                    </button>
+                  </div>
+                )}
+              </>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Quebra({ label, v, neg, forte, cor }) {
+  return (
+    <div className="flex items-center justify-between">
+      <span className={forte ? 'font-medium' : 'text-faint'}>{label}</span>
+      <span className="num" style={{ color: cor || (forte ? 'var(--text)' : 'var(--text-dim)'), fontWeight: forte ? 600 : 400 }}>{v}</span>
     </div>
   )
 }
@@ -3288,13 +3431,26 @@ function DashboardPromo({ notify }) {
   )
 }
 
+function AbasStatus({ valor, onChange, opcoes }) {
+  const op = opcoes || [['ongoing', 'Ativos'], ['upcoming', 'Agendados'], ['expired', 'Expirados']]
+  return (
+    <div className="flex gap-1.5">
+      {op.map(([id, t]) => (
+        <button key={String(id)} onClick={() => onChange(id)} className="text-xs px-3 py-1.5 rounded-lg font-medium"
+                style={valor === id ? { background: LARANJA, color: '#fff' } : { background: 'var(--glass)', color: 'var(--text-dim)', border: '1px solid var(--glass-border)' }}>{t}</button>
+      ))}
+    </div>
+  )
+}
+
 function Cupons({ notify }) {
   const [lista, setLista] = useState(null)
   const [form, setForm] = useState(false)
   const [rep, setRep] = useState(null)
   const [enc, setEnc] = useState(null)
-  const carregar = () => { setLista(null); api.shopeeCupons('ongoing').then(setLista).catch(() => setLista({ erro: true })) }
-  useEffect(carregar, [])
+  const [stat, setStat] = useState('ongoing')
+  const carregar = () => { setLista(null); api.shopeeCupons(stat).then(setLista).catch(() => setLista({ erro: true })) }
+  useEffect(carregar, [stat])
   const cupons = lista?.response?.voucher_list || []
   const encerrar = async (id) => {
     setEnc(id)
@@ -3318,12 +3474,12 @@ function Cupons({ notify }) {
   }
   return (
     <div className="space-y-3">
-      <div className="flex justify-between items-center">
-        <div className="text-sm text-dim">Cupons ativos da loja</div>
+      <div className="flex justify-between items-center gap-2 flex-wrap">
+        <AbasStatus valor={stat} onChange={setStat} />
         <button onClick={() => setForm(true)} className="rounded-lg px-3 py-1.5 text-sm font-medium text-white flex items-center gap-1.5" style={{ background: LARANJA }}><Plus size={14} /> Novo cupom</button>
       </div>
       {lista === null ? <Carregando txt="carregando cupons…" />
-        : cupons.length === 0 ? <Vazio txt="Nenhum cupom ativo. Crie um para incentivar a compra." />
+        : cupons.length === 0 ? <Vazio txt={stat === 'ongoing' ? 'Nenhum cupom ativo. Crie um para incentivar a compra.' : stat === 'upcoming' ? 'Nenhum cupom agendado.' : 'Nenhum cupom expirado no histórico recente.'} />
         : <div className="space-y-2.5">{cupons.map((c) => {
             const flags = [{ icon: Ticket, texto: c.voucher_code, cor: '#8B5CF6' },
               { texto: c.reward_type === 2 ? `${c.percentage}% OFF` : brl(c.discount_amount), cor: LARANJA }]
@@ -3332,7 +3488,7 @@ function Cupons({ notify }) {
             return (
               <CampaignCard key={c.voucher_id} tipo="cupom" id={c.voucher_id} nome={c.voucher_name}
                 inicio={c.start_time} fim={c.end_time} flags={flags} temProdutos={false}
-                podeEncerrar onEncerrar={encerrar} encerrando={enc === c.voucher_id}
+                podeEncerrar={stat !== 'expired'} onEncerrar={encerrar} encerrando={enc === c.voucher_id}
                 onRepetir={() => repetir(c)} repetindo={rep === c.voucher_id} />
             )
           })}</div>}
@@ -3626,8 +3782,9 @@ function Bundles({ notify }) {
   const [form, setForm] = useState(false)
   const [rep, setRep] = useState(null)
   const [enc, setEnc] = useState(null)
-  const carregar = () => { setLista(null); api.shopeeBundles('ongoing').then(setLista).catch(() => setLista({ erro: true })) }
-  useEffect(carregar, [])
+  const [stat, setStat] = useState('ongoing')
+  const carregar = () => { setLista(null); api.shopeeBundles(stat).then(setLista).catch(() => setLista({ erro: true })) }
+  useEffect(carregar, [stat])
   const bs = lista?.response?.bundle_deal_list || []
   const repetir = async (c) => {
     setRep(c.id)
@@ -3643,12 +3800,12 @@ function Bundles({ notify }) {
   }
   return (
     <div className="space-y-3">
-      <div className="flex justify-between items-center">
-        <div className="text-sm text-dim">Bundles ativos (compre N, leve com desconto)</div>
+      <div className="flex justify-between items-center gap-2 flex-wrap">
+        <AbasStatus valor={stat} onChange={setStat} />
         <button onClick={() => setForm(true)} className="rounded-lg px-3 py-1.5 text-sm font-medium text-white flex items-center gap-1.5" style={{ background: LARANJA }}><Plus size={14} /> Novo bundle</button>
       </div>
       {lista === null ? <Carregando txt="carregando bundles…" />
-        : bs.length === 0 ? <Vazio txt="Nenhum combo ativo. Crie um na aba acima — leve 2+ por um preço melhor." />
+        : bs.length === 0 ? <Vazio txt={stat === 'ongoing' ? 'Nenhum combo ativo. Crie um na aba acima — leve 2+ por um preço melhor.' : stat === 'upcoming' ? 'Nenhum combo agendado.' : 'Nenhum combo expirado no histórico recente.'} />
         : <div className="space-y-2.5">{bs.map((b) => {
             const reg = b.bundle_deal_rule || {}
             const flags = []
@@ -3659,7 +3816,7 @@ function Bundles({ notify }) {
             return (
               <CampaignCard key={b.bundle_deal_id} tipo="bundle" id={b.bundle_deal_id} nome={b.name}
                 inicio={b.start_time} fim={b.end_time} flags={flags}
-                podeEncerrar onEncerrar={encerrar} encerrando={enc === b.bundle_deal_id}
+                podeEncerrar={stat !== 'expired'} onEncerrar={encerrar} encerrando={enc === b.bundle_deal_id}
                 onRepetir={repetir} repetindo={rep === b.bundle_deal_id} />
             )
           })}</div>}
@@ -3714,8 +3871,9 @@ function Addons({ notify }) {
   const [form, setForm] = useState(false)
   const [rep, setRep] = useState(null)
   const [enc, setEnc] = useState(null)
-  const carregar = () => { setLista(null); api.shopeeAddons('ongoing').then(setLista).catch(() => setLista({ erro: true })) }
-  useEffect(carregar, [])
+  const [stat, setStat] = useState('ongoing')
+  const carregar = () => { setLista(null); api.shopeeAddons(stat).then(setLista).catch(() => setLista({ erro: true })) }
+  useEffect(carregar, [stat])
   const as = lista?.response?.add_on_deal_list || []
   const repetir = async (c) => {
     setRep(c.id)
@@ -3731,16 +3889,16 @@ function Addons({ notify }) {
   }
   return (
     <div className="space-y-3">
-      <div className="flex justify-between items-center">
-        <div className="text-sm text-dim">Add-on (leve um adicional com desconto na compra)</div>
+      <div className="flex justify-between items-center gap-2 flex-wrap">
+        <AbasStatus valor={stat} onChange={setStat} />
         <button onClick={() => setForm(true)} className="rounded-lg px-3 py-1.5 text-sm font-medium text-white flex items-center gap-1.5" style={{ background: LARANJA }}><Plus size={14} /> Novo add-on</button>
       </div>
       {lista === null ? <Carregando txt="carregando add-ons…" />
-        : as.length === 0 ? <Vazio txt="Nenhum add-on ativo. Crie um na aba acima — adicional com desconto junto do principal." />
+        : as.length === 0 ? <Vazio txt={stat === 'ongoing' ? 'Nenhum add-on ativo. Crie um na aba acima — adicional com desconto junto do principal.' : stat === 'upcoming' ? 'Nenhum add-on agendado.' : 'Nenhum add-on expirado no histórico recente.'} />
         : <div className="space-y-2.5">{as.map((a) => (
             <CampaignCard key={a.add_on_deal_id} tipo="addon" id={a.add_on_deal_id} nome={a.add_on_deal_name}
               inicio={a.start_time} fim={a.end_time}
-              podeEncerrar onEncerrar={encerrar} encerrando={enc === a.add_on_deal_id}
+              podeEncerrar={stat !== 'expired'} onEncerrar={encerrar} encerrando={enc === a.add_on_deal_id}
               onRepetir={repetir} repetindo={rep === a.add_on_deal_id} />
           ))}</div>}
       {form && <AddonForm onClose={() => setForm(false)} onSaved={() => { setForm(false); carregar() }} notify={notify} />}
@@ -3790,8 +3948,9 @@ function FlashSale({ notify }) {
   const [lista, setLista] = useState(null)
   const [form, setForm] = useState(false)
   const [enc, setEnc] = useState(null)
-  const carregar = () => { setLista(null); api.shopeeFlash(2).then(setLista).catch(() => setLista({ erro: true })) }
-  useEffect(carregar, [])
+  const [stat, setStat] = useState(2)
+  const carregar = () => { setLista(null); api.shopeeFlash(stat).then(setLista).catch(() => setLista({ erro: true })) }
+  useEffect(carregar, [stat])
   const fs = lista?.response?.flash_sale_list || lista?.response || []
   const arr = Array.isArray(fs) ? fs : []
   const encerrar = async (id) => {
@@ -3802,17 +3961,17 @@ function FlashSale({ notify }) {
   }
   return (
     <div className="space-y-3">
-      <div className="flex justify-between items-center">
-        <div className="text-sm text-dim">Flash Sale da loja (slots de horário)</div>
+      <div className="flex justify-between items-center gap-2 flex-wrap">
+        <AbasStatus valor={stat} onChange={setStat} opcoes={[[2, 'Ativos'], [1, 'Agendados'], [3, 'Expirados']]} />
         <button onClick={() => setForm(true)} className="rounded-lg px-3 py-1.5 text-sm font-medium text-white flex items-center gap-1.5" style={{ background: LARANJA }}><Flame size={14} /> Nova flash sale</button>
       </div>
       {lista === null ? <Carregando txt="carregando flash sales…" />
-        : arr.length === 0 ? <Vazio txt="Nenhuma flash sale ativa ou agendada. A Shopee libera slots por elegibilidade da loja." />
+        : arr.length === 0 ? <Vazio txt={stat === 2 ? 'Nenhuma flash sale ativa agora. A Shopee libera slots por elegibilidade da loja.' : stat === 1 ? 'Nenhuma flash sale agendada.' : 'Nenhuma flash sale expirada no histórico recente.'} />
         : <div className="space-y-2.5">{arr.map((s) => (
             <CampaignCard key={s.flash_sale_id} tipo="flash" id={s.flash_sale_id} nome={`Flash #${s.flash_sale_id}`}
               inicio={s.start_time} fim={s.end_time}
               flags={[{ icon: Zap, texto: 'oferta relâmpago', cor: '#F59E0B' }]}
-              podeEncerrar onEncerrar={encerrar} encerrando={enc === s.flash_sale_id} />
+              podeEncerrar={stat !== 3} onEncerrar={encerrar} encerrando={enc === s.flash_sale_id} />
           ))}</div>}
       {form && <FlashForm onClose={() => setForm(false)} onSaved={() => { setForm(false); carregar() }} notify={notify} />}
     </div>

@@ -138,6 +138,7 @@ export const api = {
   shopeeResponderPergunta: (b) => req('/api/shopee/perguntas/responder', { method: 'POST', body: b }),
   shopeeDevolucoes: (dias = 30) => req(`/api/shopee/devolucoes?dias=${dias}`),
   shopeeDivergencia: () => req('/api/shopee/divergencia'),
+  shopeeItemPreco: (item_id, preco) => req('/api/shopee/item/preco', { method: 'POST', body: { item_id, preco } }),
   shopeeBundles: (status = 'ongoing') => req(`/api/shopee/bundles?status=${status}`),
   shopeeCriarBundle: (b) => req('/api/shopee/bundles', { method: 'POST', body: b }),
   shopeeEncerrarBundle: (id) => req(`/api/shopee/bundles/${id}`, { method: 'DELETE' }),
