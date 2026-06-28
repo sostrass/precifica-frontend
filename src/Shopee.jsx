@@ -2192,11 +2192,16 @@ function htmlFolhaPedido(p, cfg = PRINT_CFG) {
   const nota = p.nota_comprador || p.observacao || ''
   const notaComprador = (cfg.mostrar_nota_comprador && nota) ? `<div class="obsbar">${ico('message-square', 13, '#C2790F')} <b>Nota do comprador:</b> ${esc(nota)}</div>` : ''
   const limpoF = (x) => (x && !mascarado(x)) ? String(x) : ''
-  const endLimpo = [limpoF(end.completo), [limpoF(end.cidade), limpoF(end.uf)].filter(Boolean).join('/'), limpoF(end.cep) ? 'CEP ' + limpoF(end.cep) : ''].filter(Boolean).join(' · ')
-  const nomeRealF = [end.nome, p.cliente, p.comprador].map(limpoF).find(Boolean) || ''
+  // Destinatário COMPLETO da NF-e do Bling (quando o pedido tem nota) — não mascarado, ao contrário da Shopee
+  const temNf = !!limpoF(p.nf_nome)
+  const endNfLinha = [p.nf_endereco, [p.nf_cidade, p.nf_uf].filter(Boolean).join('/'), p.nf_cep ? 'CEP ' + p.nf_cep : ''].filter(Boolean).join(' · ')
+  const endLimpo = temNf ? endNfLinha : [limpoF(end.completo), [limpoF(end.cidade), limpoF(end.uf)].filter(Boolean).join('/'), limpoF(end.cep) ? 'CEP ' + limpoF(end.cep) : ''].filter(Boolean).join(' · ')
+  const nomeRealF = [p.nf_nome, end.nome, p.cliente, p.comprador].map(limpoF).find(Boolean) || ''
+  const telF = limpoF(p.nf_tel) || limpoF(end.telefone)
   const iniciais = String(nomeRealF || '·').trim().split(/\s+/).slice(0, 2).map((x) => x[0] || '').join('').toUpperCase() || '·'
+  const fonteNf = temNf ? '<span class="viaNf">via NF-e</span>' : ''
   const destcardHTML = !cfg.mostrar_destinatario ? '' : (nomeRealF
-    ? `<div class="destcard"><div class="dlbl">${ico('map-pin', 11, '#9aa0ab')} DESTINATÁRIO</div><div class="drow"><div class="dav">${esc(iniciais)}</div><div><div class="dnome">${esc(nomeRealF)}</div><div class="dadr">${endLimpo ? esc(endLimpo) : 'comprador na Shopee · endereço completo na etiqueta Oficial SPX'}</div>${limpoF(end.telefone) ? `<div class="dadr">Tel ${esc(limpoF(end.telefone))}</div>` : ''}</div></div></div>`
+    ? `<div class="destcard"><div class="dlbl">${ico('map-pin', 11, '#9aa0ab')} DESTINATÁRIO${fonteNf}</div><div class="drow"><div class="dav">${esc(iniciais)}</div><div><div class="dnome">${esc(nomeRealF)}</div><div class="dadr">${endLimpo ? esc(endLimpo) : 'comprador na Shopee · endereço completo na etiqueta Oficial SPX'}</div>${telF ? `<div class="dadr">Tel ${esc(telF)}</div>` : ''}</div></div></div>`
     : `<div class="destcard"><div class="dlbl">${ico('map-pin', 11, '#9aa0ab')} DESTINATÁRIO</div><div class="drow"><div><div class="dnome" style="font-size:14px">Protegido pela Shopee</div><div class="dadr">endereço de envio na etiqueta Oficial SPX</div></div></div></div>`)
   return `<section class="doc">
     <div class="band">
@@ -2244,7 +2249,7 @@ const CSS_FOLHA = CSS_SHARED + `*{box-sizing:border-box;margin:0;padding:0}body{
 .refs{display:grid;grid-template-columns:1fr 1fr;flex:1;border-right:1px solid #eef0f3}
 .ref{padding:11px 22px;display:flex;align-items:flex-start;border-bottom:1px solid #f3f4f6;border-right:1px solid #f3f4f6}.ref:nth-child(2n){border-right:0}.ref:nth-last-child(-n+2){border-bottom:0}
 .ref span{font-size:9px;letter-spacing:.05em;color:#9aa0ab;font-weight:700;display:block}.ref b{font-size:13.5px;display:block;margin-top:2px;word-break:break-all}.mn{font-family:ui-monospace,monospace;font-size:12px}
-.destcard{width:42%;padding:12px 26px}.dlbl{font-size:9px;letter-spacing:.06em;color:#9aa0ab;font-weight:700;display:flex;align-items:center}
+.destcard{width:42%;padding:12px 26px}.dlbl{font-size:9px;letter-spacing:.06em;color:#9aa0ab;font-weight:700;display:flex;align-items:center}.viaNf{margin-left:6px;font-size:8px;font-weight:700;color:#1F9D6B;background:#E6F7EF;border:1px solid #BFE8D5;border-radius:5px;padding:1px 5px;letter-spacing:.04em}
 .drow{display:flex;align-items:center;margin-top:6px}.dav{width:38px;height:38px;border-radius:50%;background:#16171c;color:#fff;display:grid;place-items:center;font-weight:800;font-size:13px;flex-shrink:0}.dnome{font-size:17px;font-weight:800;line-height:1.1}.dadr{font-size:12px;color:#5a5f6b;line-height:1.4;margin-top:2px}
 .obsbar{margin:13px 30px 0;background:#FFF8EE;border:1px solid #F3E2C4;border-radius:9px;padding:9px 13px;font-size:12px;color:#7a5a1e;display:flex;align-items:flex-start}
 .ith{display:flex;align-items:center;justify-content:space-between;padding:14px 30px 9px}.itl{display:flex;align-items:center}.itl span{font-size:12px;font-weight:800;letter-spacing:.04em}.itr{display:flex;align-items:center}.cnt{font-size:12px;color:#3a3f4b}.cnt b{font-weight:800}.den{font-size:10.5px;color:#9aa0ab}
@@ -2263,10 +2268,16 @@ const CSS_FOLHA = CSS_SHARED + `*{box-sizing:border-box;margin:0;padding:0}body{
 function htmlEtiqueta(p, rem, cfg = PRINT_CFG) {
   const end = p.endereco || {}
   const limpo = (x) => (x && !mascarado(x)) ? String(x) : ''
-  const enderecoLinha = [limpo(end.completo)].filter(Boolean).join('')
-  const cidadeLinha = [[limpo(end.cidade), limpo(end.uf)].filter(Boolean).join(' - '), limpo(end.cep) ? 'CEP ' + limpo(end.cep) : ''].filter(Boolean).join(' · ')
-  const cpfTel = [limpo(end.telefone) ? 'Tel ' + limpo(end.telefone) : '', limpo(end.cpf) ? 'CPF ' + limpo(end.cpf) : ''].filter(Boolean).join(' · ')
-  const nomeReal = [end.nome, p.cliente, p.comprador].map(limpo).find(Boolean) || ''
+  // Destinatário COMPLETO da NF-e do Bling (quando o pedido tem nota) tem prioridade sobre o mascarado da Shopee
+  const temNf = !!limpo(p.nf_nome)
+  const enderecoLinha = temNf ? (p.nf_endereco || '') : [limpo(end.completo)].filter(Boolean).join('')
+  const cidadeLinha = temNf
+    ? [[p.nf_cidade, p.nf_uf].filter(Boolean).join(' - '), p.nf_cep ? 'CEP ' + p.nf_cep : ''].filter(Boolean).join(' · ')
+    : [[limpo(end.cidade), limpo(end.uf)].filter(Boolean).join(' - '), limpo(end.cep) ? 'CEP ' + limpo(end.cep) : ''].filter(Boolean).join(' · ')
+  const cpfTel = temNf
+    ? (limpo(p.nf_tel) ? 'Tel ' + limpo(p.nf_tel) : '')
+    : [limpo(end.telefone) ? 'Tel ' + limpo(end.telefone) : '', limpo(end.cpf) ? 'CPF ' + limpo(end.cpf) : ''].filter(Boolean).join(' · ')
+  const nomeReal = [p.nf_nome, end.nome, p.cliente, p.comprador].map(limpo).find(Boolean) || ''
   const temEndereco = !!(enderecoLinha || cidadeLinha)
   const remNome = rem || emitNome(cfg)
   const nItens = (p.itens || []).length
