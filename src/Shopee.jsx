@@ -2012,6 +2012,26 @@ function prazoInfo(shipBy, agora) {
 
 const corMargemReal = (m, alvo) => m == null ? 'var(--text-faint)' : m < 0 ? '#FF6F6F' : (alvo && m < alvo - 0.5) ? '#d6007f' : '#2DD4BF'
 
+const AZUL_RADAR = '#3DA8F5'
+const STATUS_PREC = {
+  no_padrao: { label: 'No padrão', cor: '#2DD4BF', Icon: CheckCircle2 },
+  abaixo: { label: 'Abaixo do alvo', cor: '#d6007f', Icon: TrendingDown },
+  prejuizo: { label: 'Prejuízo', cor: '#FF6F6F', Icon: AlertTriangle },
+  em_competicao: { label: 'Em competição', cor: AZUL_RADAR, Icon: Target },
+  sem_custo: { label: 'Sem custo', cor: 'var(--text-faint)', Icon: HelpCircle },
+}
+const statusProduto = (l) => l.sem_custo ? 'sem_custo' : l.prejuizo ? 'prejuizo' : l.em_competicao ? 'em_competicao' : l.margem_baixa ? 'abaixo' : 'no_padrao'
+const contarStatus = (itens) => {
+  const c = { no_padrao: 0, abaixo: 0, prejuizo: 0, em_competicao: 0, sem_custo: 0, total: itens.length }
+  for (const l of itens) c[statusProduto(l)]++
+  return c
+}
+function BadgeStatus({ s, lg }) {
+  const m = STATUS_PREC[s]; if (!m) return null
+  const { Icon } = m
+  return <span className={`${lg ? 'px-2.5 py-1 text-[11px]' : 'px-2 py-0.5 text-[10px]'} rounded font-semibold inline-flex items-center gap-1 whitespace-nowrap`} style={{ background: `color-mix(in srgb, ${m.cor} 16%, transparent)`, color: m.cor }}><Icon size={lg ? 12 : 11} /> {m.label}</span>
+}
+
 /* ====================== Pedidos: utilitários ====================== */
 
 // Barreira de erro — impede que um payload inesperado derrube a tela inteira (tela preta)
@@ -3371,12 +3391,130 @@ function copiarTexto(txt) {
   try { const ta = document.createElement('textarea'); ta.value = String(txt); ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.focus(); ta.select(); document.execCommand('copy'); document.body.removeChild(ta) } catch (_) {}
 }
 
+function PainelIndicadores({ itens, alvo }) {
+  const dados = useMemo(() => {
+    const c = contarStatus(itens)
+    const comMargem = itens.filter((l) => l.margem_real != null)
+    const media = comMargem.length ? comMargem.reduce((s, l) => s + l.margem_real, 0) / comMargem.length : 0
+    let mesa = 0
+    for (const l of itens) {
+      if ((l.prejuizo || l.margem_baixa) && l.preco_alvo != null) {
+        mesa += Math.max(0, (l.preco_alvo * alvo / 100) - (l.lucro_real || 0))
+      }
+    }
+    const a1 = alvo || 12, a2 = a1 + 10
+    const bands = [
+      { label: 'Prejuízo', cor: '#FF6F6F', n: comMargem.filter((l) => l.margem_real < 0).length },
+      { label: `0–${a1}%`, cor: '#d6007f', n: comMargem.filter((l) => l.margem_real >= 0 && l.margem_real < a1).length },
+      { label: `${a1}–${a2}%`, cor: '#2DD4BF', n: comMargem.filter((l) => l.margem_real >= a1 && l.margem_real < a2).length },
+      { label: `${a2}%+`, cor: '#1aa896', n: comMargem.filter((l) => l.margem_real >= a2).length },
+    ]
+    const maxB = Math.max(1, ...bands.map((b) => b.n))
+    return { c, media, mesa, bands, maxB }
+  }, [itens, alvo])
+
+  const { c, media, mesa, bands, maxB } = dados
+  const total = c.total || 1
+  const CIRC = 2 * Math.PI * 52
+  const segDefs = [['no_padrao', c.no_padrao, '#2DD4BF'], ['abaixo', c.abaixo, '#d6007f'], ['prejuizo', c.prejuizo, '#FF6F6F'], ['em_competicao', c.em_competicao, AZUL_RADAR], ['sem_custo', c.sem_custo, '#6a5f73']].filter((s) => s[1] > 0)
+  let acc = 0
+  const arcs = segDefs.map(([k, v, col]) => { const len = v / total * CIRC; const rot = -90 + acc / total * 360; acc += v; return { k, col, dash: `${len} ${CIRC - len}`, rot } })
+  const pctPadrao = Math.round((c.no_padrao / total) * 100)
+  const CR = 2 * Math.PI * 38
+  const ringDash = Math.max(0, Math.min(1, media / 40)) * CR
+  const acima = media >= (alvo || 0)
+  const delta = media - (alvo || 0)
+
+  return (
+    <div className="glass rounded-2xl p-4">
+      <div className="flex items-center gap-2 text-sm font-semibold mb-3"><Activity size={15} style={{ color: LARANJA }} /> Painel de indicadores
+        <span className="ml-auto text-[11px] text-faint font-normal flex items-center gap-1.5"><Box size={12} /> {c.total} SKUs casados</span>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+        <div className="rounded-xl p-3.5" style={{ background: 'rgba(0,0,0,.16)', border: '1px solid var(--glass-border)' }}>
+          <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2.5">Saúde da precificação</div>
+          <div className="flex items-center gap-3">
+            <svg width="104" height="104" viewBox="0 0 118 118" className="shrink-0">
+              <circle cx="59" cy="59" r="52" stroke="rgba(255,255,255,.05)" strokeWidth="13" fill="none" />
+              {arcs.map((a, i) => <circle key={i} cx="59" cy="59" r="52" stroke={a.col} strokeWidth="13" fill="none" strokeDasharray={a.dash} transform={`rotate(${a.rot} 59 59)`} />)}
+              <text x="59" y="55" textAnchor="middle" fill="var(--text)" fontSize="22" fontWeight="800">{pctPadrao}%</text>
+              <text x="59" y="72" textAnchor="middle" fill="var(--text-faint)" fontSize="10">no padrão</text>
+            </svg>
+            <div className="flex flex-col gap-1 text-[11px] min-w-0 flex-1">
+              {[['No padrão', '#2DD4BF', c.no_padrao], ['Abaixo', '#d6007f', c.abaixo], ['Prejuízo', '#FF6F6F', c.prejuizo], ['Competição', AZUL_RADAR, c.em_competicao], ['Sem custo', '#6a5f73', c.sem_custo]].map(([t, col, n]) => (
+                <div key={t} className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-sm shrink-0" style={{ background: col }} />{t}<span className="num font-bold ml-auto">{n}</span></div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-xl p-3.5 flex flex-col" style={{ background: 'rgba(0,0,0,.16)', border: '1px solid var(--glass-border)' }}>
+          <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Margem média</div>
+          <div className="flex flex-col items-center gap-2 flex-1 justify-center">
+            <svg width="88" height="88" viewBox="0 0 96 96">
+              <circle cx="48" cy="48" r="38" stroke="rgba(255,255,255,.05)" strokeWidth="9" fill="none" />
+              <circle cx="48" cy="48" r="38" stroke={acima ? '#2DD4BF' : '#d6007f'} strokeWidth="9" fill="none" strokeLinecap="round" strokeDasharray={`${ringDash} ${CR - ringDash}`} transform="rotate(-90 48 48)" />
+              <text x="48" y="45" textAnchor="middle" fill="var(--text)" fontSize="20" fontWeight="800">{media.toFixed(1)}%</text>
+              <text x="48" y="62" textAnchor="middle" fill="var(--text-faint)" fontSize="9.5">média real</text>
+            </svg>
+            <span className="text-[11px] font-bold px-2 py-0.5 rounded whitespace-nowrap" style={{ background: `color-mix(in srgb, ${acima ? '#2DD4BF' : '#d6007f'} 14%, transparent)`, color: acima ? '#2DD4BF' : '#d6007f' }}>{delta >= 0 ? '+' : ''}{delta.toFixed(1)} pts vs alvo {alvo || '—'}%</span>
+          </div>
+        </div>
+
+        <div className="rounded-xl p-3.5 flex flex-col" style={{ background: 'rgba(0,0,0,.16)', border: '1px solid var(--glass-border)' }}>
+          <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Lucro deixado na mesa</div>
+          <div className="num text-[26px] font-extrabold leading-none" style={{ color: '#F5A623' }}>{brl(mesa)}</div>
+          <div className="text-[11px] text-faint mt-1.5">potencial ajustando os <b style={{ color: 'var(--text)' }}>{c.abaixo} abaixo</b> + {c.prejuizo} no prejuízo</div>
+          <div className="text-[10px] text-faint mt-auto pt-1.5 flex items-start gap-1"><Info size={11} className="shrink-0 mt-0.5" /> estimativa por unidade — fica exato com o volume de vendas</div>
+        </div>
+
+        <div className="rounded-xl p-3.5" style={{ background: 'rgba(0,0,0,.16)', border: '1px solid var(--glass-border)' }}>
+          <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Distribuição de margem</div>
+          <div className="relative flex items-end gap-2.5" style={{ height: 92 }}>
+            <div className="absolute" style={{ left: '50%', top: 2, bottom: 22, borderLeft: '2px dashed #2DD4BF', opacity: .55 }} />
+            {bands.map((b, i) => (
+              <div key={i} className="flex-1 flex flex-col items-center justify-end gap-1.5 h-full">
+                <div className="text-[12px] font-bold" style={{ color: b.cor }}>{b.n}</div>
+                <div className="w-full rounded-t-md" style={{ height: `${Math.max(5, b.n / maxB * 100)}%`, background: b.cor, minHeight: 4 }} />
+                <div className="text-[9px] text-faint text-center leading-tight">{b.label}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function AgenteBar() {
+  const [modo, setModo] = useState(() => { try { return localStorage.getItem('precifica_agente_modo') || 'sugerir' } catch { return 'sugerir' } })
+  const set = (m) => { setModo(m); try { localStorage.setItem('precifica_agente_modo', m) } catch (_) {} }
+  const modos = [['automatico', 'Automático', CheckCircle2, true], ['sugerir', 'Sugerir', Sparkles, false], ['manual', 'Manual', SlidersHorizontal, false]]
+  const desc = { automatico: 'corrige sozinho respeitando o piso de margem e o Radar', sugerir: 'o agente propõe o preço e você aplica em um clique', manual: 'você ajusta cada preço manualmente no detalhe' }
+  return (
+    <div className="glass rounded-2xl px-4 py-3 flex items-center gap-3 flex-wrap" style={{ background: `linear-gradient(180deg, color-mix(in srgb, var(--accent) 5%, transparent), var(--glass-bg))` }}>
+      <div className="flex items-center gap-2.5 min-w-0">
+        <div className="h-8 w-8 rounded-lg grid place-items-center shrink-0" style={{ background: `color-mix(in srgb, ${LARANJA} 18%, transparent)`, color: LARANJA }}><Bot size={17} /></div>
+        <div className="min-w-0"><div className="text-sm font-bold leading-tight">Agente de precificação</div><div className="text-[11px] text-faint">{desc[modo]}</div></div>
+      </div>
+      <div className="flex rounded-xl p-1 gap-0.5 ml-auto" style={{ background: 'var(--bg)', border: '1px solid var(--glass-border)' }}>
+        {modos.map(([id, label, Ic, soon]) => {
+          const on = modo === id
+          return <button key={id} onClick={() => !soon && set(id)} disabled={soon} title={soon ? 'Em breve' : ''} className="text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors disabled:opacity-45" style={on ? { background: LARANJA, color: '#fff' } : { color: 'var(--text-dim)' }}><Ic size={13} /> {label}{soon && <span className="text-[8px] px-1 py-px rounded" style={{ background: 'var(--glass-hover)' }}>em breve</span>}</button>
+        })}
+      </div>
+    </div>
+  )
+}
+
 function Divergencia({ conectado, notify }) {
   const [d, setD] = useState(null)
   const [filtro, setFiltro] = useState('prejuizo')
   const [busca, setBusca] = useState('')
   const [ajustando, setAjustando] = useState(null)
+  const [aplicandoManual, setAplicandoManual] = useState(null)
   const [salvandoCusto, setSalvandoCusto] = useState(null)
+  const [aberto, setAberto] = useState(null)   // item_id do produto aberto no painel lateral
   const carregar = () => { setD(null); api.shopeeDivergencia().then(setD).catch(() => setD({ erro: true })) }
   useEffect(() => { if (conectado) carregar() }, [conectado])
   if (!conectado) return <Vazio txt="Conecte a loja Shopee para ver a margem real dos seus produtos." />
@@ -3409,6 +3547,19 @@ function Divergencia({ conectado, notify }) {
     setAjustando(null)
   }
 
+  const aplicarManual = async (l, valorRaw) => {
+    const novo = Number(String(valorRaw).replace(/\s/g, '').replace(',', '.'))
+    if (Number.isNaN(novo) || novo <= 0) { notify?.('Informe um preço válido.', 'danger'); return }
+    if (!window.confirm(`Atualizar o preço de "${l.nome}" na Shopee para ${brl(novo)}?\n\nIsso altera o preço do anúncio AO VIVO na Shopee.`)) return
+    setAplicandoManual(l.item_id)
+    try {
+      await api.shopeeItemPreco(l.item_id, novo)
+      setD((cur) => ({ ...cur, itens: cur.itens.map((x) => x.item_id !== l.item_id ? x : ({ ...x, preco: novo, ajustado: true, preco_min: null, preco_alvo: null })) }))
+      notify?.(`Preço de "${l.nome}" atualizado na Shopee: ${brl(novo)}. Recalcule para atualizar a margem.`, 'ok')
+    } catch (e) { notify?.('Não consegui atualizar o preço na Shopee: ' + (e.message || ''), 'danger') }
+    setAplicandoManual(null)
+  }
+
   const salvarCusto = async (l, valorRaw) => {
     const c = Number(String(valorRaw).replace(',', '.'))
     if (!l.produto_id || Number.isNaN(c) || c < 0) { notify?.('Informe um custo válido.', 'danger'); return }
@@ -3436,53 +3587,43 @@ function Divergencia({ conectado, notify }) {
     setSalvandoCusto(null)
   }
 
+  const cont = contarStatus(d.itens || [])
   const filtros = [
-    ['prejuizo', 'Prejuízo', d.prejuizo],
-    ['margem_baixa', `Abaixo de ${alvo || '—'}%`, d.margem_baixa],
-    ['saudavel', 'Saudável', d.saudavel],
-    ['sem_custo', 'Sem custo', d.sem_custo],
-    ['todos', 'Todos', d.casados],
+    ['prejuizo', 'Prejuízo', cont.prejuizo],
+    ['abaixo', `Abaixo de ${alvo || '—'}%`, cont.abaixo],
+    ['em_competicao', 'Em competição', cont.em_competicao],
+    ['no_padrao', 'No padrão', cont.no_padrao],
+    ['sem_custo', 'Sem custo', cont.sem_custo],
+    ['todos', 'Todos', cont.total],
   ]
   const q = busca.trim().toLowerCase()
   const itens = (d.itens || []).filter((l) => {
     if (q) return (l.sku || '').toLowerCase().includes(q) || (l.nome || '').toLowerCase().includes(q)
-    return filtro === 'prejuizo' ? l.prejuizo
-      : filtro === 'margem_baixa' ? l.margem_baixa
-        : filtro === 'saudavel' ? l.saudavel
-          : filtro === 'sem_custo' ? l.sem_custo
-            : true
+    return filtro === 'todos' ? true : statusProduto(l) === filtro
   })
+  const selecionado = aberto ? (d.itens || []).find((x) => x.item_id === aberto) : null
 
   return (
     <div className="space-y-3">
-      <div className="glass rounded-2xl p-4">
-        <div className="text-sm font-medium flex items-center gap-2"><Wallet size={15} style={{ color: LARANJA }} /> Margem real na Shopee</div>
-        <div className="text-xs text-faint mt-1" style={{ maxWidth: '42rem' }}>
-          Calculo o lucro de verdade de cada anúncio: <b>preço − comissão/taxa da Shopee − imposto − embalagem − custo (Bling)</b>. Vender acima do custo ainda pode dar prejuízo depois que a Shopee tira a parte dela — é isso que aparece aqui (não é só "preço diferente do Bling").
+      <PainelIndicadores itens={d.itens || []} alvo={alvo} />
+      <AgenteBar />
+
+      {/* busca + filtros: travados no topo enquanto a lista rola */}
+      <div className={selecionado ? 'space-y-2' : 'sticky top-0 z-20 pt-1 pb-2 space-y-2'} style={selecionado ? undefined : { background: 'var(--bg)' }}>
+        <div className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5" style={{ background: 'var(--glass-hover)' }}>
+          <Search size={13} className="text-faint" />
+          <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="buscar por SKU ou nome do produto…" className="bg-transparent text-xs flex-1 outline-none" />
+          {busca && <button onClick={() => setBusca('')} className="text-faint hover:text-fg" title="Limpar"><X size={12} /></button>}
         </div>
-      </div>
-
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <Metric n={d.saudavel} sub="saudável" cor="#2DD4BF" icon={CheckCircle2} />
-        <Metric n={d.margem_baixa} sub={`abaixo de ${alvo || '—'}%`} cor="#d6007f" icon={TrendingDown} />
-        <Metric n={d.prejuizo} sub="no prejuízo" cor="#FF6F6F" icon={AlertTriangle} />
-        <Metric n={(d.sem_custo || 0) + (d.sem_match || 0)} sub="sem custo / sem match" cor="var(--text-faint)" icon={HelpCircle} />
-      </div>
-
-      <div className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5" style={{ background: 'var(--glass-hover)' }}>
-        <Search size={13} className="text-faint" />
-        <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="buscar por SKU ou nome do produto…" className="bg-transparent text-xs flex-1 outline-none" />
-        {busca && <button onClick={() => setBusca('')} className="text-faint hover:text-fg" title="Limpar"><X size={12} /></button>}
-      </div>
-
-      <div className="flex gap-1.5 flex-wrap items-center" style={{ opacity: q ? 0.5 : 1 }}>
-        {filtros.map(([id, t, n]) => (
-          <button key={id} onClick={() => setFiltro(id)} className="text-xs px-3 py-1.5 rounded-lg font-medium flex items-center gap-1.5"
-                  style={filtro === id ? { background: LARANJA, color: '#fff' } : { background: 'var(--glass)', color: 'var(--text-dim)', border: '1px solid var(--glass-border)' }}>
-            {t} <span className="num" style={{ opacity: .75 }}>{n ?? 0}</span>
-          </button>
-        ))}
-        <button onClick={carregar} className="text-xs px-3 py-1.5 rounded-lg text-dim hover:text-fg flex items-center gap-1 ml-auto"><RefreshCw size={12} /> recalcular</button>
+        <div className="flex gap-1.5 flex-wrap items-center" style={{ opacity: q ? 0.5 : 1 }}>
+          {filtros.map(([id, t, n]) => (
+            <button key={id} onClick={() => setFiltro(id)} className="text-xs px-3 py-1.5 rounded-lg font-medium flex items-center gap-1.5"
+                    style={filtro === id ? { background: LARANJA, color: '#fff' } : { background: 'var(--glass)', color: 'var(--text-dim)', border: '1px solid var(--glass-border)' }}>
+              {t} <span className="num" style={{ opacity: .75 }}>{n ?? 0}</span>
+            </button>
+          ))}
+          <button onClick={carregar} className="text-xs px-3 py-1.5 rounded-lg text-dim hover:text-fg flex items-center gap-1 ml-auto"><RefreshCw size={12} /> recalcular</button>
+        </div>
       </div>
 
       {alvo === 0 && (
@@ -3491,11 +3632,182 @@ function Divergencia({ conectado, notify }) {
         </div>
       )}
 
-      {itens.length === 0
-        ? <Vazio txt={q ? `Nenhum produto encontrado para "${busca}".` : (filtro === 'prejuizo' ? 'Nenhum produto no prejuízo.' : 'Nenhum produto neste filtro.')} />
-        : <div className="space-y-2">
-            {itens.map((l) => <LinhaMargem key={l.item_id} l={l} alvo={alvo} ajustar={ajustar} ajustando={ajustando === l.item_id} salvarCusto={salvarCusto} salvandoCusto={salvandoCusto === l.item_id} />)}
-          </div>}
+      <div className={selecionado ? 'grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(400px,480px)] gap-4 items-start' : ''}>
+        <div className="min-w-0">
+          {itens.length === 0
+            ? <Vazio txt={q ? `Nenhum produto encontrado para "${busca}".` : (filtro === 'prejuizo' ? 'Nenhum produto no prejuízo.' : 'Nenhum produto neste filtro.')} />
+            : <div className="space-y-2">
+                {itens.map((l) => <ProdutoCard key={l.item_id} l={l} alvo={alvo} sel={aberto === l.item_id} onAbrir={() => setAberto(l.item_id)} />)}
+              </div>}
+        </div>
+        {selecionado && (
+          <div className="min-w-0 xl:sticky xl:top-2">
+            <ProdutoDetalhe l={selecionado} alvo={alvo} onClose={() => setAberto(null)}
+              ajustar={ajustar} ajustando={ajustando === selecionado.item_id}
+              salvarCusto={salvarCusto} salvandoCusto={salvandoCusto === selecionado.item_id}
+              aplicarManual={aplicarManual} aplicandoManual={aplicandoManual === selecionado.item_id} />
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function ProdutoCard({ l, alvo, sel, onAbrir }) {
+  const st = statusProduto(l)
+  const cor = STATUS_PREC[st].cor
+  const corM = l.sem_custo ? 'var(--text-faint)' : corMargemReal(l.margem_real, alvo)
+  return (
+    <button onClick={onAbrir} className="w-full text-left glass rounded-xl overflow-hidden flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-[var(--glass-hover)]"
+      style={{ borderLeft: `3px solid ${cor}`, ...(sel ? { background: 'color-mix(in srgb, var(--accent) 9%, var(--glass-bg))', borderColor: 'var(--accent)' } : {}) }}>
+      <div className="h-11 w-11 rounded-lg overflow-hidden shrink-0 grid place-items-center" style={{ background: 'var(--glass-hover)' }}>
+        {l.imagem ? <img src={l.imagem} alt="" className="h-full w-full object-cover" loading="lazy" /> : <ImageIcon size={16} className="text-faint" />}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="text-sm leading-snug" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{l.nome || `#${l.item_id}`}</div>
+        <div className="text-[11px] text-faint flex items-center gap-1.5 flex-wrap mt-1">
+          <BadgeStatus s={st} />
+          <span className="num">SKU {l.sku} · {brl(l.preco)}{l.saldo != null ? ` · ${l.saldo} un` : ''}</span>
+        </div>
+      </div>
+      {!l.sem_custo && (
+        <div className="text-right shrink-0 leading-tight">
+          <div className="num text-sm font-bold" style={{ color: corM }}>{l.margem_real}%</div>
+          <div className="num text-[10px]" style={{ color: corM }}>{brl(l.lucro_real)}</div>
+        </div>
+      )}
+      <ChevronRight size={15} className="text-faint shrink-0" />
+    </button>
+  )
+}
+
+function BarraPosicao({ piso, atual, alvo, cor }) {
+  const lo = piso, hi = (alvo * 1.06) || (piso + 1)
+  const span = (hi - lo) || 1
+  const pct = (v) => Math.max(0, Math.min(100, (v - lo) / span * 100))
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2 flex items-center gap-1.5"><GitCompareArrows size={12} /> Posição do preço</div>
+      <div className="relative h-2 rounded-full mt-1" style={{ background: 'linear-gradient(90deg,#FF6F6F,#F5A623 38%,#2DD4BF)' }}>
+        <div className="absolute" style={{ left: `${pct(alvo)}%`, top: -4, bottom: -4, borderLeft: '2px dashed #2DD4BF' }} />
+        <div className="absolute rounded-full" style={{ left: `calc(${pct(atual)}% - 7px)`, top: -3, height: 14, width: 14, background: cor, border: '3px solid var(--bg)' }} />
+      </div>
+      <div className="flex justify-between text-[10px] mt-2">
+        <div className="flex flex-col"><span className="text-faint">Piso</span><span className="num font-bold">{brl(piso)}</span></div>
+        <div className="flex flex-col items-center" style={{ color: cor }}><span className="text-faint">Atual</span><span className="num font-bold">{brl(atual)}</span></div>
+        <div className="flex flex-col items-end" style={{ color: '#2DD4BF' }}><span className="text-faint">Alvo</span><span className="num font-bold">{brl(alvo)}</span></div>
+      </div>
+    </div>
+  )
+}
+
+function ProdutoDetalhe({ l, alvo, onClose, ajustar, ajustando, salvarCusto, salvandoCusto, aplicarManual, aplicandoManual }) {
+  const [cop, setCop] = useState(false)
+  const [custoEdit, setCustoEdit] = useState('')
+  const [precoManual, setPrecoManual] = useState('')
+  const st = statusProduto(l)
+  const cor = l.sem_custo ? 'var(--text-faint)' : corMargemReal(l.margem_real, alvo)
+  const sugerido = l.preco_alvo || l.preco_min
+  const diff = (l.concorrente != null) ? (l.preco - l.concorrente) : null
+  const copiarSku = () => { copiarTexto(l.sku); setCop(true); setTimeout(() => setCop(false), 1200) }
+  return (
+    <div className="glass rounded-2xl overflow-hidden flex flex-col drawer-in" style={{ borderTop: `3px solid ${STATUS_PREC[st].cor}`, maxHeight: 'calc(100vh - 96px)' }}>
+      <div className="flex items-start gap-3 p-4 border-b border-glassb shrink-0">
+        <div className="h-14 w-14 rounded-xl overflow-hidden shrink-0 grid place-items-center" style={{ background: 'var(--glass-hover)' }}>
+          {l.imagem ? <img src={l.imagem} alt="" className="h-full w-full object-cover" /> : <ImageIcon size={18} className="text-faint" />}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-medium leading-snug" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{l.nome || `#${l.item_id}`}</div>
+          <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+            <BadgeStatus s={st} lg />
+            <span className="text-[11px] text-faint num inline-flex items-center gap-1">SKU {l.sku}
+              <span role="button" tabIndex={0} onClick={copiarSku} className="cursor-pointer hover:text-fg inline-flex items-center" title="Copiar SKU">{cop ? <Check size={11} style={{ color: '#2DD4BF' }} /> : <Copy size={11} />}</span>
+            </span>
+          </div>
+        </div>
+        <button onClick={onClose} className="text-faint hover:text-fg p-1 shrink-0"><X size={17} /></button>
+      </div>
+
+      <div className="p-4 overflow-y-auto space-y-3 text-[12px]">
+        <div className="grid grid-cols-4 gap-2">
+          <div className="rounded-lg px-2 py-2 text-center" style={{ background: 'var(--glass-hover)' }}><div className="text-[8.5px] uppercase tracking-wide text-faint">Preço Shopee</div><div className="num text-[13px] font-bold mt-0.5">{brl(l.preco)}</div></div>
+          <div className="rounded-lg px-2 py-2 text-center" style={{ background: 'var(--glass-hover)' }}><div className="text-[8.5px] uppercase tracking-wide text-faint">Preço Bling</div><div className="num text-[13px] mt-0.5">{l.preco_bling != null ? brl(l.preco_bling) : '—'}</div></div>
+          <div className="rounded-lg px-2 py-2 text-center" style={{ background: 'var(--glass-hover)' }}><div className="text-[8.5px] uppercase tracking-wide text-faint">Custo Bling</div><div className="num text-[13px] mt-0.5">{l.custo != null ? brl(l.custo) : '—'}</div></div>
+          <div className="rounded-lg px-2 py-2 text-center" style={{ background: 'var(--glass-hover)' }}><div className="text-[8.5px] uppercase tracking-wide text-faint">Estoque</div><div className="num text-[13px] mt-0.5">{l.saldo != null ? l.saldo : '—'}</div></div>
+        </div>
+
+        {l.sem_custo
+          ? <div className="text-faint rounded-lg px-3 py-2.5" style={{ background: 'var(--glass-hover)' }}>Sem custo cadastrado no Bling. Informe o custo abaixo — a margem é calculada na hora.</div>
+          : <div className="space-y-1">
+              <Quebra label="Preço na Shopee" v={brl(l.preco)} forte />
+              <Quebra label="− Comissão / taxa Shopee" v={'− ' + brl(l.taxa_shopee)} neg />
+              {l.imposto > 0 && <Quebra label="− Imposto" v={'− ' + brl(l.imposto)} neg />}
+              {l.embalagem > 0 && <Quebra label="− Embalagem" v={'− ' + brl(l.embalagem)} neg />}
+              <Quebra label="− Custo (Bling)" v={'− ' + brl(l.custo)} neg />
+              <div className="h-px my-1" style={{ background: 'var(--glass-border)' }} />
+              <Quebra label="= Lucro real" v={l.margem_real != null ? `${brl(l.lucro_real)} · ${l.margem_real}%` : '— recalcule'} forte cor={cor} />
+            </div>}
+
+        {!l.sem_custo && l.preco_min != null && l.preco_alvo != null && (
+          <BarraPosicao piso={l.preco_min} atual={l.preco} alvo={l.preco_alvo} cor={cor} />
+        )}
+
+        {l.monitorado && l.concorrente != null && (
+          <div className="rounded-xl p-3" style={{ background: `color-mix(in srgb, ${AZUL_RADAR} 7%, transparent)`, border: `1px solid color-mix(in srgb, ${AZUL_RADAR} 26%, transparent)` }}>
+            <div className="flex items-center gap-2 font-semibold text-[12px] mb-2.5" style={{ color: AZUL_RADAR }}><Target size={14} /> Radar de concorrência</div>
+            <div className="grid grid-cols-3 gap-2">
+              <div className="rounded-lg px-2 py-1.5" style={{ background: 'rgba(0,0,0,.18)' }}><div className="text-[8.5px] uppercase text-faint">Concorrente</div><div className="num text-[13px] font-bold" style={{ color: AZUL_RADAR }}>{brl(l.concorrente)}</div></div>
+              <div className="rounded-lg px-2 py-1.5" style={{ background: 'rgba(0,0,0,.18)' }}><div className="text-[8.5px] uppercase text-faint">Sua posição</div><div className="num text-[13px] font-bold">{diff >= 0 ? '+ ' : '− '}{brl(Math.abs(diff))}</div></div>
+              <div className="rounded-lg px-2 py-1.5" style={{ background: 'rgba(0,0,0,.18)' }}><div className="text-[8.5px] uppercase text-faint">Agente</div><div className="text-[12px] font-bold" style={{ color: l.em_competicao ? AZUL_RADAR : '#2DD4BF' }}>{l.em_competicao ? 'em espera' : 'monitorando'}</div></div>
+            </div>
+            {l.em_competicao && l.preco_alvo != null && (
+              <div className="text-[11px] leading-relaxed text-dim mt-2.5 flex gap-2"><Info size={13} className="shrink-0 mt-0.5" style={{ color: AZUL_RADAR }} /><span>Subir pra margem alvo ({brl(l.preco_alvo)}) deixaria você acima do concorrente. No automático o agente fica em espera neste SKU pra manter a competitividade e evitar looping.</span></div>
+            )}
+            {l.preco_min != null && (
+              <div className="text-[11px] text-faint flex items-center gap-1.5 mt-2.5 pt-2.5" style={{ borderTop: `1px solid color-mix(in srgb, ${AZUL_RADAR} 18%, transparent)` }}><Box size={12} style={{ color: '#2DD4BF' }} /> Piso de margem: <b className="num" style={{ color: '#2DD4BF' }}>{brl(l.preco_min)}</b> — nunca abaixo, nem pra competir.</div>
+            )}
+          </div>
+        )}
+
+        {!l.sem_custo && (
+          <div>
+            <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2 flex items-center gap-1.5"><BadgePercent size={12} /> Corrigir preço na Shopee</div>
+            {sugerido && (
+              <div className="flex items-center justify-between gap-2 rounded-lg px-3 py-2.5 mb-2" style={{ background: `color-mix(in srgb, ${cor} 9%, transparent)`, border: `1px solid color-mix(in srgb, ${cor} 22%, transparent)` }}>
+                <div><div className="text-[10px] text-faint">Sugerido p/ margem alvo {alvo}%</div><div className="num text-base font-bold" style={{ color: '#2DD4BF' }}>{brl(sugerido)}</div></div>
+                <button onClick={() => ajustar(l)} disabled={ajustando} className="text-xs px-3 py-1.5 rounded-lg font-medium text-white flex items-center gap-1.5 disabled:opacity-60 shrink-0" style={{ background: LARANJA }}>
+                  {ajustando ? <Loader2 size={13} className="animate-spin" /> : <TrendingUp size={13} />} Aplicar na Shopee
+                </button>
+              </div>
+            )}
+            <div className="rounded-lg px-3 py-2.5" style={{ background: 'var(--glass-hover)' }}>
+              <div className="text-[10px] uppercase tracking-wide text-faint mb-1.5">Preço manual</div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center gap-1 rounded-lg px-2 py-1" style={{ background: 'var(--bg)' }}><span className="text-faint">R$</span>
+                  <input type="text" inputMode="decimal" value={precoManual} onChange={(e) => setPrecoManual(e.target.value)} placeholder="0,00" className="bg-transparent outline-none num w-16 text-fg" />
+                </div>
+                <button onClick={() => { aplicarManual?.(l, precoManual); setPrecoManual('') }} disabled={aplicandoManual || !precoManual.trim()} className="text-xs px-2.5 py-1 rounded-lg font-medium text-white flex items-center gap-1 disabled:opacity-50" style={{ background: LARANJA }}>{aplicandoManual ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />} Aplicar</button>
+                <span className="text-faint text-[11px]">define o preço direto na Shopee</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="rounded-lg px-3 py-2.5" style={{ background: 'var(--glass-hover)' }}>
+          <div className="text-[10px] uppercase tracking-wide text-faint mb-1.5">Custo no Bling <span className="normal-case font-normal tracking-normal">(fonte da verdade)</span></div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1 rounded-lg px-2 py-1" style={{ background: 'var(--bg)' }}>
+              <span className="text-faint">R$</span>
+              <input type="text" inputMode="decimal" value={custoEdit} onChange={(e) => setCustoEdit(e.target.value)} placeholder={l.custo ? brl(l.custo).replace('R$', '').trim() : '0,00'} className="bg-transparent outline-none num w-16 text-fg" />
+            </div>
+            <button onClick={() => { salvarCusto?.(l, custoEdit); setCustoEdit('') }} disabled={salvandoCusto || !custoEdit.trim()} className="text-xs px-2.5 py-1 rounded-lg font-medium text-white flex items-center gap-1 disabled:opacity-50" style={{ background: l.sem_custo ? '#2DD4BF' : LARANJA }}>
+              {salvandoCusto ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} {l.sem_custo ? 'Cadastrar' : 'Atualizar'}
+            </button>
+            {l.custo ? <span className="text-faint">atual {brl(l.custo)}</span> : null}
+          </div>
+          {l.custo_editado ? <div className="text-[10px] mt-1" style={{ color: '#2DD4BF' }}>salvo ✓ · recalcule p/ ver o equilíbrio</div> : null}
+        </div>
+      </div>
     </div>
   )
 }
