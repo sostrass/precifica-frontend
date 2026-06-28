@@ -2738,8 +2738,8 @@ function PainelImpressao({ onClose, onSalvo }) {
     : `<style>${CSS_ETIQ}</style>${htmlEtiqueta(PEDIDO_AMOSTRA, '', cfgPrev)}`)
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center p-4" style={{ background: 'rgba(0,0,0,.6)', backdropFilter: 'blur(3px)' }} onClick={onClose}>
-      <div className="glass rounded-2xl w-full max-w-3xl max-h-[92vh] flex flex-col" style={{ background: 'var(--bg, var(--glass))' }} onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50" style={{ background: 'rgba(0,0,0,.5)' }} onClick={onClose}>
+      <div className="absolute top-0 right-0 bottom-0 w-full max-w-3xl flex flex-col drawer-in rounded-l-2xl overflow-hidden" style={{ background: 'var(--bg)', borderLeft: '1px solid var(--glass-border)', boxShadow: '-14px 0 44px rgba(0,0,0,.34)' }} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-2 p-4 border-b border-glassb shrink-0">
           <SlidersHorizontal size={17} style={{ color: LARANJA }} />
           <div className="flex-1 min-w-0">
@@ -2752,7 +2752,7 @@ function PainelImpressao({ onClose, onSalvo }) {
         {!cfg ? (
           <div className="py-16 text-center text-faint flex items-center justify-center gap-2"><Loader2 size={16} className="animate-spin" /> carregando…</div>
         ) : (
-          <div className="grid md:grid-cols-2 gap-0 overflow-hidden flex-1">
+          <div className="grid md:grid-cols-2 gap-0 overflow-hidden flex-1 min-h-0">
             {/* Configurações */}
             <div className="p-4 overflow-y-auto space-y-4 border-r border-glassb">
               <div>
@@ -2892,13 +2892,18 @@ function PedidosPainel({ conectado }) {
   const [impressas, setImpressas] = useState(lerImpressas)
   const [editorImpr, setEditorImpr] = useState(false)
 
-  const carregar = (over = {}) => {
+  const [carregando, setCarregando] = useState(false)
+  const [cacheImpr, setCacheImpr] = useState({})   // order_sn -> pedido completo (seleção entre páginas)
+  const [selTudoLoad, setSelTudoLoad] = useState(false)
+  const carregar = (over = {}, manter = false) => {
     const st = over.status ?? status, gr = over.grupo ?? grupo, nfv = over.nf ?? nf
     const bz = over.busca ?? busca, bt = over.buscaTipo ?? buscaTipo
     const pg = over.page ?? page, dd = over.dias ?? dias
-    setD(null); setSel(new Set())
+    if (manter) setCarregando(true)        // troca de página: mantém a lista visível (sem piscar) e preserva a seleção
+    else { setD(null); setSel(new Set()) } // troca de filtro: recomeça e limpa a seleção
     api.shopeePedidosPainel(st, dd, { page: pg, page_size: pageSize, busca: bz, busca_tipo: bt, grupo: gr, nf: nfv })
-      .then(setD).catch((e) => setD({ erro: e.message || true }))
+      .then((r) => { setD(r); setCarregando(false) })
+      .catch((e) => { setD({ erro: e.message || true }); setCarregando(false) })
   }
   const carregarContagens = (dd = dias) => { api.shopeePedidosContagens(dd).then(setContagens).catch(() => setContagens(null)) }
   const carregarContagensNf = (st = status, dd = dias) => { setContagensNf(null); api.shopeePedidosContagensNf(st, dd).then(setContagensNf).catch(() => setContagensNf(null)) }
@@ -2921,7 +2926,7 @@ function PedidosPainel({ conectado }) {
     if (campo === 'dias') { carregarContagens(valor); carregarContagensNf(status, valor) }
     if (campo === 'status') carregarContagensNf(valor, dias)
   }
-  const irPagina = (pg) => { if (pg < 1) return; setPage(pg); carregar({ page: pg }) }
+  const irPagina = (pg) => { if (pg < 1) return; setPage(pg); carregar({ page: pg }, true) }
 
   const pedidos = d?.pedidos || []
   const res = d?.resumo
@@ -2952,8 +2957,27 @@ function PedidosPainel({ conectado }) {
   const marcarImpressa = (sn) => setImpressas((s) => { const n = new Set(s); n.add(sn); gravarImpressas(n); return n })
 
   const toggleSel = (sn) => setSel((s) => { const n = new Set(s); n.has(sn) ? n.delete(sn) : n.add(sn); return n })
-  const selTodos = () => setSel((s) => s.size === pedidos.length && pedidos.length ? new Set() : new Set(pedidos.map((p) => p.order_sn)))
-  const alvoImpressao = () => (sel.size ? pedidos.filter((p) => sel.has(p.order_sn)) : pedidos)
+  const totalAba = d?.total || 0
+  const selTodos = async () => {
+    if (sel.size > 0 && sel.size >= totalAba) { setSel(new Set()); return }                 // já tudo -> limpa
+    if (totalAba <= pedidos.length) { setSel(new Set(pedidos.map((p) => p.order_sn))); return } // 1 página só
+    // várias páginas: busca todos os pedidos da aba de uma vez (modo legado do backend) e cacheia p/ impressão
+    setSelTudoLoad(true)
+    try {
+      const r = await api.shopeePedidosPainel(status, dias, { page: 1, page_size: 500, busca, busca_tipo: buscaTipo, grupo, nf })
+      const lista = r.pedidos || []
+      setCacheImpr((m) => { const n = { ...m }; lista.forEach((p) => { n[p.order_sn] = p }); return n })
+      setSel(new Set(lista.map((p) => p.order_sn)))
+    } catch (e) { notify(e.message || 'Falha ao selecionar todos.', 'danger') }
+    setSelTudoLoad(false)
+  }
+  const alvoImpressao = () => {
+    if (!sel.size) return pedidos
+    const m = {}
+    pedidos.forEach((p) => { if (sel.has(p.order_sn)) m[p.order_sn] = p })
+    sel.forEach((sn) => { if (!m[sn] && cacheImpr[sn]) m[sn] = cacheImpr[sn] })  // selecionados de outras páginas
+    return Object.values(m)
+  }
   const aprovadoStatus = (s) => s === 'READY_TO_SHIP' || s === 'PROCESSED'
   const aprovadosComNota = pedidos.filter((p) => aprovadoStatus(p.status) && seloDe(p)?.grupo === 'autorizado')
 
@@ -3120,8 +3144,8 @@ function PedidosPainel({ conectado }) {
               </button>
             )
           })()}
-          <button onClick={selTodos} className="text-[11px] px-2.5 py-1 rounded-lg flex items-center gap-1 glass text-dim hover:text-fg" title="Selecionar ou limpar todos os pedidos desta página">
-            <CheckCheck size={12} /> {sel.size === pedidos.length && pedidos.length ? 'Limpar seleção' : 'Selecionar todos'}
+          <button onClick={selTodos} disabled={selTudoLoad} className="text-[11px] px-2.5 py-1 rounded-lg flex items-center gap-1 glass text-dim hover:text-fg disabled:opacity-50" title="Selecionar ou limpar todos os pedidos da aba (todas as páginas)">
+            {selTudoLoad ? <Loader2 size={12} className="animate-spin" /> : <CheckCheck size={12} />} {(sel.size > 0 && sel.size >= totalAba) ? 'Limpar seleção' : `Selecionar todos${totalAba > pedidos.length ? ` (${totalAba})` : ''}`}
           </button>
         </div>
       )}
@@ -3129,16 +3153,16 @@ function PedidosPainel({ conectado }) {
       <div className={aberto ? 'grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(380px,460px)] gap-4 items-start' : ''}>
        <div className="min-w-0">
       {d && !d.erro && d.paginas > 1 && (
-        <div className="mb-2.5"><Paginacao page={d.page} total={d.paginas} onIr={irPagina} /></div>
+        <div className="mb-2.5"><Paginacao page={page} total={d.paginas} onIr={irPagina} /></div>
       )}
       {d === null ? <div className="py-10 text-center text-faint flex items-center justify-center gap-2"><Loader2 size={16} className="animate-spin" /> carregando pedidos…</div>
         : d?.erro ? <div className="py-6 text-center text-sm" style={{ color: '#FF6F6F' }}>{typeof d.erro === 'string' ? d.erro : 'Falha ao carregar pedidos.'}</div>
         : pedidos.length === 0 ? <div className="py-8 text-center text-sm text-faint">{busca ? 'Nenhum pedido bate com a busca.' : `Nenhum pedido ${LABEL_ABA[status] || ''} no período.`}</div>
-        : <div className="space-y-2">{pedidos.map((p) => <PedidoCard key={p.order_sn} p={p} agora={agora} alvo={d?.margem_alvo} sel={sel.has(p.order_sn)} onSel={toggleSel} onAbrir={setAberto} recorrente={ehRecorrente(p)} impressa={impressas.has(p.order_sn)} nfSelo={seloDe(p)} />)}</div>}
+        : <div className="space-y-2" style={{ opacity: carregando ? 0.45 : 1, transition: 'opacity .15s', pointerEvents: carregando ? 'none' : 'auto' }}>{pedidos.map((p) => <PedidoCard key={p.order_sn} p={p} agora={agora} alvo={d?.margem_alvo} sel={sel.has(p.order_sn)} onSel={toggleSel} onAbrir={setAberto} recorrente={ehRecorrente(p)} impressa={impressas.has(p.order_sn)} nfSelo={seloDe(p)} />)}</div>}
 
       {/* Paginação */}
       {d && !d.erro && d.paginas > 1 && (<>
-        <Paginacao page={d.page} total={d.paginas} onIr={irPagina} />
+        <Paginacao page={page} total={d.paginas} onIr={irPagina} />
         <div className="text-center text-[11px] text-faint num mt-2">{d.total} pedidos · página {d.page} de {d.paginas}</div>
       </>)}
        </div>
