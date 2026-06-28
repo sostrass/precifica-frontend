@@ -2193,6 +2193,7 @@ function htmlFolhaPedido(p, cfg = PRINT_CFG) {
   return `<section class="doc">
     <div class="band">
       <div class="bl"><div class="kick">PEDIDO DE VENDA · SEPARAÇÃO</div><div class="onum">#${esc(p.order_sn)}</div>
+        <div class="cliente">${ico('shopping-bag', 13, '#FFB59E')}<span>${esc(nomeRealF || 'comprador protegido')}</span></div>
         <div class="tags"><span class="tg s">${ico('truck', 12, '#FF9576')} Shopee Xpress</span>${tagPrazo}</div></div>
       <div class="br">${cfg.mostrar_codigo_barras ? `<div class="bcwrap">${barcodeSVG(p.order_sn, { height: 38, modulo: 1.15 })}</div>` : ''}<div class="dt">impresso em ${new Date().toLocaleString('pt-BR')}</div></div>
     </div>
@@ -2225,7 +2226,8 @@ const CSS_SHARED = `*{-webkit-print-color-adjust:exact !important;print-color-ad
 const CSS_FOLHA = CSS_SHARED + `*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Inter',system-ui,-apple-system,Segoe UI,Arial,sans-serif;color:#14151a}
 .doc{background:#fff;page-break-after:always}
 .band{background:linear-gradient(120deg,#16171c,#23252e);color:#fff;padding:16px 30px;display:flex;justify-content:space-between;align-items:flex-start}
-.kick{font-size:10px;letter-spacing:.16em;color:#EE6A45;font-weight:800}.onum{font-size:25px;font-weight:800;font-family:ui-monospace,monospace;margin:2px 0 7px;word-break:break-all}
+.kick{font-size:10px;letter-spacing:.16em;color:#EE6A45;font-weight:800}.onum{font-size:25px;font-weight:800;font-family:ui-monospace,monospace;margin:2px 0 6px;word-break:break-all}
+.cliente{display:flex;align-items:center;font-size:13.5px;font-weight:700;color:#FFD9CC;margin:0 0 8px}.cliente svg{margin-right:6px;flex-shrink:0}.cliente span{letter-spacing:.01em;word-break:break-all}
 .tags{display:flex;flex-wrap:wrap}.tg{font-size:11px;font-weight:600;padding:4px 10px;border-radius:20px;display:inline-flex;align-items:center}.tg.s{background:rgba(238,77,45,.18);color:#FF9576}.tg.w{background:rgba(224,162,60,.16);color:#F0C079}
 .br{text-align:right;flex-shrink:0;margin-left:14px}.bcwrap{background:#fff;padding:5px 7px;border-radius:5px;display:inline-block}.bcwrap svg{display:block}.dt{font-size:10px;color:#9a9da6;margin-top:5px}
 .emp{display:flex;align-items:center;padding:11px 30px;background:#FAFAFB;border-bottom:1px solid #eef0f3}
@@ -2241,8 +2243,8 @@ const CSS_FOLHA = CSS_SHARED + `*{box-sizing:border-box;margin:0;padding:0}body{
 .list{border-top:1px solid #eef0f3}
 .row{display:flex;align-items:flex-start;padding:11px 30px;border-bottom:1px solid #f1f2f5;page-break-inside:avoid}
 .row .ph{width:44px;height:44px;border-radius:9px;background:linear-gradient(135deg,#f4f5f7,#e9ebef);border:1px solid #e8eaef;display:grid;place-items:center;flex-shrink:0;overflow:hidden}.row .ph img{width:100%;height:100%;object-fit:cover}
-.cd{flex:1;min-width:0}.nm{font-size:14px;font-weight:700;line-height:1.3}
-.mt{font-size:12px;color:#3a3f4b;margin-top:4px;display:flex;align-items:center;flex-wrap:wrap}.sku{font-family:ui-monospace,monospace;color:#7a7f8b}.dt2{color:#ccc}.cp{color:#8a8f9b}
+.cd{flex:1;min-width:0}.nm{font-size:13.5px;font-weight:700;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.mt{font-size:12px;color:#3a3f4b;margin-top:5px;display:flex;align-items:center;flex-wrap:wrap}.sku{font-family:ui-monospace,monospace;color:#16171c;font-weight:700;font-size:12.5px;background:#eef0f3;padding:1px 6px;border-radius:5px}.dt2{color:#ccc}.cp{color:#8a8f9b}
 .qt{text-align:center;flex-shrink:0;width:46px}.qt b{font-size:20px;font-weight:800;display:block;line-height:1}.qt span{font-size:9px;color:#aab0bb}.ck{width:18px;height:18px;border:1.5px solid #ccd;border-radius:4px;flex-shrink:0;margin-top:3px}
 .foot{padding:13px 30px;border-top:2px solid #14151a;display:flex;justify-content:space-between;align-items:center}.fl{display:flex;align-items:center}.genf{font-size:12px;color:#5a5f6b}.genf b{color:#EE4D2D}.pgn{font-size:10.5px;color:#9aa0ab}
 
