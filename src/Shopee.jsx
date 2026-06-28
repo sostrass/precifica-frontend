@@ -2102,6 +2102,14 @@ const PRINT_CFG_PADRAO = {
 }
 let PRINT_CFG = { ...PRINT_CFG_PADRAO }
 function setPrintCfg(c) { PRINT_CFG = { ...PRINT_CFG_PADRAO, ...(c || {}) } }
+// Overrides por tipo de impressão (Folha do pedido x Etiqueta), guardados no navegador.
+// O backend continua só com dados da empresa + flags base; cada tipo pode divergir.
+// Fallback: se não houver override salvo, usa PRINT_CFG (comportamento atual, sem regressão).
+const LS_PRINT_TIPO = 'precifica_print_tipo'
+const FLAGS_IMPR = ['mostrar_timeline', 'mostrar_miniaturas', 'mostrar_codigo_barras', 'mostrar_nota_comprador', 'mostrar_complemento', 'mostrar_nfe', 'mostrar_rastreio', 'mostrar_destinatario', 'mostrar_qr']
+function lerPorTipo() { try { return JSON.parse(localStorage.getItem(LS_PRINT_TIPO) || '{}') || {} } catch { return {} } }
+function gravarPorTipo(o) { try { localStorage.setItem(LS_PRINT_TIPO, JSON.stringify(o || {})) } catch (_) {} }
+function cfgTipo(tipo) { const o = lerPorTipo()[tipo]; return o ? { ...PRINT_CFG, ...o } : PRINT_CFG }
 // resolve emitente: usa o que a conta configurou; cai no placeholder se vazio
 const emitNome = (cfg) => (cfg.emitente_nome || REMETENTE_NOME)
 const emitCnpjCidade = (cfg) => {
@@ -2324,11 +2332,13 @@ table.ci{width:100%;table-layout:fixed;border-collapse:collapse}table.ci td{padd
 
 function imprimirFolhasPedido(pedidos) {
   if (!pedidos.length) return
-  abrirImpressao('Pedidos', CSS_FOLHA, pedidos.map(htmlFolhaPedido).join(''))
+  const cfg = cfgTipo('folha')
+  abrirImpressao('Pedidos', CSS_FOLHA, pedidos.map((p) => htmlFolhaPedido(p, cfg)).join(''))
 }
 function imprimirEtiquetas(pedidos, rem) {
   if (!pedidos.length) return
-  abrirImpressao('Etiquetas', CSS_ETIQ, pedidos.map((p) => htmlEtiqueta(p, rem)).join(''))
+  const cfg = cfgTipo('etiqueta')
+  abrirImpressao('Etiquetas', CSS_ETIQ, pedidos.map((p) => htmlEtiqueta(p, rem, cfg)).join(''))
 }
 
 function MiniBadge({ children, cor, icon: Ic }) {
@@ -2680,7 +2690,7 @@ function ToggleLinha({ on, onClick, label, escopo }) {
     <button type="button" onClick={onClick} className="w-full flex items-center justify-between gap-3 py-2 px-1 text-left rounded-lg hover:bg-[var(--glass-hover)] transition-colors">
       <div className="min-w-0">
         <div className="text-xs">{label}</div>
-        <div className="text-[10px] text-faint">{escopo}</div>
+        {escopo && <div className="text-[10px] text-faint">{escopo}</div>}
       </div>
       <span className="shrink-0 w-9 h-5 rounded-full relative transition-colors" style={{ background: on ? LARANJA : 'var(--glass-border)' }}>
         <span className="absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all" style={{ left: on ? '18px' : '2px' }} />
@@ -2692,19 +2702,29 @@ function ToggleLinha({ on, onClick, label, escopo }) {
 function PainelImpressao({ onClose, onSalvo }) {
   const notify = useToast()
   const [cfg, setCfg] = useState(null)
+  const [porTipo, setPorTipo] = useState(null)   // { folha:{flags}, etiqueta:{flags} } — independente por tipo
   const [salvando, setSalvando] = useState(false)
   const [preview, setPreview] = useState('folha')
   useEffect(() => {
-    api.shopeeImpressaoConfig().then((c) => { setCfg(c); setPrintCfg(c) }).catch(() => setCfg({ ...PRINT_CFG_PADRAO }))
+    const semear = (c) => {
+      const base = {}; FLAGS_IMPR.forEach((f) => { base[f] = c[f] !== false })
+      const s = lerPorTipo()
+      setPorTipo({ folha: { ...base, ...(s.folha || {}) }, etiqueta: { ...base, ...(s.etiqueta || {}) } })
+    }
+    api.shopeeImpressaoConfig().then((c) => { setCfg(c); setPrintCfg(c); semear(c) })
+      .catch(() => { const c = { ...PRINT_CFG_PADRAO }; setCfg(c); semear(c) })
   }, [])
   const set = (k, v) => setCfg((c) => ({ ...c, [k]: v }))
   const campo = (k, v) => set(k, v)
+  const toggleTipo = (k) => setPorTipo((pt) => ({ ...pt, [preview]: { ...pt[preview], [k]: !pt[preview][k] } }))
   const salvar = async () => {
     if (!cfg) return
     setSalvando(true)
     try {
-      const salvo = await api.shopeeImpressaoConfigSalvar(cfg)
-      setPrintCfg(salvo); onSalvo?.(salvo)
+      // backend guarda empresa + flags base (espelha a Folha, p/ compatibilidade); o por-tipo fica no navegador
+      const cfgSalvar = { ...cfg, ...((porTipo && porTipo.folha) || {}) }
+      const salvo = await api.shopeeImpressaoConfigSalvar(cfgSalvar)
+      setPrintCfg(salvo); gravarPorTipo(porTipo || {}); onSalvo?.(salvo)
       notify('Impressão personalizada salva.', 'ok'); onClose?.()
     } catch (e) { notify(e.message || 'Falha ao salvar.', 'danger') }
     setSalvando(false)
@@ -2712,9 +2732,10 @@ function PainelImpressao({ onClose, onSalvo }) {
   const W = preview === 'folha' ? 760 : 378
   const H = preview === 'folha' ? 660 : 567
   const k = 296 / W
-  const doc = !cfg ? '' : (preview === 'folha'
-    ? `<style>${CSS_FOLHA}</style>${htmlFolhaPedido(PEDIDO_AMOSTRA, cfg)}`
-    : `<style>${CSS_ETIQ}</style>${htmlEtiqueta(PEDIDO_AMOSTRA, '', cfg)}`)
+  const cfgPrev = (cfg && porTipo) ? { ...cfg, ...(porTipo[preview] || {}) } : cfg
+  const doc = !cfgPrev ? '' : (preview === 'folha'
+    ? `<style>${CSS_FOLHA}</style>${htmlFolhaPedido(PEDIDO_AMOSTRA, cfgPrev)}`
+    : `<style>${CSS_ETIQ}</style>${htmlEtiqueta(PEDIDO_AMOSTRA, '', cfgPrev)}`)
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4" style={{ background: 'rgba(0,0,0,.6)', backdropFilter: 'blur(3px)' }} onClick={onClose}>
@@ -2748,11 +2769,18 @@ function PainelImpressao({ onClose, onSalvo }) {
                 </div>
               </div>
               <div>
-                <div className="text-xs font-semibold mb-1 flex items-center gap-1.5"><Check size={13} style={{ color: LARANJA }} /> O que aparece</div>
+                <div className="text-xs font-semibold mb-1 flex items-center gap-1.5"><Check size={13} style={{ color: LARANJA }} /> O que aparece em cada impressão</div>
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <button onClick={() => setPreview('folha')} className="text-[11px] px-2.5 py-1 rounded-lg flex items-center gap-1.5 transition-colors" style={preview === 'folha' ? { background: LARANJA, color: '#fff' } : { background: 'var(--glass-bg)', color: 'var(--dim)' }}><FileText size={12} /> Folha (Pedidos)</button>
+                  <button onClick={() => setPreview('etiqueta')} className="text-[11px] px-2.5 py-1 rounded-lg flex items-center gap-1.5 transition-colors" style={preview === 'etiqueta' ? { background: LARANJA, color: '#fff' } : { background: 'var(--glass-bg)', color: 'var(--dim)' }}><Tag size={12} /> Etiqueta</button>
+                </div>
+                <div className="text-[10px] text-faint mb-1">Cada tipo é independente: o que você liga aqui vale só para a <b className="text-dim">{preview === 'folha' ? 'folha do pedido' : 'etiqueta'}</b>. A prévia ao lado acompanha.</div>
                 <div className="divide-y divide-glassb">
-                  {TogglesImpr.map(([k, label, escopo]) => (
-                    <ToggleLinha key={k} on={!!cfg[k]} onClick={() => campo(k, !cfg[k])} label={label} escopo={escopo} />
-                  ))}
+                  {porTipo && TogglesImpr
+                    .filter(([k, l, esc]) => preview === 'folha' ? esc.includes('Folha') : esc.includes('tiqueta'))
+                    .map(([k, label]) => (
+                      <ToggleLinha key={k} on={!!porTipo[preview][k]} onClick={() => toggleTipo(k)} label={label} escopo="" />
+                    ))}
                 </div>
               </div>
             </div>
@@ -3069,35 +3097,40 @@ function PedidosPainel({ conectado }) {
               style={buscaTipo === id ? { background: 'var(--glass-hover)', color: 'var(--text)' } : { color: 'var(--text-faint)' }}>{label}</button>
           ))}
         </div>
-        {aprovadosComNota.length > 0 && (() => {
-          const alvos = aprovadosComNota.map((p) => p.order_sn)
-          const todos = alvos.every((sn) => sel.has(sn))
-          return (
-            <button onClick={() => setSel((s) => { const n = new Set(s); alvos.forEach((sn) => todos ? n.delete(sn) : n.add(sn)); return n })}
-              className="text-[11px] px-2 py-1.5 rounded-lg flex items-center gap-1 glass hover:text-fg"
-              style={{ color: todos ? '#2DD4BF' : 'var(--text-dim)', borderColor: todos ? '#2DD4BF' : undefined }}
-              title="Marca de uma vez todos os pedidos aprovados (a enviar / processado) que já têm NF-e autorizada — prontos para imprimir">
-              <CheckCheck size={12} /> Aprovados c/ nota <span className="num">({alvos.length})</span>
-            </button>
-          )
-        })()}
-        {pedidos.length > 0 && (
-          <button onClick={selTodos} className="text-[11px] px-2 py-1.5 rounded-lg glass text-dim hover:text-fg">
-            {sel.size === pedidos.length && pedidos.length ? 'limpar' : 'pág.'}{sel.size ? ` (${sel.size})` : ''}
-          </button>
-        )}
       </div>
 
-      {/* faixa de instrução p/ seleção em lote */}
+      {/* barra de seleção em lote */}
       {pedidos.length > 0 && (
-        <div className="flex items-center gap-2 mb-3 rounded-xl px-3 py-2 text-[11px]" style={{ color: 'var(--dim)', background: 'color-mix(in srgb, var(--accent2) 10%, transparent)', border: '1px solid var(--glass-border)' }}>
+        <div className="flex items-center gap-2 mb-3 rounded-xl px-3 py-2 flex-wrap" style={{ background: 'color-mix(in srgb, var(--accent2) 10%, transparent)', border: '1px solid var(--glass-border)' }}>
           <CheckCheck size={14} style={{ color: LARANJA }} className="shrink-0" />
-          <span><b className="text-fg">Marque os pedidos</b> no quadradinho à esquerda para imprimir em lote — depois use <b className="text-fg">Etiquetas</b>, <b className="text-fg">Pedidos</b> ou <b className="text-fg">Oficial SPX</b>.</span>
+          <span className="text-[11px] flex-1 min-w-[170px]" style={{ color: 'var(--dim)' }}>
+            {sel.size > 0
+              ? <><b className="text-fg num">{sel.size}</b> selecionado(s) — imprima com <b className="text-fg">Etiquetas</b>, <b className="text-fg">Pedidos</b> ou <b className="text-fg">Oficial SPX</b>.</>
+              : <><b className="text-fg">Marque os pedidos</b> no quadradinho à esquerda, ou use o botão ao lado.</>}
+          </span>
+          {aprovadosComNota.length > 0 && (() => {
+            const alvos = aprovadosComNota.map((p) => p.order_sn)
+            const todos = alvos.every((sn) => sel.has(sn))
+            return (
+              <button onClick={() => setSel((s) => { const n = new Set(s); alvos.forEach((sn) => todos ? n.delete(sn) : n.add(sn)); return n })}
+                className="text-[11px] px-2.5 py-1 rounded-lg flex items-center gap-1 glass hover:text-fg"
+                style={{ color: todos ? '#2DD4BF' : 'var(--text-dim)' }}
+                title="Marca todos os pedidos aprovados (a enviar / processado) que já têm NF-e autorizada">
+                <CheckCheck size={12} /> Aprovados c/ nota <span className="num">({alvos.length})</span>
+              </button>
+            )
+          })()}
+          <button onClick={selTodos} className="text-[11px] px-2.5 py-1 rounded-lg flex items-center gap-1 glass text-dim hover:text-fg" title="Selecionar ou limpar todos os pedidos desta página">
+            <CheckCheck size={12} /> {sel.size === pedidos.length && pedidos.length ? 'Limpar seleção' : 'Selecionar todos'}
+          </button>
         </div>
       )}
 
       <div className={aberto ? 'grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(380px,460px)] gap-4 items-start' : ''}>
        <div className="min-w-0">
+      {d && !d.erro && d.paginas > 1 && (
+        <div className="mb-2.5"><Paginacao page={d.page} total={d.paginas} onIr={irPagina} /></div>
+      )}
       {d === null ? <div className="py-10 text-center text-faint flex items-center justify-center gap-2"><Loader2 size={16} className="animate-spin" /> carregando pedidos…</div>
         : d?.erro ? <div className="py-6 text-center text-sm" style={{ color: '#FF6F6F' }}>{typeof d.erro === 'string' ? d.erro : 'Falha ao carregar pedidos.'}</div>
         : pedidos.length === 0 ? <div className="py-8 text-center text-sm text-faint">{busca ? 'Nenhum pedido bate com a busca.' : `Nenhum pedido ${LABEL_ABA[status] || ''} no período.`}</div>
