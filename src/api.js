@@ -150,6 +150,7 @@ export const api = {
   shopeeDevolucoes: (dias = 30) => req(`/api/shopee/devolucoes?dias=${dias}`),
   shopeeDivergencia: () => req('/api/shopee/divergencia'),
   shopeeItemPreco: (item_id, preco) => req('/api/shopee/item/preco', { method: 'POST', body: { item_id, preco } }),
+  shopeeReprecificar: (b) => req('/api/shopee/reprecificar', { method: 'POST', body: b }),
   shopeeBundles: (status = 'ongoing') => req(`/api/shopee/bundles?status=${status}`),
   shopeeCriarBundle: (b) => req('/api/shopee/bundles', { method: 'POST', body: b }),
   shopeeEncerrarBundle: (id) => req(`/api/shopee/bundles/${id}`, { method: 'DELETE' }),

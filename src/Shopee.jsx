@@ -2015,14 +2015,14 @@ const corMargemReal = (m, alvo) => m == null ? 'var(--text-faint)' : m < 0 ? '#F
 const AZUL_RADAR = '#3DA8F5'
 const STATUS_PREC = {
   no_padrao: { label: 'No padrão', cor: '#2DD4BF', Icon: CheckCircle2 },
-  abaixo: { label: 'Abaixo do alvo', cor: '#d6007f', Icon: TrendingDown },
+  abaixo: { label: 'Abaixo do líquido', cor: '#d6007f', Icon: TrendingDown },
   prejuizo: { label: 'Prejuízo', cor: '#FF6F6F', Icon: AlertTriangle },
   em_competicao: { label: 'Em competição', cor: AZUL_RADAR, Icon: Target },
-  sem_custo: { label: 'Sem custo', cor: 'var(--text-faint)', Icon: HelpCircle },
+  sem_base: { label: 'Sem Preço Bling', cor: 'var(--text-faint)', Icon: HelpCircle },
 }
-const statusProduto = (l) => l.sem_custo ? 'sem_custo' : l.prejuizo ? 'prejuizo' : l.em_competicao ? 'em_competicao' : l.margem_baixa ? 'abaixo' : 'no_padrao'
+const statusProduto = (l) => l.sem_base ? 'sem_base' : l.prejuizo ? 'prejuizo' : l.em_competicao ? 'em_competicao' : l.abaixo ? 'abaixo' : 'no_padrao'
 const contarStatus = (itens) => {
-  const c = { no_padrao: 0, abaixo: 0, prejuizo: 0, em_competicao: 0, sem_custo: 0, total: itens.length }
+  const c = { no_padrao: 0, abaixo: 0, prejuizo: 0, em_competicao: 0, sem_base: 0, total: itens.length }
   for (const l of itens) c[statusProduto(l)]++
   return c
 }
@@ -3391,39 +3391,35 @@ function copiarTexto(txt) {
   try { const ta = document.createElement('textarea'); ta.value = String(txt); ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.focus(); ta.select(); document.execCommand('copy'); document.body.removeChild(ta) } catch (_) {}
 }
 
-function PainelIndicadores({ itens, alvo }) {
+function PainelIndicadores({ itens }) {
   const dados = useMemo(() => {
     const c = contarStatus(itens)
-    const comMargem = itens.filter((l) => l.margem_real != null)
-    const media = comMargem.length ? comMargem.reduce((s, l) => s + l.margem_real, 0) / comMargem.length : 0
-    let mesa = 0
+    const comBase = itens.filter((l) => !l.sem_base && l.liquido != null && l.preco_bling > 0)
+    const cobertura = comBase.length ? comBase.reduce((s, l) => s + (l.liquido / l.preco_bling) * 100, 0) / comBase.length : 0
+    let falta = 0
     for (const l of itens) {
-      if ((l.prejuizo || l.margem_baixa) && l.preco_alvo != null) {
-        mesa += Math.max(0, (l.preco_alvo * alvo / 100) - (l.lucro_real || 0))
-      }
+      if ((l.abaixo || l.prejuizo) && l.preco_bling > 0 && l.liquido != null) falta += Math.max(0, l.preco_bling - l.liquido)
     }
-    const a1 = alvo || 12, a2 = a1 + 10
     const bands = [
-      { label: 'Prejuízo', cor: '#FF6F6F', n: comMargem.filter((l) => l.margem_real < 0).length },
-      { label: `0–${a1}%`, cor: '#d6007f', n: comMargem.filter((l) => l.margem_real >= 0 && l.margem_real < a1).length },
-      { label: `${a1}–${a2}%`, cor: '#2DD4BF', n: comMargem.filter((l) => l.margem_real >= a1 && l.margem_real < a2).length },
-      { label: `${a2}%+`, cor: '#1aa896', n: comMargem.filter((l) => l.margem_real >= a2).length },
+      { label: 'Prejuízo', cor: '#FF6F6F', n: comBase.filter((l) => l.liquido < 0).length },
+      { label: '< 80%', cor: '#d6007f', n: comBase.filter((l) => l.liquido >= 0 && l.liquido < l.preco_bling * 0.8).length },
+      { label: '80–99%', cor: '#F5A623', n: comBase.filter((l) => l.liquido >= l.preco_bling * 0.8 && l.liquido < l.preco_bling).length },
+      { label: '100%+', cor: '#2DD4BF', n: comBase.filter((l) => l.liquido >= l.preco_bling).length },
     ]
     const maxB = Math.max(1, ...bands.map((b) => b.n))
-    return { c, media, mesa, bands, maxB }
-  }, [itens, alvo])
+    return { c, cobertura, falta, bands, maxB }
+  }, [itens])
 
-  const { c, media, mesa, bands, maxB } = dados
+  const { c, cobertura, falta, bands, maxB } = dados
   const total = c.total || 1
   const CIRC = 2 * Math.PI * 52
-  const segDefs = [['no_padrao', c.no_padrao, '#2DD4BF'], ['abaixo', c.abaixo, '#d6007f'], ['prejuizo', c.prejuizo, '#FF6F6F'], ['em_competicao', c.em_competicao, AZUL_RADAR], ['sem_custo', c.sem_custo, '#6a5f73']].filter((s) => s[1] > 0)
+  const segDefs = [['no_padrao', c.no_padrao, '#2DD4BF'], ['abaixo', c.abaixo, '#d6007f'], ['prejuizo', c.prejuizo, '#FF6F6F'], ['em_competicao', c.em_competicao, AZUL_RADAR], ['sem_base', c.sem_base, '#6a5f73']].filter((s) => s[1] > 0)
   let acc = 0
   const arcs = segDefs.map(([k, v, col]) => { const len = v / total * CIRC; const rot = -90 + acc / total * 360; acc += v; return { k, col, dash: `${len} ${CIRC - len}`, rot } })
   const pctPadrao = Math.round((c.no_padrao / total) * 100)
   const CR = 2 * Math.PI * 38
-  const ringDash = Math.max(0, Math.min(1, media / 40)) * CR
-  const acima = media >= (alvo || 0)
-  const delta = media - (alvo || 0)
+  const cobreOk = cobertura >= 100
+  const ringDash = Math.max(0, Math.min(1, cobertura / 130)) * CR
 
   return (
     <div className="glass rounded-2xl p-4">
@@ -3441,7 +3437,7 @@ function PainelIndicadores({ itens, alvo }) {
               <text x="59" y="72" textAnchor="middle" fill="var(--text-faint)" fontSize="10">no padrão</text>
             </svg>
             <div className="flex flex-col gap-1 text-[11px] min-w-0 flex-1">
-              {[['No padrão', '#2DD4BF', c.no_padrao], ['Abaixo', '#d6007f', c.abaixo], ['Prejuízo', '#FF6F6F', c.prejuizo], ['Competição', AZUL_RADAR, c.em_competicao], ['Sem custo', '#6a5f73', c.sem_custo]].map(([t, col, n]) => (
+              {[['No padrão', '#2DD4BF', c.no_padrao], ['Abaixo', '#d6007f', c.abaixo], ['Prejuízo', '#FF6F6F', c.prejuizo], ['Competição', AZUL_RADAR, c.em_competicao], ['Sem Bling', '#6a5f73', c.sem_base]].map(([t, col, n]) => (
                 <div key={t} className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-sm shrink-0" style={{ background: col }} />{t}<span className="num font-bold ml-auto">{n}</span></div>
               ))}
             </div>
@@ -3449,29 +3445,29 @@ function PainelIndicadores({ itens, alvo }) {
         </div>
 
         <div className="rounded-xl p-3.5 flex flex-col" style={{ background: 'rgba(0,0,0,.16)', border: '1px solid var(--glass-border)' }}>
-          <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Margem média</div>
+          <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Cobertura do líquido</div>
           <div className="flex flex-col items-center gap-2 flex-1 justify-center">
             <svg width="88" height="88" viewBox="0 0 96 96">
               <circle cx="48" cy="48" r="38" stroke="rgba(255,255,255,.05)" strokeWidth="9" fill="none" />
-              <circle cx="48" cy="48" r="38" stroke={acima ? '#2DD4BF' : '#d6007f'} strokeWidth="9" fill="none" strokeLinecap="round" strokeDasharray={`${ringDash} ${CR - ringDash}`} transform="rotate(-90 48 48)" />
-              <text x="48" y="45" textAnchor="middle" fill="var(--text)" fontSize="20" fontWeight="800">{media.toFixed(1)}%</text>
-              <text x="48" y="62" textAnchor="middle" fill="var(--text-faint)" fontSize="9.5">média real</text>
+              <circle cx="48" cy="48" r="38" stroke={cobreOk ? '#2DD4BF' : '#d6007f'} strokeWidth="9" fill="none" strokeLinecap="round" strokeDasharray={`${ringDash} ${CR - ringDash}`} transform="rotate(-90 48 48)" />
+              <text x="48" y="45" textAnchor="middle" fill="var(--text)" fontSize="19" fontWeight="800">{cobertura.toFixed(0)}%</text>
+              <text x="48" y="62" textAnchor="middle" fill="var(--text-faint)" fontSize="9.5">do Preço Bling</text>
             </svg>
-            <span className="text-[11px] font-bold px-2 py-0.5 rounded whitespace-nowrap" style={{ background: `color-mix(in srgb, ${acima ? '#2DD4BF' : '#d6007f'} 14%, transparent)`, color: acima ? '#2DD4BF' : '#d6007f' }}>{delta >= 0 ? '+' : ''}{delta.toFixed(1)} pts vs alvo {alvo || '—'}%</span>
+            <span className="text-[11px] font-bold px-2 py-0.5 rounded whitespace-nowrap" style={{ background: `color-mix(in srgb, ${cobreOk ? '#2DD4BF' : '#d6007f'} 14%, transparent)`, color: cobreOk ? '#2DD4BF' : '#d6007f' }}>{cobreOk ? 'netando o Preço Bling' : 'abaixo do Preço Bling'}</span>
           </div>
         </div>
 
         <div className="rounded-xl p-3.5 flex flex-col" style={{ background: 'rgba(0,0,0,.16)', border: '1px solid var(--glass-border)' }}>
-          <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Lucro deixado na mesa</div>
-          <div className="num text-[26px] font-extrabold leading-none" style={{ color: '#F5A623' }}>{brl(mesa)}</div>
-          <div className="text-[11px] text-faint mt-1.5">potencial ajustando os <b style={{ color: 'var(--text)' }}>{c.abaixo} abaixo</b> + {c.prejuizo} no prejuízo</div>
+          <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Deixando de receber</div>
+          <div className="num text-[26px] font-extrabold leading-none" style={{ color: '#F5A623' }}>{brl(falta)}</div>
+          <div className="text-[11px] text-faint mt-1.5">falta pra netar o Preço Bling nos <b style={{ color: 'var(--text)' }}>{c.abaixo} abaixo</b> + {c.prejuizo} no prejuízo</div>
           <div className="text-[10px] text-faint mt-auto pt-1.5 flex items-start gap-1"><Info size={11} className="shrink-0 mt-0.5" /> estimativa por unidade — fica exato com o volume de vendas</div>
         </div>
 
         <div className="rounded-xl p-3.5" style={{ background: 'rgba(0,0,0,.16)', border: '1px solid var(--glass-border)' }}>
-          <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Distribuição de margem</div>
+          <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Líquido vs Preço Bling</div>
           <div className="relative flex items-end gap-2.5" style={{ height: 92 }}>
-            <div className="absolute" style={{ left: '50%', top: 2, bottom: 22, borderLeft: '2px dashed #2DD4BF', opacity: .55 }} />
+            <div className="absolute" style={{ left: '75%', top: 2, bottom: 22, borderLeft: '2px dashed #2DD4BF', opacity: .55 }} />
             {bands.map((b, i) => (
               <div key={i} className="flex-1 flex flex-col items-center justify-end gap-1.5 h-full">
                 <div className="text-[12px] font-bold" style={{ color: b.cor }}>{b.n}</div>
@@ -3509,40 +3505,43 @@ function AgenteBar() {
 
 function Divergencia({ conectado, notify }) {
   const [d, setD] = useState(null)
-  const [filtro, setFiltro] = useState('prejuizo')
+  const [filtro, setFiltro] = useState('abaixo')
   const [busca, setBusca] = useState('')
   const [ajustando, setAjustando] = useState(null)
   const [aplicandoManual, setAplicandoManual] = useState(null)
-  const [salvandoCusto, setSalvandoCusto] = useState(null)
+  const [loteAberto, setLoteAberto] = useState(false)
+  const [aplicandoLote, setAplicandoLote] = useState(false)
+  const [salvandoPreco, setSalvandoPreco] = useState(null)
   const [aberto, setAberto] = useState(null)   // item_id do produto aberto no painel lateral
   const carregar = () => { setD(null); api.shopeeDivergencia().then(setD).catch(() => setD({ erro: true })) }
   useEffect(() => { if (conectado) carregar() }, [conectado])
-  if (!conectado) return <Vazio txt="Conecte a loja Shopee para ver a margem real dos seus produtos." />
-  if (d === null) return <Carregando txt="calculando a margem real de cada anúncio (preço − taxas da Shopee − custo)…" />
+  if (!conectado) return <Vazio txt="Conecte a loja Shopee para ver o líquido de cada anúncio frente ao Preço Bling." />
+  if (d === null) return <Carregando txt="calculando o líquido de cada anúncio (preço − taxas − imposto − embalagem) e comparando com o Preço Bling…" />
   if (d.erro) return <Vazio txt="Não consegui ler o catálogo da Shopee. Verifique a conexão." />
-  const alvo = d.alvo || 0
+
+  const recontar = (itens) => ({
+    sem_base: itens.filter((x) => x.sem_base).length,
+    prejuizo: itens.filter((x) => x.prejuizo).length,
+    abaixo: itens.filter((x) => x.abaixo).length,
+    cobre: itens.filter((x) => x.cobre).length,
+  })
 
   const ajustar = async (l) => {
-    const novo = l.preco_alvo || l.preco_min
+    const novo = l.preco_ideal
     if (!novo) return
-    if (!window.confirm(`Atualizar o preço de "${l.nome}" na Shopee de ${brl(l.preco)} para ${brl(novo)}?\n\nIsso altera o preço do anúncio AO VIVO na Shopee.`)) return
+    if (!window.confirm(`Atualizar o preço de "${l.nome}" na Shopee de ${brl(l.preco)} para ${brl(novo)}?\n\nNesse preço você recebe líquido o Preço Bling (${brl(l.preco_bling)}). Isso altera o anúncio AO VIVO na Shopee.`)) return
     setAjustando(l.item_id)
     try {
       await api.shopeeItemPreco(l.item_id, novo)
-      const usouAlvo = !!l.preco_alvo
       setD((cur) => {
         const itens = cur.itens.map((x) => x.item_id !== l.item_id ? x : ({
           ...x, preco: novo, ajustado: true,
-          margem_real: usouAlvo ? alvo : 0,
-          lucro_real: usouAlvo ? Math.round(novo * alvo) / 100 : 0,
-          prejuizo: false, margem_baixa: false, saudavel: true,
+          liquido: x.preco_bling, diferenca: 0,
+          prejuizo: false, abaixo: false, cobre: true,
         }))
-        return { ...cur, itens,
-          prejuizo: itens.filter((x) => x.prejuizo).length,
-          margem_baixa: itens.filter((x) => x.margem_baixa).length,
-          saudavel: itens.filter((x) => x.saudavel).length }
+        return { ...cur, itens, ...recontar(itens) }
       })
-      notify?.(`Preço de "${l.nome}" ajustado para ${brl(novo)} na Shopee`, 'ok')
+      notify?.(`Preço de "${l.nome}" ajustado para ${brl(novo)} na Shopee — netando o Preço Bling`, 'ok')
     } catch (e) { notify?.('Não consegui atualizar: ' + e.message, 'danger') }
     setAjustando(null)
   }
@@ -3554,46 +3553,62 @@ function Divergencia({ conectado, notify }) {
     setAplicandoManual(l.item_id)
     try {
       await api.shopeeItemPreco(l.item_id, novo)
-      setD((cur) => ({ ...cur, itens: cur.itens.map((x) => x.item_id !== l.item_id ? x : ({ ...x, preco: novo, ajustado: true, preco_min: null, preco_alvo: null })) }))
-      notify?.(`Preço de "${l.nome}" atualizado na Shopee: ${brl(novo)}. Recalcule para atualizar a margem.`, 'ok')
+      setD((cur) => ({ ...cur, itens: cur.itens.map((x) => x.item_id !== l.item_id ? x : ({ ...x, preco: novo, ajustado: true })) }))
+      notify?.(`Preço de "${l.nome}" atualizado na Shopee: ${brl(novo)}. Recalcule para atualizar o líquido.`, 'ok')
     } catch (e) { notify?.('Não consegui atualizar o preço na Shopee: ' + (e.message || ''), 'danger') }
     setAplicandoManual(null)
   }
 
-  const salvarCusto = async (l, valorRaw) => {
-    const c = Number(String(valorRaw).replace(',', '.'))
-    if (!l.produto_id || Number.isNaN(c) || c < 0) { notify?.('Informe um custo válido.', 'danger'); return }
-    setSalvandoCusto(l.item_id)
+  const aplicarLote = async (subir) => {
+    const ids = (subir || []).map((l) => l.item_id)
+    if (!ids.length) return
+    setAplicandoLote(true)
     try {
-      await api.produtoAtualizar(l.produto_id, { custo: c, sku: l.sku })
+      const r = await api.shopeeReprecificar({ item_ids: ids, aplicar: true })
+      const n = r.aplicados || 0, e = (r.erros || []).length
+      notify?.(`${n} preço(s) atualizado(s) na Shopee${e ? ` · ${e} com erro` : ''}. Recalcule para conferir as margens.`, e ? 'danger' : 'ok')
+      setLoteAberto(false)
+      carregar()
+    } catch (err) { notify?.('Não consegui aplicar o lote: ' + (err.message || ''), 'danger') }
+    setAplicandoLote(false)
+  }
+
+  const salvarPrecoBling = async (l, valorRaw) => {
+    const v = Number(String(valorRaw).replace(',', '.'))
+    if (!l.produto_id || Number.isNaN(v) || v < 0) { notify?.('Informe um Preço Bling válido.', 'danger'); return }
+    setSalvandoPreco(l.item_id)
+    try {
+      await api.produtoAtualizar(l.produto_id, { preco: v, sku: l.sku })
       setD((cur) => {
         const itens = cur.itens.map((x) => {
           if (x.item_id !== l.item_id) return x
-          const tem = c > 0 && x.preco > 0
-          const lucro = tem ? Math.round((x.preco - (x.taxa_shopee || 0) - (x.imposto || 0) - (x.embalagem || 0) - c) * 100) / 100 : null
-          const margem = (tem && x.preco > 0) ? Math.round(lucro / x.preco * 1000) / 10 : null
-          const prej = !!(tem && lucro < 0)
-          const baixa = !!(tem && !prej && alvo > 0 && margem != null && margem < alvo)
-          return { ...x, custo: c > 0 ? c : null, sem_custo: !tem, lucro_real: lucro, margem_real: margem, prejuizo: prej, margem_baixa: baixa, saudavel: !!(tem && !prej && !baixa), preco_min: null, preco_alvo: null, custo_editado: true }
+          const base = v
+          const semBase = !(base > 0 && x.preco > 0)
+          const liq = x.liquido
+          const prej = !!(!semBase && liq != null && liq < 0)
+          const abx = !!(!semBase && liq != null && !prej && liq < base)
+          const cob = !!(!semBase && liq != null && liq >= base)
+          return {
+            ...x, preco_bling: base > 0 ? base : null,
+            diferenca: (!semBase && liq != null) ? Math.round((liq - base) * 100) / 100 : null,
+            preco_ideal: null, sem_base: semBase, prejuizo: prej, abaixo: abx, cobre: cob,
+            precobling_editado: true,
+          }
         })
-        return { ...cur, itens,
-          prejuizo: itens.filter((x) => x.prejuizo).length,
-          margem_baixa: itens.filter((x) => x.margem_baixa).length,
-          saudavel: itens.filter((x) => x.saudavel).length,
-          sem_custo: itens.filter((x) => x.sem_custo).length }
+        return { ...cur, itens, ...recontar(itens) }
       })
-      notify?.(`Custo de "${l.nome}" salvo no Bling: ${brl(c)}`, 'ok')
-    } catch (e) { notify?.('Não consegui salvar o custo no Bling: ' + (e.message || ''), 'danger') }
-    setSalvandoCusto(null)
+      notify?.(`Preço Bling de "${l.nome}" salvo: ${brl(v)}. Recalcule para o preço ideal.`, 'ok')
+    } catch (e) { notify?.('Não consegui salvar o Preço Bling: ' + (e.message || ''), 'danger') }
+    setSalvandoPreco(null)
   }
 
   const cont = contarStatus(d.itens || [])
   const filtros = [
     ['prejuizo', 'Prejuízo', cont.prejuizo],
-    ['abaixo', `Abaixo de ${alvo || '—'}%`, cont.abaixo],
+    ['abaixo', 'Abaixo do líquido', cont.abaixo],
     ['em_competicao', 'Em competição', cont.em_competicao],
     ['no_padrao', 'No padrão', cont.no_padrao],
-    ['sem_custo', 'Sem custo', cont.sem_custo],
+    ['sem_base', 'Sem Preço Bling', cont.sem_base],
     ['todos', 'Todos', cont.total],
   ]
   const q = busca.trim().toLowerCase()
@@ -3602,10 +3617,21 @@ function Divergencia({ conectado, notify }) {
     return filtro === 'todos' ? true : statusProduto(l) === filtro
   })
   const selecionado = aberto ? (d.itens || []).find((x) => x.item_id === aberto) : null
+  const planoLote = (() => {
+    const subir = [], pulados = { competicao: 0, sem_base: 0, no_liquido: 0 }
+    for (const l of itens) {
+      if (l.sem_base || l.preco_ideal == null) { pulados.sem_base++; continue }
+      if (l.em_competicao) { pulados.competicao++; continue }
+      const novo = Math.round(l.preco_ideal * 100) / 100
+      if (novo <= l.preco + 0.01) { pulados.no_liquido++; continue }
+      subir.push({ item_id: l.item_id, nome: l.nome, sku: l.sku, preco: l.preco, novo, delta: Math.round((novo - l.preco) * 100) / 100 })
+    }
+    return { subir, pulados }
+  })()
 
   return (
     <div className="space-y-3">
-      <PainelIndicadores itens={d.itens || []} alvo={alvo} />
+      <PainelIndicadores itens={d.itens || []} />
       <AgenteBar />
 
       {/* busca + filtros: travados no topo enquanto a lista rola */}
@@ -3615,48 +3641,86 @@ function Divergencia({ conectado, notify }) {
           <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="buscar por SKU ou nome do produto…" className="bg-transparent text-xs flex-1 outline-none" />
           {busca && <button onClick={() => setBusca('')} className="text-faint hover:text-fg" title="Limpar"><X size={12} /></button>}
         </div>
-        <div className="flex gap-1.5 flex-wrap items-center" style={{ opacity: q ? 0.5 : 1 }}>
-          {filtros.map(([id, t, n]) => (
-            <button key={id} onClick={() => setFiltro(id)} className="text-xs px-3 py-1.5 rounded-lg font-medium flex items-center gap-1.5"
-                    style={filtro === id ? { background: LARANJA, color: '#fff' } : { background: 'var(--glass)', color: 'var(--text-dim)', border: '1px solid var(--glass-border)' }}>
-              {t} <span className="num" style={{ opacity: .75 }}>{n ?? 0}</span>
-            </button>
-          ))}
-          <button onClick={carregar} className="text-xs px-3 py-1.5 rounded-lg text-dim hover:text-fg flex items-center gap-1 ml-auto"><RefreshCw size={12} /> recalcular</button>
+        <div className="flex gap-1.5 flex-wrap items-center">
+          <div className="flex gap-1.5 flex-wrap items-center flex-1" style={{ opacity: q ? 0.5 : 1 }}>
+            {filtros.map(([id, t, n]) => (
+              <button key={id} onClick={() => setFiltro(id)} className="text-xs px-3 py-1.5 rounded-lg font-medium flex items-center gap-1.5"
+                      style={filtro === id ? { background: LARANJA, color: '#fff' } : { background: 'var(--glass)', color: 'var(--text-dim)', border: '1px solid var(--glass-border)' }}>
+                {t} <span className="num" style={{ opacity: .75 }}>{n ?? 0}</span>
+              </button>
+            ))}
+          </div>
+          <button onClick={() => setLoteAberto(true)} disabled={planoLote.subir.length === 0} title={planoLote.subir.length === 0 ? 'Nenhum anúncio para subir neste filtro' : 'Subir para netar o Preço Bling em lote'} className="text-xs px-3 py-1.5 rounded-lg font-medium text-white flex items-center gap-1.5 disabled:opacity-40" style={{ background: LARANJA }}>
+            <Layers size={12} /> Ajustar em lote{planoLote.subir.length ? ` (${planoLote.subir.length})` : ''}
+          </button>
+          <button onClick={carregar} className="text-xs px-3 py-1.5 rounded-lg text-dim hover:text-fg flex items-center gap-1"><RefreshCw size={12} /> recalcular</button>
         </div>
       </div>
-
-      {alvo === 0 && (
-        <div className="text-[11px] text-faint flex items-center gap-1.5 px-1">
-          <Info size={12} /> Defina uma <b className="mx-1">margem alvo</b> na Precificação para destacar os produtos abaixo do alvo e sugerir o preço ideal.
-        </div>
-      )}
 
       <div className={selecionado ? 'grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(400px,480px)] gap-4 items-start' : ''}>
         <div className="min-w-0">
           {itens.length === 0
-            ? <Vazio txt={q ? `Nenhum produto encontrado para "${busca}".` : (filtro === 'prejuizo' ? 'Nenhum produto no prejuízo.' : 'Nenhum produto neste filtro.')} />
+            ? <Vazio txt={q ? `Nenhum produto encontrado para "${busca}".` : (filtro === 'abaixo' ? 'Nenhum anúncio abaixo do Preço Bling neste filtro.' : filtro === 'prejuizo' ? 'Nenhum produto no prejuízo.' : 'Nenhum produto neste filtro.')} />
             : <div className="space-y-2">
-                {itens.map((l) => <ProdutoCard key={l.item_id} l={l} alvo={alvo} sel={aberto === l.item_id} onAbrir={() => setAberto(l.item_id)} />)}
+                {itens.map((l) => <ProdutoCard key={l.item_id} l={l} sel={aberto === l.item_id} onAbrir={() => setAberto(l.item_id)} />)}
               </div>}
         </div>
         {selecionado && (
           <div className="min-w-0 xl:sticky xl:top-2">
-            <ProdutoDetalhe l={selecionado} alvo={alvo} onClose={() => setAberto(null)}
+            <ProdutoDetalhe l={selecionado} onClose={() => setAberto(null)}
               ajustar={ajustar} ajustando={ajustando === selecionado.item_id}
-              salvarCusto={salvarCusto} salvandoCusto={salvandoCusto === selecionado.item_id}
+              salvarPrecoBling={salvarPrecoBling} salvandoPreco={salvandoPreco === selecionado.item_id}
               aplicarManual={aplicarManual} aplicandoManual={aplicandoManual === selecionado.item_id} />
           </div>
         )}
       </div>
+
+      {loteAberto && (
+        <div className="fixed inset-0 z-50" style={{ background: 'rgba(0,0,0,.6)' }} onClick={() => !aplicandoLote && setLoteAberto(false)}>
+          <div className="rounded-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}
+            style={{ position: 'fixed', left: '50%', top: '50%', transform: 'translate(-50%,-50%)', width: 'min(560px, 92vw)', background: 'var(--bg)', border: '1px solid var(--glass-border)', boxShadow: '0 20px 60px rgba(0,0,0,.5)' }}>
+            <div className="flex items-center gap-2 px-4 py-3" style={{ borderBottom: '1px solid var(--glass-border)' }}>
+              <Layers size={16} style={{ color: LARANJA }} />
+              <div className="text-sm font-bold">Ajustar em lote · netar o Preço Bling</div>
+              <button onClick={() => !aplicandoLote && setLoteAberto(false)} className="ml-auto text-faint hover:text-fg"><X size={17} /></button>
+            </div>
+            <div className="px-4 py-3">
+              <div className="text-[13px] mb-2"><b className="num" style={{ color: '#2DD4BF' }}>{planoLote.subir.length}</b> anúncio(s) vão subir de preço pra você receber líquido o Preço Bling.</div>
+              {planoLote.subir.length > 0 ? (
+                <div className="rounded-lg" style={{ background: 'var(--glass-hover)', maxHeight: '42vh', overflowY: 'auto' }}>
+                  {planoLote.subir.map((l, i) => (
+                    <div key={l.item_id} className="flex items-center gap-2 px-3 py-2 text-[12px]" style={i < planoLote.subir.length - 1 ? { borderBottom: '1px solid var(--glass-border)' } : undefined}>
+                      <div className="min-w-0 flex-1"><div className="truncate">{l.nome}</div><div className="text-[10px] text-faint num">SKU {l.sku}</div></div>
+                      <div className="num text-right shrink-0"><span className="text-faint">{brl(l.preco)}</span> <span className="text-faint">→</span> <b style={{ color: '#2DD4BF' }}>{brl(l.novo)}</b><div className="text-[10px]" style={{ color: '#2DD4BF' }}>+{brl(l.delta)}</div></div>
+                    </div>
+                  ))}
+                </div>
+              ) : <div className="text-faint text-[12px] rounded-lg px-3 py-3" style={{ background: 'var(--glass-hover)' }}>Nada para subir neste filtro. Filtre por "Abaixo do líquido" ou "Prejuízo" para ver candidatos.</div>}
+              {(planoLote.pulados.competicao + planoLote.pulados.sem_base + planoLote.pulados.no_liquido) > 0 && (
+                <div className="text-[11px] text-faint mt-2 flex flex-wrap gap-x-3 gap-y-1">
+                  {planoLote.pulados.competicao > 0 && <span className="inline-flex items-center gap-1"><Target size={11} style={{ color: AZUL_RADAR }} /> {planoLote.pulados.competicao} em competição (Radar)</span>}
+                  {planoLote.pulados.sem_base > 0 && <span className="inline-flex items-center gap-1"><HelpCircle size={11} /> {planoLote.pulados.sem_base} sem Preço Bling</span>}
+                  {planoLote.pulados.no_liquido > 0 && <span className="inline-flex items-center gap-1"><CheckCircle2 size={11} style={{ color: '#2DD4BF' }} /> {planoLote.pulados.no_liquido} já netando</span>}
+                </div>
+              )}
+              <div className="text-[11px] mt-2.5 flex items-start gap-1.5" style={{ color: 'var(--text-dim)' }}><Info size={13} className="shrink-0 mt-0.5" style={{ color: '#F5A623' }} /> <span>Sobe o preço pra você receber o Preço Bling líquido e deixa os "em competição" com o Radar. Isso altera os preços <b>ao vivo</b> na Shopee.</span></div>
+            </div>
+            <div className="flex items-center gap-2 px-4 py-3" style={{ borderTop: '1px solid var(--glass-border)' }}>
+              <button onClick={() => !aplicandoLote && setLoteAberto(false)} className="text-xs px-3 py-2 rounded-lg" style={{ background: 'var(--glass-hover)', color: 'var(--text-dim)' }}>Cancelar</button>
+              <button onClick={() => aplicarLote(planoLote.subir)} disabled={aplicandoLote || planoLote.subir.length === 0} className="text-xs px-4 py-2 rounded-lg font-semibold text-white flex items-center gap-1.5 ml-auto disabled:opacity-50" style={{ background: LARANJA }}>
+                {aplicandoLote ? <Loader2 size={14} className="animate-spin" /> : <TrendingUp size={14} />} Aplicar na Shopee ({planoLote.subir.length})
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
-function ProdutoCard({ l, alvo, sel, onAbrir }) {
+function ProdutoCard({ l, sel, onAbrir }) {
   const st = statusProduto(l)
   const cor = STATUS_PREC[st].cor
-  const corM = l.sem_custo ? 'var(--text-faint)' : corMargemReal(l.margem_real, alvo)
   return (
     <button onClick={onAbrir} className="w-full text-left glass rounded-xl overflow-hidden flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-[var(--glass-hover)]"
       style={{ borderLeft: `3px solid ${cor}`, ...(sel ? { background: 'color-mix(in srgb, var(--accent) 9%, var(--glass-bg))', borderColor: 'var(--accent)' } : {}) }}>
@@ -3670,10 +3734,10 @@ function ProdutoCard({ l, alvo, sel, onAbrir }) {
           <span className="num">SKU {l.sku} · {brl(l.preco)}{l.saldo != null ? ` · ${l.saldo} un` : ''}</span>
         </div>
       </div>
-      {!l.sem_custo && (
+      {!l.sem_base && l.liquido != null && (
         <div className="text-right shrink-0 leading-tight">
-          <div className="num text-sm font-bold" style={{ color: corM }}>{l.margem_real}%</div>
-          <div className="num text-[10px]" style={{ color: corM }}>{brl(l.lucro_real)}</div>
+          <div className="num text-sm font-bold" style={{ color: cor }}>{brl(l.liquido)}</div>
+          {l.diferenca != null && <div className="num text-[10px]" style={{ color: cor }}>{l.diferenca >= 0 ? '+' : ''}{brl(l.diferenca)}</div>}
         </div>
       )}
       <ChevronRight size={15} className="text-faint shrink-0" />
@@ -3681,37 +3745,36 @@ function ProdutoCard({ l, alvo, sel, onAbrir }) {
   )
 }
 
-function BarraPosicao({ piso, atual, alvo, cor }) {
-  const lo = piso, hi = (alvo * 1.06) || (piso + 1)
-  const span = (hi - lo) || 1
-  const pct = (v) => Math.max(0, Math.min(100, (v - lo) / span * 100))
+function BarraPosicao({ base, liquido, cor }) {
+  const hi = (base * 1.25) || 1
+  const pct = (v) => Math.max(0, Math.min(100, v / hi * 100))
   return (
     <div>
-      <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2 flex items-center gap-1.5"><GitCompareArrows size={12} /> Posição do preço</div>
-      <div className="relative h-2 rounded-full mt-1" style={{ background: 'linear-gradient(90deg,#FF6F6F,#F5A623 38%,#2DD4BF)' }}>
-        <div className="absolute" style={{ left: `${pct(alvo)}%`, top: -4, bottom: -4, borderLeft: '2px dashed #2DD4BF' }} />
-        <div className="absolute rounded-full" style={{ left: `calc(${pct(atual)}% - 7px)`, top: -3, height: 14, width: 14, background: cor, border: '3px solid var(--bg)' }} />
+      <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2 flex items-center gap-1.5"><GitCompareArrows size={12} /> Líquido vs Preço Bling</div>
+      <div className="relative h-2 rounded-full mt-1" style={{ background: 'linear-gradient(90deg,#FF6F6F,#F5A623 45%,#2DD4BF)' }}>
+        <div className="absolute" style={{ left: `${pct(base)}%`, top: -4, bottom: -4, borderLeft: '2px dashed #c98bd8' }} />
+        <div className="absolute rounded-full" style={{ left: `calc(${pct(liquido)}% - 7px)`, top: -3, height: 14, width: 14, background: cor, border: '3px solid var(--bg)' }} />
       </div>
       <div className="flex justify-between text-[10px] mt-2">
-        <div className="flex flex-col"><span className="text-faint">Piso</span><span className="num font-bold">{brl(piso)}</span></div>
-        <div className="flex flex-col items-center" style={{ color: cor }}><span className="text-faint">Atual</span><span className="num font-bold">{brl(atual)}</span></div>
-        <div className="flex flex-col items-end" style={{ color: '#2DD4BF' }}><span className="text-faint">Alvo</span><span className="num font-bold">{brl(alvo)}</span></div>
+        <div className="flex flex-col"><span className="text-faint">R$ 0</span></div>
+        <div className="flex flex-col items-center" style={{ color: cor }}><span className="text-faint">Líquido hoje</span><span className="num font-bold">{brl(liquido)}</span></div>
+        <div className="flex flex-col items-end" style={{ color: '#c98bd8' }}><span className="text-faint">Preço Bling</span><span className="num font-bold">{brl(base)}</span></div>
       </div>
     </div>
   )
 }
 
-function ProdutoDetalhe({ l, alvo, onClose, ajustar, ajustando, salvarCusto, salvandoCusto, aplicarManual, aplicandoManual }) {
+function ProdutoDetalhe({ l, onClose, ajustar, ajustando, salvarPrecoBling, salvandoPreco, aplicarManual, aplicandoManual }) {
   const [cop, setCop] = useState(false)
-  const [custoEdit, setCustoEdit] = useState('')
+  const [precoBlingEdit, setPrecoBlingEdit] = useState('')
   const [precoManual, setPrecoManual] = useState('')
   const st = statusProduto(l)
-  const cor = l.sem_custo ? 'var(--text-faint)' : corMargemReal(l.margem_real, alvo)
-  const sugerido = l.preco_alvo || l.preco_min
+  const cor = STATUS_PREC[st].cor
+  const corDif = l.diferenca == null ? cor : (l.diferenca >= 0 ? '#2DD4BF' : '#FF6F6F')
   const diff = (l.concorrente != null) ? (l.preco - l.concorrente) : null
   const copiarSku = () => { copiarTexto(l.sku); setCop(true); setTimeout(() => setCop(false), 1200) }
   return (
-    <div className="glass rounded-2xl overflow-hidden flex flex-col drawer-in" style={{ borderTop: `3px solid ${STATUS_PREC[st].cor}`, maxHeight: 'calc(100vh - 96px)' }}>
+    <div className="glass rounded-2xl overflow-hidden flex flex-col drawer-in" style={{ borderTop: `3px solid ${cor}`, maxHeight: 'calc(100vh - 96px)' }}>
       <div className="flex items-start gap-3 p-4 border-b border-glassb shrink-0">
         <div className="h-14 w-14 rounded-xl overflow-hidden shrink-0 grid place-items-center" style={{ background: 'var(--glass-hover)' }}>
           {l.imagem ? <img src={l.imagem} alt="" className="h-full w-full object-cover" /> : <ImageIcon size={18} className="text-faint" />}
@@ -3731,25 +3794,27 @@ function ProdutoDetalhe({ l, alvo, onClose, ajustar, ajustando, salvarCusto, sal
       <div className="p-4 overflow-y-auto space-y-3 text-[12px]">
         <div className="grid grid-cols-4 gap-2">
           <div className="rounded-lg px-2 py-2 text-center" style={{ background: 'var(--glass-hover)' }}><div className="text-[8.5px] uppercase tracking-wide text-faint">Preço Shopee</div><div className="num text-[13px] font-bold mt-0.5">{brl(l.preco)}</div></div>
-          <div className="rounded-lg px-2 py-2 text-center" style={{ background: 'var(--glass-hover)' }}><div className="text-[8.5px] uppercase tracking-wide text-faint">Preço Bling</div><div className="num text-[13px] mt-0.5">{l.preco_bling != null ? brl(l.preco_bling) : '—'}</div></div>
-          <div className="rounded-lg px-2 py-2 text-center" style={{ background: 'var(--glass-hover)' }}><div className="text-[8.5px] uppercase tracking-wide text-faint">Custo Bling</div><div className="num text-[13px] mt-0.5">{l.custo != null ? brl(l.custo) : '—'}</div></div>
+          <div className="rounded-lg px-2 py-2 text-center" style={{ background: 'color-mix(in srgb, var(--accent2) 20%, transparent)' }}><div className="text-[8.5px] uppercase tracking-wide text-faint">Preço Bling</div><div className="num text-[13px] font-bold mt-0.5" style={{ color: '#c98bd8' }}>{l.preco_bling != null ? brl(l.preco_bling) : '—'}</div></div>
+          <div className="rounded-lg px-2 py-2 text-center" style={{ background: 'var(--glass-hover)' }}><div className="text-[8.5px] uppercase tracking-wide text-faint">Líquido hoje</div><div className="num text-[13px] font-bold mt-0.5" style={{ color: l.sem_base ? 'var(--text-faint)' : cor }}>{l.liquido != null ? brl(l.liquido) : '—'}</div></div>
           <div className="rounded-lg px-2 py-2 text-center" style={{ background: 'var(--glass-hover)' }}><div className="text-[8.5px] uppercase tracking-wide text-faint">Estoque</div><div className="num text-[13px] mt-0.5">{l.saldo != null ? l.saldo : '—'}</div></div>
         </div>
 
-        {l.sem_custo
-          ? <div className="text-faint rounded-lg px-3 py-2.5" style={{ background: 'var(--glass-hover)' }}>Sem custo cadastrado no Bling. Informe o custo abaixo — a margem é calculada na hora.</div>
+        {l.sem_base
+          ? <div className="text-faint rounded-lg px-3 py-2.5" style={{ background: 'var(--glass-hover)' }}>Sem Preço Bling cadastrado. Informe abaixo o valor que você quer receber líquido — o cálculo sai na hora.</div>
           : <div className="space-y-1">
               <Quebra label="Preço na Shopee" v={brl(l.preco)} forte />
               <Quebra label="− Comissão / taxa Shopee" v={'− ' + brl(l.taxa_shopee)} neg />
               {l.imposto > 0 && <Quebra label="− Imposto" v={'− ' + brl(l.imposto)} neg />}
               {l.embalagem > 0 && <Quebra label="− Embalagem" v={'− ' + brl(l.embalagem)} neg />}
-              <Quebra label="− Custo (Bling)" v={'− ' + brl(l.custo)} neg />
               <div className="h-px my-1" style={{ background: 'var(--glass-border)' }} />
-              <Quebra label="= Lucro real" v={l.margem_real != null ? `${brl(l.lucro_real)} · ${l.margem_real}%` : '— recalcule'} forte cor={cor} />
+              <Quebra label="= Líquido que você recebe" v={l.liquido != null ? brl(l.liquido) : '—'} forte cor={cor} />
+              <Quebra label="Alvo · Preço Bling" v={brl(l.preco_bling)} />
+              <div className="h-px my-1" style={{ background: `color-mix(in srgb, ${corDif} 30%, transparent)` }} />
+              <Quebra label="Diferença" v={l.diferenca != null ? `${l.diferenca >= 0 ? '+ ' : '− '}${brl(Math.abs(l.diferenca))}` : '— recalcule'} forte cor={corDif} />
             </div>}
 
-        {!l.sem_custo && l.preco_min != null && l.preco_alvo != null && (
-          <BarraPosicao piso={l.preco_min} atual={l.preco} alvo={l.preco_alvo} cor={cor} />
+        {!l.sem_base && l.preco_bling != null && l.liquido != null && (
+          <BarraPosicao base={l.preco_bling} liquido={l.liquido} cor={cor} />
         )}
 
         {l.monitorado && l.concorrente != null && (
@@ -3760,21 +3825,18 @@ function ProdutoDetalhe({ l, alvo, onClose, ajustar, ajustando, salvarCusto, sal
               <div className="rounded-lg px-2 py-1.5" style={{ background: 'rgba(0,0,0,.18)' }}><div className="text-[8.5px] uppercase text-faint">Sua posição</div><div className="num text-[13px] font-bold">{diff >= 0 ? '+ ' : '− '}{brl(Math.abs(diff))}</div></div>
               <div className="rounded-lg px-2 py-1.5" style={{ background: 'rgba(0,0,0,.18)' }}><div className="text-[8.5px] uppercase text-faint">Agente</div><div className="text-[12px] font-bold" style={{ color: l.em_competicao ? AZUL_RADAR : '#2DD4BF' }}>{l.em_competicao ? 'em espera' : 'monitorando'}</div></div>
             </div>
-            {l.em_competicao && l.preco_alvo != null && (
-              <div className="text-[11px] leading-relaxed text-dim mt-2.5 flex gap-2"><Info size={13} className="shrink-0 mt-0.5" style={{ color: AZUL_RADAR }} /><span>Subir pra margem alvo ({brl(l.preco_alvo)}) deixaria você acima do concorrente. No automático o agente fica em espera neste SKU pra manter a competitividade e evitar looping.</span></div>
-            )}
-            {l.preco_min != null && (
-              <div className="text-[11px] text-faint flex items-center gap-1.5 mt-2.5 pt-2.5" style={{ borderTop: `1px solid color-mix(in srgb, ${AZUL_RADAR} 18%, transparent)` }}><Box size={12} style={{ color: '#2DD4BF' }} /> Piso de margem: <b className="num" style={{ color: '#2DD4BF' }}>{brl(l.preco_min)}</b> — nunca abaixo, nem pra competir.</div>
+            {l.em_competicao && l.preco_ideal != null && (
+              <div className="text-[11px] leading-relaxed text-dim mt-2.5 flex gap-2"><Info size={13} className="shrink-0 mt-0.5" style={{ color: AZUL_RADAR }} /><span>Subir o preço pra netar o Preço Bling ({brl(l.preco_ideal)}) deixaria você acima do concorrente. No automático o agente fica em espera neste SKU pra manter a competitividade e evitar looping.</span></div>
             )}
           </div>
         )}
 
-        {!l.sem_custo && (
+        {!l.sem_base && (
           <div>
             <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2 flex items-center gap-1.5"><BadgePercent size={12} /> Corrigir preço na Shopee</div>
-            {sugerido && (
-              <div className="flex items-center justify-between gap-2 rounded-lg px-3 py-2.5 mb-2" style={{ background: `color-mix(in srgb, ${cor} 9%, transparent)`, border: `1px solid color-mix(in srgb, ${cor} 22%, transparent)` }}>
-                <div><div className="text-[10px] text-faint">Sugerido p/ margem alvo {alvo}%</div><div className="num text-base font-bold" style={{ color: '#2DD4BF' }}>{brl(sugerido)}</div></div>
+            {l.preco_ideal != null && (
+              <div className="flex items-center justify-between gap-2 rounded-lg px-3 py-2.5 mb-2" style={{ background: 'color-mix(in srgb, #2DD4BF 9%, transparent)', border: '1px solid color-mix(in srgb, #2DD4BF 22%, transparent)' }}>
+                <div><div className="text-[10px] text-faint">Preço pra netar o Preço Bling ({brl(l.preco_bling)})</div><div className="num text-base font-bold" style={{ color: '#2DD4BF' }}>{brl(l.preco_ideal)}</div></div>
                 <button onClick={() => ajustar(l)} disabled={ajustando} className="text-xs px-3 py-1.5 rounded-lg font-medium text-white flex items-center gap-1.5 disabled:opacity-60 shrink-0" style={{ background: LARANJA }}>
                   {ajustando ? <Loader2 size={13} className="animate-spin" /> : <TrendingUp size={13} />} Aplicar na Shopee
                 </button>
@@ -3794,98 +3856,24 @@ function ProdutoDetalhe({ l, alvo, onClose, ajustar, ajustando, salvarCusto, sal
         )}
 
         <div className="rounded-lg px-3 py-2.5" style={{ background: 'var(--glass-hover)' }}>
-          <div className="text-[10px] uppercase tracking-wide text-faint mb-1.5">Custo no Bling <span className="normal-case font-normal tracking-normal">(fonte da verdade)</span></div>
+          <div className="text-[10px] uppercase tracking-wide text-faint mb-1.5">Preço Bling <span className="normal-case font-normal tracking-normal">(líquido alvo · fonte da verdade)</span></div>
           <div className="flex items-center gap-2 flex-wrap">
             <div className="flex items-center gap-1 rounded-lg px-2 py-1" style={{ background: 'var(--bg)' }}>
               <span className="text-faint">R$</span>
-              <input type="text" inputMode="decimal" value={custoEdit} onChange={(e) => setCustoEdit(e.target.value)} placeholder={l.custo ? brl(l.custo).replace('R$', '').trim() : '0,00'} className="bg-transparent outline-none num w-16 text-fg" />
+              <input type="text" inputMode="decimal" value={precoBlingEdit} onChange={(e) => setPrecoBlingEdit(e.target.value)} placeholder={l.preco_bling ? brl(l.preco_bling).replace('R$', '').trim() : '0,00'} className="bg-transparent outline-none num w-16 text-fg" />
             </div>
-            <button onClick={() => { salvarCusto?.(l, custoEdit); setCustoEdit('') }} disabled={salvandoCusto || !custoEdit.trim()} className="text-xs px-2.5 py-1 rounded-lg font-medium text-white flex items-center gap-1 disabled:opacity-50" style={{ background: l.sem_custo ? '#2DD4BF' : LARANJA }}>
-              {salvandoCusto ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} {l.sem_custo ? 'Cadastrar' : 'Atualizar'}
+            <button onClick={() => { salvarPrecoBling?.(l, precoBlingEdit); setPrecoBlingEdit('') }} disabled={salvandoPreco || !precoBlingEdit.trim()} className="text-xs px-2.5 py-1 rounded-lg font-medium text-white flex items-center gap-1 disabled:opacity-50" style={{ background: l.sem_base ? '#2DD4BF' : LARANJA }}>
+              {salvandoPreco ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} {l.sem_base ? 'Cadastrar' : 'Atualizar'}
             </button>
-            {l.custo ? <span className="text-faint">atual {brl(l.custo)}</span> : null}
+            {l.preco_bling ? <span className="text-faint">atual {brl(l.preco_bling)}</span> : null}
           </div>
-          {l.custo_editado ? <div className="text-[10px] mt-1" style={{ color: '#2DD4BF' }}>salvo ✓ · recalcule p/ ver o equilíbrio</div> : null}
+          {l.precobling_editado ? <div className="text-[10px] mt-1" style={{ color: '#2DD4BF' }}>salvo ✓ · recalcule p/ ver o líquido</div> : null}
         </div>
       </div>
     </div>
   )
 }
 
-function LinhaMargem({ l, alvo, ajustar, ajustando, salvarCusto, salvandoCusto }) {
-  const [aberto, setAberto] = useState(false)
-  const [cop, setCop] = useState(false)
-  const [custoEdit, setCustoEdit] = useState('')
-  const copiarSku = (e) => { e.stopPropagation(); copiarTexto(l.sku); setCop(true); setTimeout(() => setCop(false), 1200) }
-  const editorCusto = (
-    <div className="flex items-center gap-2 flex-wrap pb-2 mb-1" style={{ borderBottom: '1px solid var(--glass-border)' }}>
-      <span className="text-faint">Custo no Bling:</span>
-      <div className="flex items-center gap-1 rounded-lg px-2 py-1" style={{ background: 'var(--glass-hover)' }}>
-        <span className="text-faint">R$</span>
-        <input type="text" inputMode="decimal" value={custoEdit} onChange={(e) => setCustoEdit(e.target.value)} placeholder={l.custo ? brl(l.custo).replace('R$', '').trim() : '0,00'} className="bg-transparent outline-none num w-16 text-fg" />
-      </div>
-      <button onClick={() => { salvarCusto?.(l, custoEdit); setCustoEdit('') }} disabled={salvandoCusto || !custoEdit.trim()}
-              className="text-xs px-2.5 py-1 rounded-lg font-medium text-white flex items-center gap-1 disabled:opacity-50" style={{ background: l.sem_custo ? '#2DD4BF' : LARANJA }}>
-        {salvandoCusto ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} {l.sem_custo ? 'Cadastrar no Bling' : 'Atualizar no Bling'}
-      </button>
-      {l.custo ? <span className="text-faint">atual {brl(l.custo)}</span> : null}
-      {l.custo_editado ? <span className="text-[10px]" style={{ color: '#2DD4BF' }}>salvo ✓ · recalcule p/ equilíbrio</span> : null}
-    </div>
-  )
-  const cor = l.sem_custo ? 'var(--text-faint)' : corMargemReal(l.margem_real, alvo)
-  const sugerido = l.preco_alvo || l.preco_min
-  const problema = l.prejuizo || l.margem_baixa
-  return (
-    <div className="glass rounded-xl overflow-hidden" style={{ borderLeft: `3px solid ${cor}` }}>
-      <button onClick={() => setAberto((v) => !v)} className="w-full flex items-center gap-3 px-4 py-2.5 text-left">
-        <div className="min-w-0 flex-1">
-          <div className="text-sm leading-snug" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{l.nome || `#${l.item_id}`}</div>
-          <div className="text-[11px] text-faint num flex items-center gap-1.5 flex-wrap">
-            <span>SKU {l.sku}</span>
-            <span role="button" tabIndex={0} onClick={copiarSku} className="cursor-pointer hover:text-fg inline-flex items-center" title="Copiar SKU">{cop ? <Check size={11} style={{ color: '#2DD4BF' }} /> : <Copy size={11} />}</span>
-            <span>· {brl(l.preco)} na Shopee{l.ajustado ? ' · ajustado ✓' : ''}</span>
-          </div>
-        </div>
-        {l.sem_custo
-          ? <span className="text-[10px] px-2 py-1 rounded shrink-0" style={{ background: 'var(--glass-hover)', color: 'var(--text-faint)' }}>sem custo no Bling</span>
-          : <div className="text-right shrink-0 leading-tight">
-              <div className="num text-sm font-bold" style={{ color: cor }}>{l.margem_real}%</div>
-              <div className="num text-[11px]" style={{ color: cor }}>{brl(l.lucro_real)}</div>
-            </div>}
-        {problema && !aberto && <span className="text-[10px] px-1.5 py-0.5 rounded shrink-0 hidden sm:block" style={{ background: `color-mix(in srgb, ${cor} 16%, transparent)`, color: cor }}>{l.prejuizo ? 'prejuízo' : 'baixa'}</span>}
-        <ChevronDown size={15} className="text-faint shrink-0" style={{ transform: aberto ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }} />
-      </button>
-      {aberto && (
-        <div className="px-4 pb-3 pt-2 text-[11px] space-y-1" style={{ borderTop: '1px solid var(--glass-border)' }}>
-          {editorCusto}
-          {l.sem_custo
-            ? <div className="text-faint">Sem custo cadastrado no Bling para este SKU. Digite o custo acima e grave no Bling — a margem é calculada na hora.</div>
-            : <>
-                <Quebra label="Preço na Shopee" v={brl(l.preco)} forte />
-                <Quebra label="− Comissão / taxa Shopee" v={'− ' + brl(l.taxa_shopee)} neg />
-                {l.imposto > 0 && <Quebra label="− Imposto" v={'− ' + brl(l.imposto)} neg />}
-                {l.embalagem > 0 && <Quebra label="− Embalagem" v={'− ' + brl(l.embalagem)} neg />}
-                <Quebra label="− Custo (Bling)" v={'− ' + brl(l.custo)} neg />
-                <div className="h-px my-1" style={{ background: 'var(--glass-border)' }} />
-                <Quebra label="= Lucro real" v={`${brl(l.lucro_real)} · ${l.margem_real}%`} forte cor={cor} />
-                {problema && sugerido && (
-                  <div className="mt-2 flex items-center justify-between gap-2 rounded-lg px-3 py-2 flex-wrap" style={{ background: `color-mix(in srgb, ${cor} 10%, transparent)` }}>
-                    <div className="text-faint">
-                      Equilíbrio: <b className="num" style={{ color: 'var(--text-dim)' }}>{brl(l.preco_min)}</b>
-                      {l.preco_alvo ? <> · p/ {alvo}%: <b className="num" style={{ color: '#2DD4BF' }}>{brl(l.preco_alvo)}</b></> : null}
-                    </div>
-                    <button onClick={() => ajustar(l)} disabled={ajustando}
-                            className="text-xs px-3 py-1.5 rounded-lg font-medium text-white flex items-center gap-1.5 disabled:opacity-60 shrink-0" style={{ background: LARANJA }}>
-                      {ajustando ? <Loader2 size={13} className="animate-spin" /> : <TrendingUp size={13} />} Ajustar p/ {brl(sugerido)} na Shopee
-                    </button>
-                  </div>
-                )}
-              </>}
-        </div>
-      )}
-    </div>
-  )
-}
 
 function Quebra({ label, v, neg, forte, cor }) {
   return (
