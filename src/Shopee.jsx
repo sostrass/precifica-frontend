@@ -9,7 +9,7 @@ import {
   Percent, Ticket, RotateCcw, ChevronDown, PlusCircle, Layers, Hourglass, Infinity as InfinityIcon,
   Wallet, Receipt, Coins, Truck, BadgePercent, Target,
   Printer, MapPin, FileText, ClipboardList, User as UserIcon,
-  Repeat, CreditCard, Phone, Hash, Barcode, CheckCheck, Box, Info,
+  Repeat, CreditCard, Phone, Hash, Barcode, CheckCheck, Box, Info, Copy, Save,
 } from 'lucide-react'
 import { api, setToken } from './api'
 import { useToast } from './toast.jsx'
@@ -2744,9 +2744,14 @@ function PainelImpressao({ onClose, onSalvo }) {
   const H = preview === 'folha' ? 660 : 567
   const k = 296 / W
   const cfgPrev = (cfg && porTipo) ? { ...cfg, ...(porTipo[preview] || {}) } : cfg
-  const doc = !cfgPrev ? '' : (preview === 'folha'
-    ? `<style>${CSS_FOLHA}</style>${htmlFolhaPedido(PEDIDO_AMOSTRA, cfgPrev)}`
-    : `<style>${CSS_ETIQ}</style>${htmlEtiqueta(PEDIDO_AMOSTRA, '', cfgPrev)}`)
+  const doc = !cfgPrev ? '' : `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;padding:0;background:#fff}${preview === 'folha' ? CSS_FOLHA : CSS_ETIQ}</style></head><body>${preview === 'folha' ? htmlFolhaPedido(PEDIDO_AMOSTRA, cfgPrev) : htmlEtiqueta(PEDIDO_AMOSTRA, '', cfgPrev)}</body></html>`
+  const [docUrl, setDocUrl] = useState('')
+  useEffect(() => {
+    if (!doc) { setDocUrl(''); return }
+    const url = URL.createObjectURL(new Blob([doc], { type: 'text/html' }))
+    setDocUrl(url)
+    return () => URL.revokeObjectURL(url)
+  }, [doc])
 
   return (
     <div className="fixed inset-0 z-50" style={{ background: 'rgba(0,0,0,.5)' }} onClick={onClose}>
@@ -2807,7 +2812,7 @@ function PainelImpressao({ onClose, onSalvo }) {
               </div>
               <div className="grid place-items-center flex-1">
                 <div style={{ width: W * k, height: H * k, overflow: 'hidden', borderRadius: 8, boxShadow: '0 6px 24px rgba(0,0,0,.16)' }}>
-                  <iframe title="prévia" srcDoc={doc} style={{ width: W, height: H, border: 0, transform: `scale(${k})`, transformOrigin: 'top left', background: '#fff' }} />
+                  <iframe title="prévia" src={docUrl} style={{ width: W, height: H, border: 0, transform: `scale(${k})`, transformOrigin: 'top left', background: '#fff' }} />
                 </div>
               </div>
               <div className="text-[10px] text-faint text-center mt-2 shrink-0">dados de exemplo · o destinatário fica protegido pela Shopee</div>
@@ -3057,6 +3062,7 @@ function PedidosPainel({ conectado }) {
 
   return (
     <div className="glass rounded-2xl p-4">
+      <div className={!aberto ? 'sticky top-0 z-20 pb-2 mb-1' : ''} style={!aberto ? { background: 'var(--bg)', borderBottom: '1px solid var(--glass-border)' } : undefined}>
       <div className="flex items-center justify-between gap-2 flex-wrap mb-3">
         <div className="text-sm font-semibold flex items-center gap-1.5"><Package size={15} style={{ color: LARANJA }} /> Central de pedidos</div>
         <div className="flex items-center gap-1.5 flex-wrap">
@@ -3160,6 +3166,8 @@ function PedidosPainel({ conectado }) {
           </button>
         </div>
       )}
+
+      </div>
 
       <div className={aberto ? 'grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(380px,460px)] gap-4 items-start' : ''}>
        <div className="min-w-0">
@@ -3358,10 +3366,17 @@ function EmBreve({ titulo, desc, icon: Ic }) {
 }
 
 /* --------------------- BLING × SHOPEE (divergência) ---------------------- */
+function copiarTexto(txt) {
+  try { if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(String(txt)); return } } catch (_) {}
+  try { const ta = document.createElement('textarea'); ta.value = String(txt); ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.focus(); ta.select(); document.execCommand('copy'); document.body.removeChild(ta) } catch (_) {}
+}
+
 function Divergencia({ conectado, notify }) {
   const [d, setD] = useState(null)
   const [filtro, setFiltro] = useState('prejuizo')
+  const [busca, setBusca] = useState('')
   const [ajustando, setAjustando] = useState(null)
+  const [salvandoCusto, setSalvandoCusto] = useState(null)
   const carregar = () => { setD(null); api.shopeeDivergencia().then(setD).catch(() => setD({ erro: true })) }
   useEffect(() => { if (conectado) carregar() }, [conectado])
   if (!conectado) return <Vazio txt="Conecte a loja Shopee para ver a margem real dos seus produtos." />
@@ -3394,6 +3409,33 @@ function Divergencia({ conectado, notify }) {
     setAjustando(null)
   }
 
+  const salvarCusto = async (l, valorRaw) => {
+    const c = Number(String(valorRaw).replace(',', '.'))
+    if (!l.produto_id || Number.isNaN(c) || c < 0) { notify?.('Informe um custo válido.', 'danger'); return }
+    setSalvandoCusto(l.item_id)
+    try {
+      await api.produtoAtualizar(l.produto_id, { custo: c, sku: l.sku })
+      setD((cur) => {
+        const itens = cur.itens.map((x) => {
+          if (x.item_id !== l.item_id) return x
+          const tem = c > 0 && x.preco > 0
+          const lucro = tem ? Math.round((x.preco - (x.taxa_shopee || 0) - (x.imposto || 0) - (x.embalagem || 0) - c) * 100) / 100 : null
+          const margem = (tem && x.preco > 0) ? Math.round(lucro / x.preco * 1000) / 10 : null
+          const prej = !!(tem && lucro < 0)
+          const baixa = !!(tem && !prej && alvo > 0 && margem != null && margem < alvo)
+          return { ...x, custo: c > 0 ? c : null, sem_custo: !tem, lucro_real: lucro, margem_real: margem, prejuizo: prej, margem_baixa: baixa, saudavel: !!(tem && !prej && !baixa), preco_min: null, preco_alvo: null, custo_editado: true }
+        })
+        return { ...cur, itens,
+          prejuizo: itens.filter((x) => x.prejuizo).length,
+          margem_baixa: itens.filter((x) => x.margem_baixa).length,
+          saudavel: itens.filter((x) => x.saudavel).length,
+          sem_custo: itens.filter((x) => x.sem_custo).length }
+      })
+      notify?.(`Custo de "${l.nome}" salvo no Bling: ${brl(c)}`, 'ok')
+    } catch (e) { notify?.('Não consegui salvar o custo no Bling: ' + (e.message || ''), 'danger') }
+    setSalvandoCusto(null)
+  }
+
   const filtros = [
     ['prejuizo', 'Prejuízo', d.prejuizo],
     ['margem_baixa', `Abaixo de ${alvo || '—'}%`, d.margem_baixa],
@@ -3401,12 +3443,15 @@ function Divergencia({ conectado, notify }) {
     ['sem_custo', 'Sem custo', d.sem_custo],
     ['todos', 'Todos', d.casados],
   ]
-  const itens = (d.itens || []).filter((l) =>
-    filtro === 'prejuizo' ? l.prejuizo
+  const q = busca.trim().toLowerCase()
+  const itens = (d.itens || []).filter((l) => {
+    if (q) return (l.sku || '').toLowerCase().includes(q) || (l.nome || '').toLowerCase().includes(q)
+    return filtro === 'prejuizo' ? l.prejuizo
       : filtro === 'margem_baixa' ? l.margem_baixa
         : filtro === 'saudavel' ? l.saudavel
           : filtro === 'sem_custo' ? l.sem_custo
-            : true)
+            : true
+  })
 
   return (
     <div className="space-y-3">
@@ -3424,7 +3469,13 @@ function Divergencia({ conectado, notify }) {
         <Metric n={(d.sem_custo || 0) + (d.sem_match || 0)} sub="sem custo / sem match" cor="var(--text-faint)" icon={HelpCircle} />
       </div>
 
-      <div className="flex gap-1.5 flex-wrap items-center">
+      <div className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5" style={{ background: 'var(--glass-hover)' }}>
+        <Search size={13} className="text-faint" />
+        <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="buscar por SKU ou nome do produto…" className="bg-transparent text-xs flex-1 outline-none" />
+        {busca && <button onClick={() => setBusca('')} className="text-faint hover:text-fg" title="Limpar"><X size={12} /></button>}
+      </div>
+
+      <div className="flex gap-1.5 flex-wrap items-center" style={{ opacity: q ? 0.5 : 1 }}>
         {filtros.map(([id, t, n]) => (
           <button key={id} onClick={() => setFiltro(id)} className="text-xs px-3 py-1.5 rounded-lg font-medium flex items-center gap-1.5"
                   style={filtro === id ? { background: LARANJA, color: '#fff' } : { background: 'var(--glass)', color: 'var(--text-dim)', border: '1px solid var(--glass-border)' }}>
@@ -3441,16 +3492,34 @@ function Divergencia({ conectado, notify }) {
       )}
 
       {itens.length === 0
-        ? <Vazio txt={filtro === 'prejuizo' ? 'Nenhum produto no prejuízo.' : 'Nenhum produto neste filtro.'} />
+        ? <Vazio txt={q ? `Nenhum produto encontrado para "${busca}".` : (filtro === 'prejuizo' ? 'Nenhum produto no prejuízo.' : 'Nenhum produto neste filtro.')} />
         : <div className="space-y-2">
-            {itens.map((l) => <LinhaMargem key={l.item_id} l={l} alvo={alvo} ajustar={ajustar} ajustando={ajustando === l.item_id} />)}
+            {itens.map((l) => <LinhaMargem key={l.item_id} l={l} alvo={alvo} ajustar={ajustar} ajustando={ajustando === l.item_id} salvarCusto={salvarCusto} salvandoCusto={salvandoCusto === l.item_id} />)}
           </div>}
     </div>
   )
 }
 
-function LinhaMargem({ l, alvo, ajustar, ajustando }) {
+function LinhaMargem({ l, alvo, ajustar, ajustando, salvarCusto, salvandoCusto }) {
   const [aberto, setAberto] = useState(false)
+  const [cop, setCop] = useState(false)
+  const [custoEdit, setCustoEdit] = useState('')
+  const copiarSku = (e) => { e.stopPropagation(); copiarTexto(l.sku); setCop(true); setTimeout(() => setCop(false), 1200) }
+  const editorCusto = (
+    <div className="flex items-center gap-2 flex-wrap pb-2 mb-1" style={{ borderBottom: '1px solid var(--glass-border)' }}>
+      <span className="text-faint">Custo no Bling:</span>
+      <div className="flex items-center gap-1 rounded-lg px-2 py-1" style={{ background: 'var(--glass-hover)' }}>
+        <span className="text-faint">R$</span>
+        <input type="text" inputMode="decimal" value={custoEdit} onChange={(e) => setCustoEdit(e.target.value)} placeholder={l.custo ? brl(l.custo).replace('R$', '').trim() : '0,00'} className="bg-transparent outline-none num w-16 text-fg" />
+      </div>
+      <button onClick={() => { salvarCusto?.(l, custoEdit); setCustoEdit('') }} disabled={salvandoCusto || !custoEdit.trim()}
+              className="text-xs px-2.5 py-1 rounded-lg font-medium text-white flex items-center gap-1 disabled:opacity-50" style={{ background: l.sem_custo ? '#2DD4BF' : LARANJA }}>
+        {salvandoCusto ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} {l.sem_custo ? 'Cadastrar no Bling' : 'Atualizar no Bling'}
+      </button>
+      {l.custo ? <span className="text-faint">atual {brl(l.custo)}</span> : null}
+      {l.custo_editado ? <span className="text-[10px]" style={{ color: '#2DD4BF' }}>salvo ✓ · recalcule p/ equilíbrio</span> : null}
+    </div>
+  )
   const cor = l.sem_custo ? 'var(--text-faint)' : corMargemReal(l.margem_real, alvo)
   const sugerido = l.preco_alvo || l.preco_min
   const problema = l.prejuizo || l.margem_baixa
@@ -3459,7 +3528,11 @@ function LinhaMargem({ l, alvo, ajustar, ajustando }) {
       <button onClick={() => setAberto((v) => !v)} className="w-full flex items-center gap-3 px-4 py-2.5 text-left">
         <div className="min-w-0 flex-1">
           <div className="text-sm leading-snug" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{l.nome || `#${l.item_id}`}</div>
-          <div className="text-[11px] text-faint num">SKU {l.sku} · {brl(l.preco)} na Shopee{l.ajustado ? ' · ajustado ✓' : ''}</div>
+          <div className="text-[11px] text-faint num flex items-center gap-1.5 flex-wrap">
+            <span>SKU {l.sku}</span>
+            <span role="button" tabIndex={0} onClick={copiarSku} className="cursor-pointer hover:text-fg inline-flex items-center" title="Copiar SKU">{cop ? <Check size={11} style={{ color: '#2DD4BF' }} /> : <Copy size={11} />}</span>
+            <span>· {brl(l.preco)} na Shopee{l.ajustado ? ' · ajustado ✓' : ''}</span>
+          </div>
         </div>
         {l.sem_custo
           ? <span className="text-[10px] px-2 py-1 rounded shrink-0" style={{ background: 'var(--glass-hover)', color: 'var(--text-faint)' }}>sem custo no Bling</span>
@@ -3472,8 +3545,9 @@ function LinhaMargem({ l, alvo, ajustar, ajustando }) {
       </button>
       {aberto && (
         <div className="px-4 pb-3 pt-2 text-[11px] space-y-1" style={{ borderTop: '1px solid var(--glass-border)' }}>
+          {editorCusto}
           {l.sem_custo
-            ? <div className="text-faint">Sem custo cadastrado no Bling para este SKU, então não dá pra calcular a margem. Cadastre o custo no Bling e recalcule.</div>
+            ? <div className="text-faint">Sem custo cadastrado no Bling para este SKU. Digite o custo acima e grave no Bling — a margem é calculada na hora.</div>
             : <>
                 <Quebra label="Preço na Shopee" v={brl(l.preco)} forte />
                 <Quebra label="− Comissão / taxa Shopee" v={'− ' + brl(l.taxa_shopee)} neg />
