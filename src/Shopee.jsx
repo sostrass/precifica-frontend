@@ -92,7 +92,7 @@ export default function Shopee() {
   }, [])
 
   return (
-    <div className="space-y-4 max-w-6xl">
+    <div className="space-y-4 max-w-6xl 2xl:max-w-[1760px]">
       {/* Cabeçalho */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3">
@@ -2468,7 +2468,7 @@ function PedidoDetalhe({ orderSn, alvo, onClose, recorrente, onImpressa, rem }) 
   const end = (ok && d.endereco) || {}
   const log = (ok && d.logistica) || {}
   const cancelado = ok && ehCancelado(d.status)
-  const nome = ok ? (end.nome || d.comprador) : ''
+  const nome = ok ? ([d.comprador, end.nome].find((x) => x && !mascarado(x)) || 'Comprador protegido') : ''
   const paraImpressao = ok ? { ...d, rastreio: log.rastreio } : null
 
   const enriquecerUm = async (p) => {
@@ -2901,6 +2901,16 @@ function PedidosPainel({ conectado }) {
     return selosNf[p.order_sn] || null
   }
   const cnt = (chave) => (contagens && chave ? contagens[chave] : null)
+  // "Em aberto / Concluído" do STATUS DO PEDIDO escopados na aba atual (igual à Shopee)
+  const cntGrupo = (ck) => {
+    if (!ck) return null
+    const chaveAba = { NAO_PAGO: 'nao_pago', A_ENVIAR: 'a_enviar', ENVIADO: 'enviado', CONCLUIDO: 'concluido', RETORNOS: 'retornos', TODOS: 'todos' }[status]
+    const totalAba = cnt(chaveAba)
+    if (status === 'TODOS') return cnt(ck)
+    if (status === 'CONCLUIDO') return ck === 'concluido' ? totalAba : 0
+    if (status === 'RETORNOS') return 0
+    return ck === 'em_aberto' ? totalAba : 0
+  }
   const cntNf = (chave) => (contagensNf && chave ? (contagensNf.contagens || {})[chave] : null)
 
   const freqComprador = useMemo(() => {
@@ -3019,7 +3029,7 @@ function PedidosPainel({ conectado }) {
       <div className="mb-2.5">
         <span className="text-[10px] uppercase tracking-wider text-faint font-bold block mb-1">Status do pedido</span>
         <div className="flex items-center gap-1.5 flex-wrap">
-          {ABAS_GRUPO.map(([id, label, ck]) => <Aba key={id} ativo={grupo === id} onClick={() => mudar('grupo', id)} label={label} count={cnt(ck)} cor="#7b2a8c" />)}
+          {ABAS_GRUPO.map(([id, label, ck]) => <Aba key={id} ativo={grupo === id} onClick={() => mudar('grupo', id)} label={label} count={cntGrupo(ck)} cor="#7b2a8c" />)}
         </div>
       </div>
 
@@ -3084,7 +3094,7 @@ function PedidosPainel({ conectado }) {
         </div>
       )}
 
-      <div className={aberto ? 'grid grid-cols-1 xl:grid-cols-[minmax(0,1.32fr)_minmax(0,1fr)] gap-4 items-start' : ''}>
+      <div className={aberto ? 'grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(380px,460px)] gap-4 items-start' : ''}>
        <div className="min-w-0">
       {d === null ? <div className="py-10 text-center text-faint flex items-center justify-center gap-2"><Loader2 size={16} className="animate-spin" /> carregando pedidos…</div>
         : d?.erro ? <div className="py-6 text-center text-sm" style={{ color: '#FF6F6F' }}>{typeof d.erro === 'string' ? d.erro : 'Falha ao carregar pedidos.'}</div>
