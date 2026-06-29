@@ -410,6 +410,22 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
     return () => { vivo = false }
   }, [produto.sku])
 
+  const [reviews, setReviews] = useState(null)
+  const [carregandoReviews, setCarregandoReviews] = useState(false)
+  const [mostrarReviews, setMostrarReviews] = useState(false)
+  const verReviews = async () => {
+    if (mostrarReviews) { setMostrarReviews(false); return }
+    setMostrarReviews(true)
+    if (reviews !== null || !(shopeeItem && shopeeItem.item_id)) return
+    setCarregandoReviews(true)
+    try {
+      const d = await api.shopeeItemAvaliacoes(shopeeItem.item_id)
+      const lista = (d && d.response && d.response.item_comment_list) || (d && d.item_comment_list) || []
+      setReviews(lista)
+    } catch { setReviews([]) }
+    setCarregandoReviews(false)
+  }
+
   useEffect(() => {
     let vivo = true
     setCarregandoSinc(true)
@@ -611,6 +627,35 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
                     <button onClick={onRadar} className="text-[11px] mt-2 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)', color: 'var(--dim)' }}><Radar size={12} /> Abrir radar completo</button>
                   </div>}
           </div>
+
+          {shopeeItem && shopeeItem.item_id && (
+            <div>
+              <button onClick={verReviews} className="w-full flex items-center justify-between text-[10px] uppercase tracking-wide text-faint font-bold mb-2">
+                <span>Avaliações recentes na Shopee</span>
+                <span className="text-accent normal-case">{mostrarReviews ? 'ocultar' : 'ver'}</span>
+              </button>
+              {mostrarReviews && (
+                carregandoReviews
+                  ? <div className="text-faint text-xs flex items-center gap-2 py-2"><Loader2 size={14} className="animate-spin" /> buscando avaliações…</div>
+                  : !reviews || reviews.length === 0
+                    ? <div className="text-faint text-xs rounded-lg px-3 py-2.5" style={{ background: 'var(--glass-hover)' }}>Sem avaliações recentes para este anúncio.</div>
+                    : <div>
+                        <div className="flex items-center gap-3 mb-2">
+                          <span className="text-sm font-bold num" style={{ color: '#F5A623' }}>{(reviews.reduce((a, c) => a + (c.rating_star || 0), 0) / reviews.length).toFixed(1)} ★</span>
+                          <span className="text-[11px] text-faint">{reviews.length} avaliação(ões) recente(s)</span>
+                        </div>
+                        <div className="space-y-1.5">
+                          {reviews.slice(0, 3).map((c, i) => (
+                            <div key={i} className="rounded-lg px-2.5 py-2 text-xs" style={{ background: 'var(--glass-hover)' }}>
+                              <div className="num text-[11px]"><span style={{ color: '#F5A623' }}>{'★'.repeat(Math.round(c.rating_star || 0))}</span><span className="text-faint">{'★'.repeat(Math.max(0, 5 - Math.round(c.rating_star || 0)))}</span></div>
+                              {c.comment && <div className="text-dim mt-0.5">{c.comment.length > 120 ? c.comment.slice(0, 120) + '…' : c.comment}</div>}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+              )}
+            </div>
+          )}
 
           <div className="flex items-center gap-2 pt-1">
             <button onClick={onEditarCompleto} className="text-xs px-3 py-2 rounded-lg flex items-center gap-1.5" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)', color: 'var(--dim)' }}><Zap size={13} /> Edição completa / Fotos / IA</button>

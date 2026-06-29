@@ -84,6 +84,7 @@ export const api = {
   shopeeBoostCondSalvar: (b) => req('/api/shopee/boost/condicional', { method: 'PUT', body: b }),
   shopeeBoostCondAplicar: () => req('/api/shopee/boost/condicional/aplicar', { method: 'POST' }),
   shopeeAvaliacoes: (status = 'UNANSWERED') => req(`/api/shopee/avaliacoes?status=${status}`),
+  shopeeItemAvaliacoes: (item_id) => req(`/api/shopee/avaliacoes?status=ALL&item_id=${encodeURIComponent(item_id)}`),
   shopeeResponder: (b) => req('/api/shopee/avaliacoes/responder', { method: 'POST', body: b }),
   shopeeReviewConfig: () => req('/api/shopee/avaliacoes/config'),
   shopeeReviewConfigSalvar: (cfg) => req('/api/shopee/avaliacoes/config', { method: 'PUT', body: cfg }),
