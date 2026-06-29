@@ -92,6 +92,12 @@ export default function Nfe() {
   const [blingErro, setBlingErro] = useState(false)
   const [nota, setNota] = useState(null)
   const [showCfg, setShowCfg] = useState(false)
+  const cfgRef = useRef(null)
+  const abrirConfig = () => {
+    const abrir = !showCfg
+    setShowCfg(abrir)
+    if (abrir) setTimeout(() => cfgRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60)
+  }
   const [completa, setCompleta] = useState(null)
   const [consultaId, setConsultaId] = useState('')
   const [eventos, setEventos] = useState(null)
@@ -325,7 +331,7 @@ export default function Nfe() {
                    className="bg-transparent outline-none text-sm w-24 text-fg num" />
             <button onClick={() => verCompleta(consultaId)} className="text-xs text-accent hover:underline shrink-0">ver</button>
           </div>
-          <button onClick={() => setShowCfg((v) => !v)}
+          <button onClick={abrirConfig}
                   className="glass rounded-xl px-3 py-2 text-sm text-dim hover:text-fg flex items-center gap-2">
             <Settings2 size={15} /> Configuração
           </button>
@@ -422,9 +428,21 @@ export default function Nfe() {
       <InteligenciaFiscal notas={pendentes} carregando={carregandoValores} />
 
       {/* Configuração de edição & descontos (recolhível) */}
-      {showCfg && cfg && <ConfigCard cfg={cfg} setCfg={setCfg} />}
-      <RevenueSim notas={pendentes} cfg={cfg} situacao={situacao} />
-      <AutomacaoPanel cfg={cfg} eventos={eventos} />
+      <div ref={cfgRef} className="space-y-4 scroll-mt-4">
+        <button onClick={() => setShowCfg((v) => !v)} className="glass rounded-2xl w-full flex items-center gap-2.5 px-5 py-4 text-left">
+          <div className="h-9 w-9 rounded-xl grid place-items-center shrink-0" style={{ background: 'var(--tint-accent)' }}>
+            <Settings2 size={17} style={{ color: 'var(--accent2)' }} />
+          </div>
+          <div className="min-w-0">
+            <div className="text-sm font-semibold">Configuração de edição &amp; descontos</div>
+            <div className="text-[11px] text-dim">Modo automático, remover frete, desconto padrão, desconto por plataforma e simulação{showCfg ? '' : ' — recolhido'}</div>
+          </div>
+          <ChevronDown size={18} className={`ml-auto text-faint transition shrink-0 ${showCfg ? 'rotate-180' : ''}`} />
+        </button>
+        {showCfg && cfg && <ConfigCard cfg={cfg} setCfg={setCfg} />}
+        {showCfg && <RevenueSim notas={pendentes} cfg={cfg} situacao={situacao} />}
+        {showCfg && <AutomacaoPanel cfg={cfg} eventos={eventos} />}
+      </div>
 
       {/* Aviso fiscal compacto */}
       <div className="rounded-xl px-4 py-2.5 text-[11px] flex items-start gap-2 border border-glassb"
@@ -1102,10 +1120,10 @@ function NotasList({ notas, blingErro, carregando, carregandoValores, aplicadas,
   const selCount = selecao?.size || 0
   const editaveisVis = notas.filter((n) => n.editavel).length
   return (
-    <div className="glass rounded-2xl p-4">
+    <div>
       {/* Barra de seleção em massa */}
       {!blingErro && !carregando && editaveisVis > 0 && (
-        <div className="flex items-center gap-2 pb-3 mb-2 border-b border-glassb flex-wrap">
+        <div className="flex items-center gap-2 pb-3 mb-1 flex-wrap">
           <button onClick={() => (selCount === editaveisVis ? onLimparSel() : onSelTodas(notas))}
                   className="text-[11px] px-2 py-1 rounded-lg flex items-center gap-1.5"
                   style={{ background: 'var(--glass-hover)', color: 'var(--text-dim)' }}>
@@ -1143,7 +1161,7 @@ function NotasList({ notas, blingErro, carregando, carregandoValores, aplicadas,
         </div>
       ) : carregando ? (
         <div className="space-y-2">
-          {[0, 1, 2].map((i) => <div key={i} className="rounded-xl border border-glassb h-[60px] animate-pulse" style={{ background: 'var(--glass-hover)' }} />)}
+          {[0, 1, 2].map((i) => <div key={i} className="rounded-xl border border-glassb h-[44px] animate-pulse" style={{ background: 'var(--glass-hover)' }} />)}
         </div>
       ) : notas.length === 0 ? (
         <div className="text-center py-8">
@@ -1152,13 +1170,29 @@ function NotasList({ notas, blingErro, carregando, carregandoValores, aplicadas,
           <div className="text-xs text-dim mt-1">Ajuste a situação ou a busca acima.</div>
         </div>
       ) : (
-        <div className="space-y-2 max-h-[58vh] overflow-y-auto pr-1">
-          {notas.map((n) => (
-            <NotaCard key={n.id || n.numero} n={n} ativo={n.id === notaId}
-                      aplicadaTotal={aplicadas?.[n.id]} carregandoValor={carregandoValores}
-                      selecionada={selecao?.has(n.id)} onToggleSel={onToggleSel}
-                      onAbrir={onAbrir} onVer={onVerCompleta} />
-          ))}
+        <div className="overflow-x-auto max-h-[60vh] overflow-y-auto">
+          <table className="w-full" style={{ minWidth: 660, borderCollapse: 'collapse' }}>
+            <thead className="sticky top-0 z-10" style={{ background: 'var(--surface)' }}>
+              <tr className="text-[10px] uppercase tracking-wide text-faint font-bold">
+                <th style={{ width: 30 }} />
+                <th className="text-left py-2 px-2">Número</th>
+                <th className="text-left py-2 px-2">Cliente</th>
+                <th className="text-left py-2 px-2">Plataforma</th>
+                <th className="text-left py-2 px-2" style={{ width: 44 }}>UF</th>
+                <th className="text-right py-2 px-2">Valor</th>
+                <th className="text-left py-2 px-2">Situação</th>
+                <th className="text-right py-2 px-2">Ação</th>
+              </tr>
+            </thead>
+            <tbody>
+              {notas.map((n) => (
+                <NotaRow key={n.id || n.numero} n={n} ativo={n.id === notaId}
+                         aplicadaTotal={aplicadas?.[n.id]} carregandoValor={carregandoValores}
+                         selecionada={selecao?.has(n.id)} onToggleSel={onToggleSel}
+                         onAbrir={onAbrir} onVer={onVerCompleta} />
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
       <div className="mt-3 pt-3 border-t border-glassb">
@@ -1170,49 +1204,56 @@ function NotasList({ notas, blingErro, carregando, carregandoValores, aplicadas,
   )
 }
 
-function NotaCard({ n, ativo, aplicadaTotal, carregandoValor, selecionada, onToggleSel, onAbrir, onVer }) {
+function NotaRow({ n, ativo, aplicadaTotal, carregandoValor, selecionada, onToggleSel, onAbrir, onVer }) {
   const cor = corSituacao(n.situacao)
-  const acao = () => (n.editavel ? onAbrir(n.id) : onVer(n.id))
   const aplicada = aplicadaTotal != null
   const semValor = !n.valor && carregandoValor
+  const rej = n.situacao === 4 && n.motivo
+  const bg = ativo || selecionada ? 'var(--tint-accent)' : aplicada ? 'var(--tint-ok)' : 'transparent'
+  const stop = (e) => e.stopPropagation()
   return (
-    <div className={`rounded-xl border px-3 py-2.5 flex items-center gap-2.5 transition ${ativo ? 'border-accent' : aplicada ? '' : selecionada ? '' : 'border-glassb hover:bg-[var(--glass-hover)]'}`}
-         style={selecionada && !ativo ? { borderColor: 'var(--accent)', background: 'var(--tint-accent)' }
-              : aplicada && !ativo ? { borderColor: 'var(--ok)', background: 'var(--tint-ok)' } : undefined}>
-      {n.editavel && onToggleSel && (
-        <button onClick={() => onToggleSel(n.id)} className="shrink-0 text-faint hover:text-accent" title="Selecionar">
-          {selecionada ? <CheckSquare size={16} style={{ color: 'var(--accent)' }} /> : <Square size={16} />}
-        </button>
-      )}
-      <button onClick={acao} className="min-w-0 flex-1 text-left">
-        <div className="text-sm font-medium truncate">{n.cliente || `Nota ${n.numero ?? ''}`}</div>
-        <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-          <Badge>{`nº ${n.numero ?? '—'}`}</Badge>
+    <>
+      <tr onClick={() => onVer(n.id)} className="text-[13px] cursor-pointer hover:bg-[var(--glass-hover)]"
+          style={{ background: bg, borderTop: '1px solid var(--glass-border)' }}>
+        <td className="px-2 py-2.5 align-middle">
+          {n.editavel && onToggleSel ? (
+            <button onClick={(e) => { stop(e); onToggleSel(n.id) }} className="text-faint hover:text-accent align-middle" title="Selecionar">
+              {selecionada ? <CheckSquare size={16} style={{ color: 'var(--accent)' }} /> : <Square size={16} />}
+            </button>
+          ) : null}
+        </td>
+        <td className="px-2 py-2.5 num font-semibold whitespace-nowrap">{n.numero ?? '—'}</td>
+        <td className="px-2 py-2.5"><div className="truncate" style={{ maxWidth: 200 }}>{n.cliente || '—'}</div></td>
+        <td className="px-2 py-2.5">{n.plataforma ? <PlataformaBadge nome={n.plataforma} /> : <span className="text-faint">—</span>}</td>
+        <td className="px-2 py-2.5 num">{n.uf || <span className="text-faint">—</span>}</td>
+        <td className="px-2 py-2.5 text-right num font-semibold whitespace-nowrap">
+          {aplicada ? <span style={{ color: 'var(--ok)' }}>{brl(aplicadaTotal)}</span>
+            : semValor ? <span className="inline-block h-4 w-12 rounded animate-pulse" style={{ background: 'var(--glass-hover)' }} />
+              : brl(n.valor)}
+        </td>
+        <td className="px-2 py-2.5 whitespace-nowrap">
           {aplicada
             ? <Badge cor="var(--ok)"><span className="inline-flex items-center gap-0.5"><CheckCircle2 size={9} /> aplicada</span></Badge>
             : <Badge cor={cor}>{n.situacao_label}</Badge>}
-          {!aplicada && n.editavel && <Badge cor="var(--ok)">editável</Badge>}
-          {n.uf && <Badge>{n.uf}</Badge>}
-          <PlataformaBadge nome={n.plataforma} />
-        </div>
-        {n.situacao === 4 && n.motivo && (
-          <div className="text-[10px] mt-1 flex items-start gap-1" style={{ color: 'var(--danger)' }}>
-            <AlertTriangle size={10} className="mt-0.5 shrink-0" /> <span className="line-clamp-2">{n.motivo}</span>
-          </div>
-        )}
-      </button>
-      <div className="text-right shrink-0">
-        {aplicada
-          ? <div className="num text-sm font-semibold" style={{ color: 'var(--ok)' }}>{brl(aplicadaTotal)}</div>
-          : semValor
-            ? <div className="h-4 w-14 rounded animate-pulse ml-auto" style={{ background: 'var(--glass-hover)' }} />
-            : <div className="num text-sm font-semibold">{brl(n.valor)}</div>}
-        <div className="flex items-center gap-1 justify-end mt-1">
-          <button onClick={() => onVer(n.id)} title="Ver nota completa" className="text-faint hover:text-accent p-0.5"><Eye size={14} /></button>
-          <button onClick={acao} title={n.editavel ? 'Editar desconto' : 'Ver nota'} className="text-faint hover:text-fg p-0.5"><ChevronRight size={15} /></button>
-        </div>
-      </div>
-    </div>
+        </td>
+        <td className="px-2 py-2.5 text-right whitespace-nowrap">
+          <button onClick={(e) => { stop(e); n.editavel ? onAbrir(n.id) : onVer(n.id) }}
+                  className="text-[12px] font-semibold inline-flex items-center gap-0.5" style={{ color: 'var(--accent)' }}>
+            {n.editavel ? 'editar' : 'abrir'} <ChevronRight size={13} />
+          </button>
+        </td>
+      </tr>
+      {rej ? (
+        <tr style={{ background: bg }}>
+          <td />
+          <td colSpan={7} className="px-2 pb-2">
+            <div className="text-[10.5px] flex items-start gap-1" style={{ color: 'var(--danger)' }}>
+              <AlertTriangle size={10} className="mt-0.5 shrink-0" /> {n.motivo}
+            </div>
+          </td>
+        </tr>
+      ) : null}
+    </>
   )
 }
 
