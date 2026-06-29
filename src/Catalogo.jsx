@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Search, RefreshCw, Plug, X, Check, Zap, Radar, Wand2, Database, Loader2, ImageOff, BadgePercent, PanelRight, Plus, Star, CheckCircle2, Boxes, BarChart3 } from 'lucide-react'
+import { Search, RefreshCw, Plug, X, Check, Zap, Radar, Wand2, Database, Loader2, ImageOff, BadgePercent, PanelRight, Plus, Star, CheckCircle2, Boxes, BarChart3, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react'
 import { api, DEFAULT_CUSTOS } from './api.js'
 import { useToast } from './toast.jsx'
 import RadarDrawer from './RadarDrawer.jsx'
@@ -60,6 +60,8 @@ export default function Catalogo() {
   const [ajDir, setAjDir] = useState('mais')
   const [ajValor, setAjValor] = useState('')
   const [ajLoading, setAjLoading] = useState(false)
+  const [pagina, setPagina] = useState(1)
+  const [porPagina, setPorPagina] = useState(50)
 
   useEffect(() => {
     api.precificacaoConfig()
@@ -126,7 +128,7 @@ export default function Catalogo() {
   }, [])
 
   const mapearCanais = async () => {
-    if (!window.confirm('Mapear os canais de todos os produtos lê o Bling item a item — pode levar ~30 min rodando em segundo plano. Pode continuar usando o sistema. Iniciar agora?')) return
+    if (!window.confirm('Isso lê o Bling produto a produto pra trazer imagem, custo e os canais de marketplace (o que a lista não traz) — pode levar ~30 min rodando em segundo plano. Pode continuar usando o sistema. Iniciar agora?')) return
     try {
       await api.vinculosEnriquecer()
       notify('Mapeamento de canais iniciado. Roda em segundo plano; os badges vão aparecendo conforme avança.', 'ok')
@@ -202,12 +204,22 @@ export default function Catalogo() {
       (!q || (i.nome || '').toLowerCase().includes(q) || (i.sku || '').toLowerCase().includes(q)))
   }, [itens, busca, filtro])
 
+  // volta pra página 1 quando muda filtro/busca/canal ou o tamanho da página
+  useEffect(() => { setPagina(1) }, [busca, filtro, canal, porPagina])
+  const totalPaginas = Math.max(1, Math.ceil(filtrados.length / porPagina))
+  const pageSafe = Math.min(pagina, totalPaginas)
+  const paginados = useMemo(
+    () => filtrados.slice((pageSafe - 1) * porPagina, pageSafe * porPagina),
+    [filtrados, pageSafe, porPagina])
+  const ini = filtrados.length ? (pageSafe - 1) * porPagina + 1 : 0
+  const fim = Math.min(pageSafe * porPagina, filtrados.length)
+
   const toggle = (id) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
-  const todosMarcados = filtrados.length > 0 && filtrados.every((i) => sel.has(i.id))
+  const todosMarcados = paginados.length > 0 && paginados.every((i) => sel.has(i.id))
   const toggleTodos = () => setSel((s) => {
     const n = new Set(s)
-    if (filtrados.every((i) => n.has(i.id))) filtrados.forEach((i) => n.delete(i.id))
-    else filtrados.forEach((i) => n.add(i.id))
+    if (paginados.every((i) => n.has(i.id))) paginados.forEach((i) => n.delete(i.id))
+    else paginados.forEach((i) => n.add(i.id))
     return n
   })
 
@@ -284,8 +296,8 @@ export default function Catalogo() {
         <button onClick={mapearCanais} disabled={vincSync?.status === 'rodando'}
                 className="rounded-xl px-3 py-2 text-sm flex items-center gap-2 disabled:opacity-70"
                 style={{ background: 'rgba(123,42,140,.14)', color: 'var(--accent2)', border: '1px solid var(--accent2)' }}
-                title="Lê o Bling produto a produto pra descobrir em quais marketplaces cada um está anunciado (~30 min)">
-          <Plug size={15} /> {vincSync?.status === 'rodando' ? `Mapeando canais… ${vincSync.processados}/${vincSync.total}` : 'Mapear canais'}
+                title="Lê o Bling produto a produto pra trazer imagem, custo e em quais marketplaces cada um está anunciado — o que a lista não traz (~30 min, em segundo plano)">
+          <Plug size={15} /> {vincSync?.status === 'rodando' ? `Carregando… ${vincSync.processados}/${vincSync.total}` : 'Carregar imagens, custos e canais'}
         </button>
       </div>
 
@@ -318,8 +330,8 @@ export default function Catalogo() {
              style={{ border: `1px solid ${vincSync.status === 'erro' ? 'var(--danger)' : 'var(--accent2)'}` }}>
           {vincSync.status === 'rodando' && <Loader2 size={15} className="animate-spin" style={{ color: 'var(--accent2)' }} />}
           <span className="flex-1">
-            {vincSync.status === 'rodando' && <>Mapeando canais no Bling… <b className="num">{vincSync.processados}</b> de <b className="num">{vincSync.total}</b> produtos. Pode continuar usando o sistema; os badges vão aparecendo.</>}
-            {vincSync.status === 'concluido' && <>Canais mapeados em <b className="num">{vincSync.total}</b> produtos. Os badges de marketplace agora aparecem na lista.</>}
+            {vincSync.status === 'rodando' && <>Lendo o Bling produto a produto… <b className="num">{vincSync.processados}</b> de <b className="num">{vincSync.total}</b>. Imagens, custos e badges de marketplace vão aparecendo. Pode continuar usando o sistema.</>}
+            {vincSync.status === 'concluido' && <>Concluído em <b className="num">{vincSync.total}</b> produtos: imagens, custos e badges de marketplace agora aparecem na lista.</>}
             {vincSync.status === 'erro' && <span style={{ color: 'var(--danger)' }}>Erro no mapeamento: {vincSync.erro} — pode rodar de novo, ele recomeça do zero.</span>}
           </span>
         </div>
@@ -345,8 +357,14 @@ export default function Catalogo() {
       {sel.size > 0 && (
         <div className="rounded-xl px-4 py-3 flex flex-col gap-3" style={{ background: 'var(--glass-hover)', border: '1px solid var(--accent)' }}>
           <div className="flex items-center justify-between flex-wrap gap-2">
-            <span className="text-sm flex items-center gap-2">
+            <span className="text-sm flex items-center gap-2 flex-wrap">
               <Zap size={15} className="text-accent" /> <b className="num">{sel.size}</b> selecionado(s)
+              {todosMarcados && filtrados.length > sel.size && (
+                <button onClick={() => setSel(new Set(filtrados.map((i) => i.id)))}
+                        className="text-xs text-accent hover:underline">
+                  selecionar todos os {filtrados.length}
+                </button>
+              )}
             </span>
             <div className="flex items-center gap-2 flex-wrap">
               <button onClick={() => setSel(new Set())} className="text-xs text-dim hover:text-fg flex items-center gap-1"><X size={13} /> limpar</button>
@@ -402,7 +420,7 @@ export default function Catalogo() {
             </tr>
           </thead>
           <tbody>
-            {filtrados.map((i) => {
+            {paginados.map((i) => {
               const s = STATUS[i.status] || STATUS.atencao
               const delta = (i.pra_netar || 0) - (i.preco_bling || 0)
               return (
@@ -462,6 +480,33 @@ export default function Catalogo() {
           </tbody>
         </table>
       </div>
+
+      {/* Paginação */}
+      {filtrados.length > 0 && (
+        <div className="flex items-center justify-between gap-3 flex-wrap mt-3 text-sm">
+          <div className="flex items-center gap-2 text-dim">
+            <span className="num">{ini}–{fim}</span> de <span className="num font-medium text-fg">{filtrados.length}</span> produto(s)
+            <label className="flex items-center gap-1.5 ml-2">
+              <span className="text-faint text-xs">por página</span>
+              <select value={porPagina} onChange={(e) => setPorPagina(Number(e.target.value))}
+                      className="glass rounded-lg px-2 py-1 text-xs num outline-none">
+                {[25, 50, 100, 200, 500].map((n) => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </label>
+          </div>
+          <div className="flex items-center gap-1">
+            <button onClick={() => setPagina(1)} disabled={pageSafe <= 1}
+                    className="glass rounded-lg p-1.5 disabled:opacity-40" title="Primeira"><ChevronsLeft size={16} /></button>
+            <button onClick={() => setPagina((p) => Math.max(1, p - 1))} disabled={pageSafe <= 1}
+                    className="glass rounded-lg p-1.5 disabled:opacity-40" title="Anterior"><ChevronLeft size={16} /></button>
+            <span className="px-3 text-dim">página <span className="num font-medium text-fg">{pageSafe}</span> de <span className="num">{totalPaginas}</span></span>
+            <button onClick={() => setPagina((p) => Math.min(totalPaginas, p + 1))} disabled={pageSafe >= totalPaginas}
+                    className="glass rounded-lg p-1.5 disabled:opacity-40" title="Próxima"><ChevronRight size={16} /></button>
+            <button onClick={() => setPagina(totalPaginas)} disabled={pageSafe >= totalPaginas}
+                    className="glass rounded-lg p-1.5 disabled:opacity-40" title="Última"><ChevronsRight size={16} /></button>
+          </div>
+        </div>
+      )}
 
       {cockpit && <CockpitProduto produto={cockpit} canalSel={canal} notify={notify}
         onClose={() => setCockpit(null)}
