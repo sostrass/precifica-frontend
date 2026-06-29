@@ -4,7 +4,8 @@ import {
   Truck, Lock, ChevronRight, Zap, Info, X, Download, ExternalLink, User, Receipt, MapPin,
   CheckCircle2, AlertTriangle, Clock, HelpCircle, PauseCircle, Activity, Hash, CreditCard,
   Eye, Landmark, ShieldCheck, Bell, Sparkles, TrendingDown, Search, ToggleRight, Users, Inbox, ShoppingBag,
-  CheckSquare, Square, BarChart3, Copy, Package,
+  CheckSquare, Square, BarChart3, Copy, Package, Loader2,
+  Store, ArrowRight, FileDown, Calendar, TrendingUp, ChevronDown, FileCheck2, CircleAlert,
 } from 'lucide-react'
 
 const PLATAFORMA_COR = {
@@ -22,6 +23,25 @@ const PLATAFORMA_DOMINIO = {
   'Shopify': 'shopify.com',
 }
 
+// rgba a partir de hex — Safari 13.1 (High Sierra) não suporta color-mix()
+const hexA = (hex, a) => {
+  const m = String(hex || '').replace('#', '')
+  const n = m.length === 3 ? m.split('').map((c) => c + c).join('') : m
+  const r = parseInt(n.slice(0, 2), 16) || 0
+  const g = parseInt(n.slice(2, 4), 16) || 0
+  const b = parseInt(n.slice(4, 6), 16) || 0
+  return `rgba(${r}, ${g}, ${b}, ${a})`
+}
+const ACCENT = '#d6007f', ACCENT2 = '#7b2a8c'
+const C_OK = '#1d9e75', C_WARN = '#C77F1A', C_DANGER = '#a32d2d'
+
+// fundo translúcido a partir de uma cor (CSS var conhecida ou hex) — sem color-mix (Safari 13.1)
+const TINT_VAR = {
+  'var(--accent)': 'var(--tint-accent)', 'var(--accent2)': 'rgba(123, 42, 140, 0.16)',
+  'var(--ok)': 'var(--tint-ok)', 'var(--warn)': 'var(--tint-warn)', 'var(--danger)': 'var(--tint-danger)',
+}
+const tintOf = (cor) => TINT_VAR[cor] || (String(cor).startsWith('#') ? hexA(cor, 0.14) : 'var(--glass-hover)')
+
 // Logo real do marketplace (favicon) com fallback para monograma colorido se a imagem falhar
 function MarketplaceLogo({ nome, size = 16 }) {
   const [erro, setErro] = useState(false)
@@ -36,7 +56,7 @@ function MarketplaceLogo({ nome, size = 16 }) {
     )
   }
   return (
-    <span style={{ width: size, height: size, borderRadius: radius, background: `color-mix(in srgb, ${cor} 22%, transparent)`,
+    <span style={{ width: size, height: size, borderRadius: radius, background: hexA(cor.startsWith('#') ? cor : '#7b2a8c', 0.22),
                    color: cor, fontSize: Math.round(size * 0.56), fontWeight: 700, display: 'grid', placeItems: 'center', lineHeight: 1 }}>
       {(nome || '?').charAt(0)}
     </span>
@@ -48,7 +68,7 @@ function PlataformaBadge({ nome }) {
   const cor = PLATAFORMA_COR[nome] || 'var(--accent2)'
   return (
     <span className="text-[10px] pl-1 pr-1.5 py-0.5 rounded-md font-semibold inline-flex items-center gap-1"
-          style={{ background: 'color-mix(in srgb, ' + cor + ' 14%, transparent)', color: cor }}>
+          style={{ background: hexA(cor.startsWith('#') ? cor : '#7b2a8c', 0.14), color: cor }}>
       <MarketplaceLogo nome={nome} size={13} /> {nome}
     </span>
   )
@@ -84,7 +104,11 @@ export default function Nfe() {
   const [soEditaveis, setSoEditaveis] = useState(false)
   const [aplicadas, setAplicadas] = useState({})     // { id: novoTotal } — marca local, sem recarregar
   const [carregandoValores, setCarregandoValores] = useState(false)
+  const [progValores, setProgValores] = useState(null)   // {feito, total} do enriquecimento
   const [selecao, setSelecao] = useState(() => new Set())   // ids selecionados (massa)
+  const situacaoAtualRef = useRef(situacao)
+  const pendentesRef = useRef([])
+  useEffect(() => { pendentesRef.current = pendentes || [] }, [pendentes])
 
   const toggleSel = (id) => setSelecao((s) => {
     const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n
@@ -111,8 +135,10 @@ export default function Nfe() {
     api.nfeConfig().then(setCfg).catch(() => {})
     carregarEventos()
     api.nfeFaturamento().then(setFaturamento).catch(() => {})
+    api.nfeContagens().then(setContagens).catch(() => {})
+    api.nfePedidosSemNfe(30).then(setSemNfe).catch(() => setSemNfe({ total: 0, pedidos: [] }))
   }, [])
-  useEffect(() => { carregarNotas() /* eslint-disable-next-line */ }, [situacao])
+  useEffect(() => { situacaoAtualRef.current = situacao; carregarNotas() /* eslint-disable-next-line */ }, [situacao])
 
   // Auto-atualiza a lista enquanto o modo automático está ligado (notas geradas no Bling
   // chegam sozinhas, sem precisar clicar em Atualizar). Silencioso: não pisca o loading.
@@ -125,6 +151,8 @@ export default function Nfe() {
 
   const [faturamento, setFaturamento] = useState(null)
   const [fatRecalc, setFatRecalc] = useState(false)
+  const [contagens, setContagens] = useState(null)
+  const [semNfe, setSemNfe] = useState(null)
   const recalcularFaturamento = async () => {
     setFatRecalc(true)
     try {
@@ -148,22 +176,42 @@ export default function Nfe() {
     setBlingErro(false)
     if (!silencioso) { setPendentes(null); setAplicadas({}) }
     try {
-      const r = await api.nfePendentes(situacao)
+      const r = await api.nfePendentesTodas(situacao)
       const lista = Array.isArray(r) ? r : (r?.notas || r?.data || [])
-      setPendentes(lista)
-      // valores + plataforma vêm em background (a lista do Bling não traz) — tela aparece rápida
-      const ids = lista.map((n) => n.id).filter(Boolean)
+      // No refresh silencioso, preserva os valores já enriquecidos (evita piscar pra 0 e
+      // re-buscar tudo de novo). Só as notas novas (sem valor) serão enriquecidas.
+      const ant = {}
+      ;(pendentesRef.current || []).forEach((n) => { ant[String(n.id)] = n })
+      const mesclada = silencioso
+        ? lista.map((n) => {
+            const a = ant[String(n.id)]
+            return a && a.valor ? { ...a, situacao: n.situacao, situacao_label: n.situacao_label, editavel: n.editavel } : n
+          })
+        : lista
+      setPendentes(mesclada)
+      // valor + UF + tributos vêm do GET individual (a lista do Bling não traz).
+      const precisam = mesclada.filter((n) => n.id && !(n.valor > 0))
+      const ids = precisam.map((n) => n.id)
       if (ids.length) {
         setCarregandoValores(true)
-        api.nfeValores(ids)
-          .then((mapa) => {
+        setProgValores({ feito: 0, total: ids.length })
+        const LOTE = 100
+        let feito = 0
+        for (let i = 0; i < ids.length; i += LOTE) {
+          const bloco = ids.slice(i, i + LOTE)
+          try {
+            const mapa = await api.nfeValores(bloco)
             setPendentes((atual) => (atual || []).map((n) => {
               const e = mapa?.[String(n.id)]
               return e ? { ...n, ...e } : n
             }))
-          })
-          .catch(() => {})
-          .finally(() => setCarregandoValores(false))
+          } catch { /* um lote falho não derruba o resto */ }
+          feito += bloco.length
+          setProgValores({ feito, total: ids.length })
+          if (situacao !== situacaoAtualRef.current) break  // trocou de filtro: aborta
+        }
+        setCarregandoValores(false)
+        setProgValores(null)
       }
     } catch (e) {
       if (!silencioso) { setBlingErro(true); setPendentes([]) }
@@ -258,6 +306,12 @@ export default function Nfe() {
 
   return (
     <div className="space-y-4 max-w-6xl">
+      {/* Título */}
+      <div>
+        <h1 className="font-display text-2xl font-bold">Notas fiscais</h1>
+        <div className="text-sm text-dim">Emissão, gestão e inteligência fiscal das suas NF-e</div>
+      </div>
+
       {/* Top bar */}
       <div className="glass rounded-2xl px-5 py-3 flex items-center gap-3 flex-wrap">
         <div className="flex items-center gap-2 text-sm font-semibold">
@@ -273,28 +327,104 @@ export default function Nfe() {
           </div>
           <button onClick={() => setShowCfg((v) => !v)}
                   className="glass rounded-xl px-3 py-2 text-sm text-dim hover:text-fg flex items-center gap-2">
-            <Settings2 size={15} /> Regras
+            <Settings2 size={15} /> Configuração
           </button>
-          <button onClick={() => { carregarNotas(); carregarEventos() }}
+          <button onClick={() => { carregarNotas(); carregarEventos(); api.nfeContagens().then(setContagens).catch(() => {}) }}
                   className="glass rounded-xl px-3 py-2 text-sm text-dim hover:text-fg flex items-center gap-2">
             <RefreshCw size={15} /> Atualizar
           </button>
         </div>
       </div>
 
-      {showCfg && cfg && <ConfigCard cfg={cfg} setCfg={setCfg} />}
+      {progValores && progValores.total > 0 && (
+        <div className="glass rounded-xl px-4 py-2.5 text-sm flex items-center gap-3" style={{ border: '1px solid var(--accent2)' }}>
+          <Loader2 size={15} className="animate-spin" style={{ color: 'var(--accent2)' }} />
+          <span className="flex-1">
+            Carregando valores, UF e tributos das notas… <b className="num">{progValores.feito}</b> de <b className="num">{progValores.total}</b>. Os totais e o mapa por estado vão se completando.
+          </span>
+          <span className="num text-xs text-dim">{Math.round((progValores.feito / progValores.total) * 100)}%</span>
+        </div>
+      )}
 
-      {/* Simulação de receita */}
-      <RevenueSim notas={pendentes} cfg={cfg} situacao={situacao} />
+      {/* KPIs */}
+      <KpisRow notas={pendentes} faturamento={faturamento} />
 
-      {/* Status da automação (notificações ficam no sino global, no topo) */}
-      <AutomacaoPanel cfg={cfg} eventos={eventos} />
+      {/* Abas de situação */}
+      <SituacaoTabs situacao={situacao} setSituacao={setSituacao} contagens={contagens} carregadas={(pendentes || []).length} />
 
-      {/* Inteligência fiscal: carga tributária (IBPT) + vendas por UF */}
+      {/* Cartões de risco: Pedidos sem NF-e + Simples real */}
+      <div className="grid gap-4 md:grid-cols-2">
+        <PedidosSemNfeCard dados={semNfe} />
+        <SimplesCard dados={faturamento} recalc={fatRecalc} onRecalcular={recalcularFaturamento} />
+      </div>
+
+      {/* Notas — área de trabalho (lista + ajuste em massa) */}
+      <div className="glass rounded-2xl p-4 sm:p-5 space-y-3">
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="h-9 w-9 rounded-xl grid place-items-center shrink-0" style={{ background: 'linear-gradient(135deg, var(--accent), var(--accent2))' }}>
+            <Receipt size={17} className="text-white" />
+          </div>
+          <div className="min-w-0">
+            <div className="text-sm font-semibold">Notas · {SIT_LABEL[situacao] || 'Filtro'}</div>
+            <div className="text-[11px] text-dim">{(pendentes || []).length} no filtro · clique numa nota para abrir e editar</div>
+          </div>
+          <div className="ml-auto flex items-center gap-2 flex-wrap">
+            <div className="glass rounded-xl flex items-center gap-2 px-3 py-1.5">
+              <Search size={14} className="text-faint" />
+              <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="buscar número, cliente, pedido…"
+                     className="bg-transparent outline-none text-sm w-44 text-fg" />
+            </div>
+            <select value={ordem} onChange={(e) => setOrdem(e.target.value)} className="glass rounded-xl px-2.5 py-2 text-xs text-dim outline-none">
+              <option value="valor_desc">Maior valor</option>
+              <option value="valor_asc">Menor valor</option>
+              <option value="numero_desc">Número ↓</option>
+              <option value="numero_asc">Número ↑</option>
+            </select>
+            <label className="glass rounded-xl px-2.5 py-2 text-xs text-dim flex items-center gap-1.5 cursor-pointer select-none">
+              <input type="checkbox" checked={soEditaveis} onChange={(e) => setSoEditaveis(e.target.checked)} /> só editáveis
+            </label>
+            <button onClick={exportarCSV} className="glass rounded-xl px-3 py-2 text-xs text-dim hover:text-fg flex items-center gap-1.5"><Download size={13} /> CSV</button>
+          </div>
+        </div>
+
+        {situacao === 1 && (
+          <LoteBar
+            qtd={(pendentes || []).filter((n) => n.editavel).length}
+            cfg={cfg} rodando={loteRodando} onAplicar={aplicarTodas}
+            report={loteReport} onFechar={() => setLoteReport(null)} onVerNota={verCompleta}
+          />
+        )}
+
+        <NotasList
+          notas={filtradas} blingErro={blingErro} carregando={pendentes === null}
+          carregandoValores={carregandoValores} aplicadas={aplicadas}
+          selecao={selecao} onToggleSel={toggleSel} onSelTodas={selTodasEditaveis}
+          onLimparSel={limparSel} onAplicarSel={aplicarSelecionadas} loteRodando={loteRodando}
+          onConciliarSel={conciliarSelecionadas} concilLoteLoad={concilLoteLoad}
+          notaId={nota?.id} onAbrir={abrirNota} onVerCompleta={verCompleta} onSimular={simularManual}
+        />
+        {concilLote && <ConciliacaoLoteReport r={concilLote} onFechar={() => setConcilLote(null)} onVerNota={verCompleta} />}
+      </div>
+
+      {/* Indicadores e inteligência fiscal */}
+      <div className="flex items-baseline gap-2 pt-1">
+        <h2 className="font-display text-lg font-bold">Indicadores e inteligência fiscal</h2>
+        <span className="text-xs text-dim">— visão gerencial; não interfere na emissão</span>
+      </div>
+
+      <FaturamentoSimples dados={faturamento} recalc={fatRecalc} onRecalcular={recalcularFaturamento} />
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <AgingCard notas={pendentes} situacao={situacao} onVer={verCompleta} />
+        <RejeitadasCard notas={pendentes} situacao={situacao} setSituacao={setSituacao} onVer={verCompleta} />
+      </div>
+
       <InteligenciaFiscal notas={pendentes} carregando={carregandoValores} />
 
-      {/* Monitor do teto do Simples Nacional */}
-      <FaturamentoSimples dados={faturamento} recalc={fatRecalc} onRecalcular={recalcularFaturamento} />
+      {/* Configuração de edição & descontos (recolhível) */}
+      {showCfg && cfg && <ConfigCard cfg={cfg} setCfg={setCfg} />}
+      <RevenueSim notas={pendentes} cfg={cfg} situacao={situacao} />
+      <AutomacaoPanel cfg={cfg} eventos={eventos} />
 
       {/* Aviso fiscal compacto */}
       <div className="rounded-xl px-4 py-2.5 text-[11px] flex items-start gap-2 border border-glassb"
@@ -306,42 +436,305 @@ export default function Nfe() {
         </span>
       </div>
 
-      {/* Aplicar em lote — só na visão de pendentes */}
-      {situacao === 1 && (
-        <LoteBar
-          qtd={(pendentes || []).filter((n) => n.editavel).length}
-          cfg={cfg} rodando={loteRodando} onAplicar={aplicarTodas}
-          report={loteReport} onFechar={() => setLoteReport(null)} onVerNota={verCompleta}
-        />
+      {/* Editor de nota — agora em modal (lista ocupa a largura toda) */}
+      {nota && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center p-4 sm:p-8 overflow-y-auto"
+             style={{ background: 'rgba(0,0,0,.6)', backdropFilter: 'blur(3px)' }} onClick={() => setNota(null)}>
+          <div className="w-full max-w-2xl my-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-end mb-2">
+              <button onClick={() => setNota(null)} className="glass rounded-full p-1.5 text-dim hover:text-fg" title="Fechar"><X size={18} /></button>
+            </div>
+            <Editor key={nota.id || 'manual'} nota={nota} cfg={cfg} aplicada={aplicadas[nota.id]}
+                    onAplicado={(id, novoTotal) => { marcarAplicada(id, novoTotal); carregarEventos() }} onVerCompleta={verCompleta} />
+          </div>
+        </div>
       )}
 
-      {/* Filtros + lista + editor */}
-      <div className="grid gap-4" style={{ gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.3fr)' }}>
-        <div className="space-y-3">
-          <FiltrosBar
-            situacao={situacao} setSituacao={setSituacao}
-            busca={busca} setBusca={setBusca}
-            ordem={ordem} setOrdem={setOrdem}
-            soEditaveis={soEditaveis} setSoEditaveis={setSoEditaveis}
-            total={(pendentes || []).length} mostrando={filtradas.length}
-            onExportar={exportarCSV}
-          />
-          <NotasList
-            notas={filtradas} blingErro={blingErro} carregando={pendentes === null}
-            carregandoValores={carregandoValores} aplicadas={aplicadas}
-            selecao={selecao} onToggleSel={toggleSel} onSelTodas={selTodasEditaveis}
-            onLimparSel={limparSel} onAplicarSel={aplicarSelecionadas} loteRodando={loteRodando}
-            onConciliarSel={conciliarSelecionadas} concilLoteLoad={concilLoteLoad}
-            notaId={nota?.id} onAbrir={abrirNota} onVerCompleta={verCompleta} onSimular={simularManual}
-          />
-          {concilLote && <ConciliacaoLoteReport r={concilLote} onFechar={() => setConcilLote(null)} onVerNota={verCompleta} />}
-        </div>
-        {nota
-          ? <Editor key={nota.id || 'manual'} nota={nota} cfg={cfg} aplicada={aplicadas[nota.id]} onAplicado={(id, novoTotal) => { marcarAplicada(id, novoTotal); carregarEventos() }} onVerCompleta={verCompleta} />
-          : <VazioEditor />}
-      </div>
+      {completa && <NfeDetalhe nota={completa} cfg={cfg} onClose={() => setCompleta(null)} onEditar={(id) => { setCompleta(null); abrirNota(id) }} />}
+    </div>
+  )
+}
 
-      {completa && <NfeDetalhe nota={completa} onClose={() => setCompleta(null)} />}
+/* ============== Painel reformulado: KPIs, abas, risco, aging ============== */
+
+const fmtBig = (v) => {
+  const n = Number(v || 0)
+  if (n >= 1_000_000) return 'R$ ' + (n / 1_000_000).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + 'M'
+  if (n >= 10_000) return 'R$ ' + Math.round(n / 1000) + 'k'
+  return brl(n)
+}
+const diasDesde = (s) => {
+  if (!s) return null
+  let d = new Date(s)
+  if (isNaN(d)) { const m = String(s).match(/(\d{2})\/(\d{2})\/(\d{4})/); if (m) d = new Date(`${m[3]}-${m[2]}-${m[1]}`) }
+  if (isNaN(d)) return null
+  return Math.max(0, Math.floor((Date.now() - d.getTime()) / 86400000))
+}
+const fmtDataBR = (s) => {
+  if (!s) return '—'
+  let d = new Date(s)
+  if (isNaN(d)) { const m = String(s).match(/(\d{2})\/(\d{2})\/(\d{4})/); if (m) d = new Date(`${m[3]}-${m[2]}-${m[1]}`) }
+  return isNaN(d) ? String(s) : d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+}
+
+function KpiBox({ icon, label, valor, cor = 'var(--text)', sub }) {
+  return (
+    <div className="glass rounded-2xl px-4 py-3">
+      <div className="flex items-center gap-1.5 text-[11px] text-dim font-medium">{icon}{label}</div>
+      <div className="num font-bold mt-1 truncate" style={{ color: cor, fontSize: 19 }}>{valor}</div>
+      {sub ? <div className="text-[10px] text-faint mt-0.5">{sub}</div> : null}
+    </div>
+  )
+}
+
+function KpisRow({ notas, faturamento }) {
+  const lista = notas || []
+  const comValor = lista.filter((n) => n.valor > 0)
+  const receita = comValor.reduce((s, n) => s + (n.valor || 0), 0)
+  const tributos = lista.reduce((s, n) => s + (n.tributos || 0), 0)
+  const pctEf = receita > 0 ? (tributos / receita) * 100 : 0
+  const ticket = comValor.length ? receita / comValor.length : 0
+  const carregando = notas === null
+  const dash = carregando ? '—' : null
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+      <KpiBox icon={<Receipt size={13} className="text-accent" />} label="Notas no filtro" valor={dash ?? lista.length} cor="var(--accent)" />
+      <KpiBox icon={<DollarSign size={13} style={{ color: 'var(--ok)' }} />} label="Receita listada" valor={dash ?? brl(receita)} cor="var(--ok)"
+              sub={!carregando && comValor.length < lista.length ? `${comValor.length}/${lista.length} com valor` : undefined} />
+      <KpiBox icon={<Landmark size={13} style={{ color: 'var(--warn)' }} />} label="Tributos aprox." valor={dash ?? brl(tributos)} cor="var(--warn)" />
+      <KpiBox icon={<Percent size={13} style={{ color: 'var(--accent2)' }} />} label="% efetivo" valor={dash ?? `${pctEf.toFixed(1)}%`} cor="var(--accent2)" />
+      <KpiBox icon={<TrendingUp size={13} className="text-dim" />} label="Ticket médio" valor={dash ?? brl(ticket)} />
+    </div>
+  )
+}
+
+const SIT_TABS = [
+  { cod: 1, label: 'Pendentes', key: 'pendentes', Icon: Clock, cor: 'var(--warn)' },
+  { cod: 6, label: 'Autorizadas', key: 'autorizadas', Icon: CheckCircle2, cor: 'var(--ok)' },
+  { cod: 4, label: 'Rejeitadas', key: 'rejeitadas', Icon: CircleAlert, cor: 'var(--danger)' },
+  { cod: 2, label: 'Canceladas', key: 'canceladas', Icon: X, cor: 'var(--faint)' },
+  { cod: 0, label: 'Todas', key: 'todas', Icon: Inbox, cor: 'var(--accent2)' },
+]
+function SituacaoTabs({ situacao, setSituacao, contagens, carregadas }) {
+  return (
+    <div className="flex items-center gap-2 overflow-x-auto pb-1">
+      {SIT_TABS.map(({ cod, label, key, Icon, cor }) => {
+        const ativo = situacao === cod
+        const cnt = ativo && carregadas != null ? carregadas : contagens?.[key]
+        const aprox = !ativo && contagens?.aproximado && (key === 'autorizadas' || key === 'canceladas' || key === 'todas')
+        return (
+          <button key={cod} onClick={() => setSituacao(cod)}
+            className="rounded-xl px-3.5 py-2 text-sm font-semibold flex items-center gap-2 shrink-0 transition"
+            style={ativo
+              ? { background: 'linear-gradient(135deg, var(--accent), var(--accent2))', color: '#fff', boxShadow: '0 6px 16px var(--tint-accent-strong)' }
+              : { background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', color: 'var(--text-dim)' }}>
+            <Icon size={15} style={{ color: ativo ? '#fff' : cor }} />
+            {label}
+            {cnt != null && (
+              <span className="num text-[11px] px-1.5 py-0.5 rounded-md"
+                style={{ background: ativo ? 'rgba(255,255,255,.22)' : 'var(--glass-hover)', color: ativo ? '#fff' : 'var(--text-dim)' }}>
+                {aprox ? '~' : ''}{cnt}
+              </span>
+            )}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function PedidosSemNfeCard({ dados }) {
+  const carregando = dados == null
+  const total = dados?.total || 0
+  const pedidos = dados?.pedidos || []
+  const dias = dados?.dias || 30
+  const valor = dados?.valor_total || 0
+  const risco = total > 0
+  const mostrados = pedidos.slice(0, 6)
+  return (
+    <div className="glass rounded-2xl p-5" style={risco ? { borderColor: 'var(--danger)', background: 'var(--tint-danger)' } : undefined}>
+      <div className="flex items-center gap-2.5 mb-3">
+        <div className="h-9 w-9 rounded-xl grid place-items-center shrink-0" style={{ background: risco ? 'var(--tint-danger)' : 'var(--tint-ok)' }}>
+          {risco ? <AlertTriangle size={17} style={{ color: 'var(--danger)' }} /> : <FileCheck2 size={17} style={{ color: 'var(--ok)' }} />}
+        </div>
+        <div className="min-w-0">
+          <div className="text-sm font-semibold">Pedidos sem NF-e</div>
+          <div className="text-[11px] text-dim">Faturados nos últimos {dias} dias sem nota emitida</div>
+        </div>
+        {!carregando && (
+          <div className="ml-auto text-right shrink-0">
+            <div className="num font-bold" style={{ fontSize: 22, color: risco ? 'var(--danger)' : 'var(--ok)' }}>{total}</div>
+            {risco ? <div className="num text-[10px] text-dim">{brl(valor)}</div> : null}
+          </div>
+        )}
+      </div>
+      {carregando ? (
+        <div className="space-y-1.5 py-1">{[0, 1, 2].map((i) => <div key={i} className="h-7 rounded-lg" style={{ background: 'var(--glass-hover)', opacity: 0.6 - i * 0.15 }} />)}</div>
+      ) : total === 0 ? (
+        <div className="text-xs text-dim flex items-center gap-2 py-2"><CheckCircle2 size={15} style={{ color: 'var(--ok)' }} /> Tudo certo — todo pedido faturado tem nota nos últimos {dias} dias.</div>
+      ) : (
+        <>
+          <div className="space-y-1 max-h-[180px] overflow-y-auto pr-1">
+            {mostrados.map((p) => (
+              <div key={p.id || p.numero} className="flex items-center gap-2 rounded-lg px-2 py-1.5" style={{ background: 'var(--surface)' }}>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[12px] font-medium truncate">{p.cliente || p.numero_loja || ('Pedido ' + (p.numero || ''))}</div>
+                  <div className="num text-[10px] text-faint">#{p.numero_loja || p.numero} · {fmtDataBR(p.data)}</div>
+                </div>
+                {p.plataforma ? <Badge cor={PLATAFORMA_COR[p.plataforma] || 'var(--accent2)'}>{p.plataforma}</Badge> : null}
+                <span className="num text-[12px] font-semibold w-20 text-right shrink-0">{brl(p.valor)}</span>
+              </div>
+            ))}
+          </div>
+          {total > mostrados.length ? <div className="text-[10px] text-faint mt-1.5">+{total - mostrados.length} outros pedidos</div> : null}
+          <div className="text-[10px] text-faint mt-2 flex items-start gap-1"><Info size={10} className="mt-0.5 shrink-0" /> Cruza pedidos do Bling (todos os canais) com as NF-e recentes. A emissão é feita no Bling; pode haver atraso de sincronização.</div>
+        </>
+      )}
+    </div>
+  )
+}
+
+function SimplesCard({ dados, recalc, onRecalcular }) {
+  const tem = dados?.tem_dados
+  const rbt12 = dados?.rbt12 || 0
+  const sub = dados?.sublimite || 3600000
+  const efetiva = dados?.aliquota_efetiva
+  const nominal = dados?.aliquota_nominal
+  const faixa = dados?.faixa
+  const anexo = dados?.anexo || 'I'
+  const pctSub = dados?.pct_sublimite != null ? Math.min(100, dados.pct_sublimite) : Math.min(100, (rbt12 / sub) * 100)
+  const meses = dados?.meses_ate_sublimite
+  const al = ALERTA_FAT[dados?.alerta] || ALERTA_FAT.ok
+  return (
+    <div className="glass rounded-2xl p-5">
+      <div className="flex items-center gap-2.5 mb-3">
+        <div className="h-9 w-9 rounded-xl grid place-items-center shrink-0" style={{ background: 'var(--tint-accent)' }}>
+          <Percent size={16} style={{ color: 'var(--accent2)' }} />
+        </div>
+        <div className="min-w-0">
+          <div className="text-sm font-semibold">Simples Nacional · faixa &amp; projeção</div>
+          <div className="text-[11px] text-dim">Anexo {anexo} (Comércio) · estimado pelo RBT12</div>
+        </div>
+      </div>
+      {!tem ? (
+        <div className="text-center py-3">
+          <div className="text-xs text-dim mb-3">Sem dados ainda. O cálculo lê suas notas autorizadas dos últimos 12 meses.</div>
+          <button onClick={onRecalcular} disabled={recalc} className="rounded-xl px-4 py-2 text-sm font-medium text-white disabled:opacity-60 inline-flex items-center gap-2" style={{ background: 'var(--accent)' }}>
+            <RefreshCw size={14} className={recalc ? 'animate-spin' : ''} /> {recalc ? 'Calculando…' : 'Calcular agora'}
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="flex items-end gap-4 mb-3">
+            <div className="shrink-0">
+              <div className="text-[10px] uppercase tracking-wide text-faint font-bold">Alíquota efetiva</div>
+              <div className="num font-bold" style={{ fontSize: 30, color: 'var(--accent2)', lineHeight: 1 }}>{efetiva != null ? `${efetiva}%` : '—'}</div>
+              {nominal != null ? <div className="num text-[10px] text-faint mt-0.5">nominal {nominal}%</div> : null}
+            </div>
+            <div className="flex-1 grid grid-cols-2 gap-2">
+              <div className="rounded-xl px-3 py-2" style={{ background: 'var(--glass-hover)' }}>
+                <div className="text-[10px] text-faint">Faixa</div>
+                <div className="num font-bold text-sm">{faixa ? `${faixa}ª` : '—'}<span className="text-[10px] text-faint font-normal"> de 6</span></div>
+              </div>
+              <div className="rounded-xl px-3 py-2" style={{ background: 'var(--glass-hover)' }}>
+                <div className="text-[10px] text-faint">RBT12</div>
+                <div className="num font-bold text-sm">{fmtBig(rbt12)}</div>
+              </div>
+            </div>
+          </div>
+          <div className="mb-1 flex items-center justify-between text-[10px] text-dim">
+            <span>{pctSub.toFixed(1)}% do sublimite</span>
+            <span className="num">sublimite {fmtBig(sub)}</span>
+          </div>
+          <div className="h-3 rounded-lg overflow-hidden" style={{ background: 'var(--glass-hover)' }}>
+            <div className="h-full rounded-lg" style={{ width: `${pctSub}%`, background: al.cor, minWidth: 3 }} />
+          </div>
+          <div className="mt-2.5 rounded-xl px-3 py-2 text-[11px] flex items-center gap-2" style={{ background: al.tint, color: al.cor }}>
+            <al.Icone size={13} className="shrink-0" />
+            {meses === 0 ? 'Sublimite já atingido — ICMS/ISS recolhidos por fora.'
+              : meses == null ? 'Faturamento estável — sem projeção de atingir o sublimite.'
+                : `No ritmo atual, atinge o sublimite em ~${meses} ${meses === 1 ? 'mês' : 'meses'}.`}
+          </div>
+          <div className="text-[10px] text-faint mt-2 flex items-start gap-1"><Info size={10} className="mt-0.5 shrink-0" /> Estimativa pelo RBT12 (12 meses). O DAS oficial é apurado pelo seu contador.</div>
+        </>
+      )}
+    </div>
+  )
+}
+
+function AgingCard({ notas, situacao, onVer }) {
+  if (situacao !== 1) {
+    return (
+      <div className="glass rounded-2xl p-5">
+        <div className="flex items-center gap-2 mb-1"><Clock size={15} style={{ color: 'var(--warn)' }} /><div className="text-sm font-semibold">Pendentes paradas</div></div>
+        <div className="text-xs text-dim">O tempo de espera das pendentes aparece quando você está na aba <b className="text-fg">Pendentes</b>.</div>
+      </div>
+    )
+  }
+  const lista = (notas || []).map((n) => ({ ...n, dias: diasDesde(n.data) })).filter((n) => n.dias != null && n.dias >= 2).sort((a, b) => b.dias - a.dias)
+  return (
+    <div className="glass rounded-2xl p-5">
+      <div className="flex items-center gap-2 mb-3">
+        <div className="h-8 w-8 rounded-xl grid place-items-center" style={{ background: 'var(--tint-warn)' }}><Clock size={15} style={{ color: 'var(--warn)' }} /></div>
+        <div><div className="text-sm font-semibold">Pendentes paradas</div><div className="text-[11px] text-dim">Aguardando há 2+ dias · transmita no Bling</div></div>
+        {lista.length > 0 ? <span className="ml-auto num font-bold" style={{ fontSize: 18, color: 'var(--warn)' }}>{lista.length}</span> : null}
+      </div>
+      {lista.length === 0 ? (
+        <div className="text-xs text-dim flex items-center gap-2 py-1"><CheckCircle2 size={15} style={{ color: 'var(--ok)' }} /> Nenhuma pendente parada — tudo recente.</div>
+      ) : (
+        <div className="space-y-1 max-h-[200px] overflow-y-auto pr-1">
+          {lista.slice(0, 8).map((n) => {
+            const cor = n.dias >= 7 ? 'var(--danger)' : n.dias >= 4 ? 'var(--warn)' : 'var(--text-dim)'
+            return (
+              <button key={n.id} onClick={() => onVer(n.id)} className="w-full flex items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:opacity-80" style={{ background: 'var(--surface)' }}>
+                <span className="num text-[12px] font-semibold shrink-0">NF {n.numero}</span>
+                <span className="text-[11px] text-dim truncate flex-1">{n.cliente || '—'}</span>
+                <span className="text-[11px] font-semibold num shrink-0" style={{ color: cor }}>há {n.dias}d</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function RejeitadasCard({ notas, situacao, setSituacao, onVer }) {
+  if (situacao !== 4) {
+    return (
+      <div className="glass rounded-2xl p-5">
+        <div className="flex items-center gap-2 mb-1"><CircleAlert size={15} style={{ color: 'var(--danger)' }} /><div className="text-sm font-semibold">Rejeitadas · fila de correção</div></div>
+        <div className="text-xs text-dim mb-2.5">As notas rejeitadas pela Sefaz, com o motivo, aparecem na aba Rejeitadas.</div>
+        <button onClick={() => setSituacao(4)} className="text-xs font-semibold px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5" style={{ background: 'var(--tint-danger)', color: 'var(--danger)' }}>
+          <ArrowRight size={13} /> Ver rejeitadas
+        </button>
+      </div>
+    )
+  }
+  const lista = notas || []
+  return (
+    <div className="glass rounded-2xl p-5">
+      <div className="flex items-center gap-2 mb-3">
+        <div className="h-8 w-8 rounded-xl grid place-items-center" style={{ background: 'var(--tint-danger)' }}><CircleAlert size={15} style={{ color: 'var(--danger)' }} /></div>
+        <div><div className="text-sm font-semibold">Rejeitadas · fila de correção</div><div className="text-[11px] text-dim">Corrija no Bling e retransmita</div></div>
+        {lista.length > 0 ? <span className="ml-auto num font-bold" style={{ fontSize: 18, color: 'var(--danger)' }}>{lista.length}</span> : null}
+      </div>
+      {lista.length === 0 ? (
+        <div className="text-xs text-dim flex items-center gap-2 py-1"><CheckCircle2 size={15} style={{ color: 'var(--ok)' }} /> Nenhuma nota rejeitada.</div>
+      ) : (
+        <div className="space-y-1.5 max-h-[220px] overflow-y-auto pr-1">
+          {lista.slice(0, 8).map((n) => (
+            <button key={n.id} onClick={() => onVer(n.id)} className="w-full text-left rounded-lg px-2.5 py-2 hover:opacity-80" style={{ background: 'var(--surface)' }}>
+              <div className="flex items-center gap-2">
+                <span className="num text-[12px] font-semibold">NF {n.numero}</span>
+                <span className="text-[11px] text-dim truncate flex-1">{n.cliente || '—'}</span>
+                <ChevronRight size={13} className="text-faint shrink-0" />
+              </div>
+              {n.motivo ? <div className="text-[10.5px] mt-0.5" style={{ color: 'var(--danger)' }}>{n.motivo}</div> : null}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -383,6 +776,7 @@ const SIT_CHIPS = [
   { cod: 6, label: 'Autorizadas' },
   { cod: 2, label: 'Canceladas' },
 ]
+const SIT_LABEL = { 1: 'Pendentes', 4: 'Rejeitadas', 6: 'Autorizadas', 2: 'Canceladas', 0: 'Todas' }
 
 /* --------------------------- Simulação de receita ----------------------- */
 function RevenueSim({ notas, cfg, situacao }) {
@@ -484,7 +878,7 @@ function InteligenciaFiscal({ notas, carregando }) {
       {/* Carga tributária aproximada */}
       <div className="glass rounded-2xl p-5">
         <div className="flex items-center gap-2 mb-3">
-          <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: 'color-mix(in srgb, var(--accent2) 18%, transparent)' }}>
+          <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: 'rgba(123, 42, 140, 0.16)' }}>
             <Landmark size={16} style={{ color: 'var(--accent2)' }} />
           </div>
           <div>
@@ -507,7 +901,7 @@ function InteligenciaFiscal({ notas, carregando }) {
       {/* Vendas por UF */}
       <div className="glass rounded-2xl p-5">
         <div className="flex items-center gap-2 mb-3">
-          <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: 'color-mix(in srgb, var(--accent) 18%, transparent)' }}>
+          <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: 'var(--tint-accent)' }}>
             <MapPin size={16} style={{ color: 'var(--accent)' }} />
           </div>
           <div>
@@ -554,11 +948,11 @@ function InteligenciaFiscal({ notas, carregando }) {
 
 /* ------------------ Monitor do teto do Simples Nacional ----------------- */
 const ALERTA_FAT = {
-  ok: { cor: 'var(--ok)', label: 'Dentro do limite', Icone: ShieldCheck },
-  atencao: { cor: 'var(--warn)', label: 'Atenção — aproximando do sublimite', Icone: AlertTriangle },
-  sublimite: { cor: 'var(--warn)', label: 'Acima do sublimite — ICMS/ISS fora do Simples', Icone: AlertTriangle },
-  critico: { cor: 'var(--danger)', label: 'Crítico — perto do teto do Simples', Icone: AlertTriangle },
-  estourou: { cor: 'var(--danger)', label: 'Teto do Simples ultrapassado', Icone: AlertTriangle },
+  ok: { cor: 'var(--ok)', tint: 'var(--tint-ok)', label: 'Dentro do limite', Icone: ShieldCheck },
+  atencao: { cor: 'var(--warn)', tint: 'var(--tint-warn)', label: 'Atenção — aproximando do sublimite', Icone: AlertTriangle },
+  sublimite: { cor: 'var(--warn)', tint: 'var(--tint-warn)', label: 'Acima do sublimite — ICMS/ISS fora do Simples', Icone: AlertTriangle },
+  critico: { cor: 'var(--danger)', tint: 'var(--tint-danger)', label: 'Crítico — perto do teto do Simples', Icone: AlertTriangle },
+  estourou: { cor: 'var(--danger)', tint: 'var(--tint-danger)', label: 'Teto do Simples ultrapassado', Icone: AlertTriangle },
 }
 
 function FaturamentoSimples({ dados, recalc, onRecalcular }) {
@@ -575,7 +969,7 @@ function FaturamentoSimples({ dados, recalc, onRecalcular }) {
   return (
     <div className="glass rounded-2xl p-5">
       <button onClick={() => setAberto((v) => !v)} className="flex items-center gap-2 w-full text-left">
-        <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: 'color-mix(in srgb, var(--accent2) 18%, transparent)' }}>
+        <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: 'rgba(123, 42, 140, 0.16)' }}>
           <Landmark size={16} style={{ color: 'var(--accent2)' }} />
         </div>
         <div>
@@ -601,7 +995,7 @@ function FaturamentoSimples({ dados, recalc, onRecalcular }) {
           ) : (
             <>
               <div className="rounded-xl px-3 py-2 text-xs flex items-center gap-2 mb-3"
-                   style={{ background: `color-mix(in srgb, ${al.cor} 12%, transparent)`, color: al.cor }}>
+                   style={{ background: al.tint, color: al.cor }}>
                 <al.Icone size={14} /> {al.label}
               </div>
 
@@ -691,7 +1085,7 @@ function FiltrosBar({ situacao, setSituacao, busca, setBusca, ordem, setOrdem, s
         <button onClick={() => setSoEditaveis((v) => !v)}
                 className="text-xs px-3 py-2 rounded-xl font-medium flex items-center gap-1.5 shrink-0"
                 style={soEditaveis
-                  ? { background: 'color-mix(in srgb, var(--ok) 18%, transparent)', color: 'var(--ok)' }
+                  ? { background: 'var(--tint-ok)', color: 'var(--ok)' }
                   : { background: 'var(--glass-hover)', color: 'var(--text-dim)' }}>
           <ToggleRight size={14} /> só editáveis
         </button>
@@ -783,8 +1177,8 @@ function NotaCard({ n, ativo, aplicadaTotal, carregandoValor, selecionada, onTog
   const semValor = !n.valor && carregandoValor
   return (
     <div className={`rounded-xl border px-3 py-2.5 flex items-center gap-2.5 transition ${ativo ? 'border-accent' : aplicada ? '' : selecionada ? '' : 'border-glassb hover:bg-[var(--glass-hover)]'}`}
-         style={selecionada && !ativo ? { borderColor: 'var(--accent)', background: 'color-mix(in srgb, var(--accent) 8%, transparent)' }
-              : aplicada && !ativo ? { borderColor: 'var(--ok)', background: 'color-mix(in srgb, var(--ok) 7%, transparent)' } : undefined}>
+         style={selecionada && !ativo ? { borderColor: 'var(--accent)', background: 'var(--tint-accent)' }
+              : aplicada && !ativo ? { borderColor: 'var(--ok)', background: 'var(--tint-ok)' } : undefined}>
       {n.editavel && onToggleSel && (
         <button onClick={() => onToggleSel(n.id)} className="shrink-0 text-faint hover:text-accent" title="Selecionar">
           {selecionada ? <CheckSquare size={16} style={{ color: 'var(--accent)' }} /> : <Square size={16} />}
@@ -826,7 +1220,7 @@ function Badge({ children, cor }) {
   return (
     <span className="text-[10px] px-1.5 py-0.5 rounded num font-medium"
           style={cor
-            ? { background: 'color-mix(in srgb, ' + cor + ' 16%, transparent)', color: cor }
+            ? { background: tintOf(cor), color: cor }
             : { background: 'var(--glass-hover)', color: 'var(--text-dim)' }}>
       {children}
     </span>
@@ -838,7 +1232,7 @@ function LoteBar({ qtd, cfg, rodando, onAplicar, report, onFechar, onVerNota }) 
   const tipo = cfg?.desconto_tipo === 'valor' ? `R$ ${cfg?.desconto_valor}` : `${cfg?.desconto_valor ?? 0}%`
   const semDesconto = !cfg || !Number(cfg?.desconto_valor)
   return (
-    <div className="rounded-2xl p-5 border" style={{ borderColor: 'var(--accent)', background: 'color-mix(in srgb, var(--accent) 7%, transparent)' }}>
+    <div className="rounded-2xl p-5 border" style={{ borderColor: 'var(--accent)', background: 'var(--tint-accent)' }}>
       <div className="flex items-center gap-4 flex-wrap">
         <div className="h-10 w-10 rounded-xl grid place-items-center shrink-0" style={{ background: 'linear-gradient(135deg, var(--accent), var(--accent2))' }}>
           <Send size={18} className="text-white" />
@@ -872,7 +1266,7 @@ function LoteBar({ qtd, cfg, rodando, onAplicar, report, onFechar, onVerNota }) 
 function LoteReport({ report, onFechar, onVerNota }) {
   if (report.erro) {
     return (
-      <div className="mt-4 rounded-xl px-3 py-3 border flex items-start gap-2" style={{ borderColor: 'var(--danger)', background: 'color-mix(in srgb, var(--danger) 8%, transparent)' }}>
+      <div className="mt-4 rounded-xl px-3 py-3 border flex items-start gap-2" style={{ borderColor: 'var(--danger)', background: 'var(--tint-danger)' }}>
         <AlertTriangle size={15} className="mt-0.5 shrink-0" style={{ color: 'var(--danger)' }} />
         <div className="min-w-0 flex-1">
           <div className="text-xs font-medium" style={{ color: 'var(--danger)' }}>Não foi possível processar o lote</div>
@@ -931,14 +1325,14 @@ function AutomacaoPanel({ cfg, eventos }) {
     <div className="glass rounded-2xl p-5">
       <div className="flex items-center gap-3">
         <div className="h-9 w-9 rounded-xl grid place-items-center shrink-0"
-             style={{ background: autoOn ? 'color-mix(in srgb, var(--ok) 18%, transparent)' : 'var(--glass-hover)' }}>
+             style={{ background: autoOn ? 'var(--tint-ok)' : 'var(--glass-hover)' }}>
           <Activity size={17} style={{ color: autoOn ? 'var(--ok)' : 'var(--faint)' }} />
         </div>
         <div className="min-w-0 flex-1">
           <div className="text-sm font-semibold flex items-center gap-2">
             Automação por webhook
             <span className="text-[10px] px-2 py-0.5 rounded-full font-medium"
-                  style={{ background: autoOn ? 'color-mix(in srgb, var(--ok) 18%, transparent)' : 'var(--glass-hover)',
+                  style={{ background: autoOn ? 'var(--tint-ok)' : 'var(--glass-hover)',
                            color: autoOn ? 'var(--ok)' : 'var(--faint)' }}>
               {autoOn ? 'LIGADO' : 'DESLIGADO'}
             </span>
@@ -1023,7 +1417,7 @@ function PlataformaDescontos({ cfg, salvar }) {
       <button onClick={() => setAberto((v) => !v)} className="flex items-center gap-2 w-full text-left">
         <ShoppingBag size={14} className="text-accent2" />
         <span className="text-sm font-medium">Desconto por plataforma</span>
-        {ativas > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded num" style={{ background: 'color-mix(in srgb, var(--accent2) 18%, transparent)', color: 'var(--accent2)' }}>{ativas} ativa(s)</span>}
+        {ativas > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded num" style={{ background: 'rgba(123, 42, 140, 0.16)', color: 'var(--accent2)' }}>{ativas} ativa(s)</span>}
         <ChevronRight size={15} className={`ml-auto text-faint transition ${aberto ? 'rotate-90' : ''}`} />
       </button>
       <div className="text-[11px] text-dim mt-1">
@@ -1168,7 +1562,7 @@ function Editor({ nota, cfg, aplicada, onAplicado, onVerCompleta }) {
         </div>
       )}
       {aplicada != null && (
-        <div className="mt-3 rounded-xl px-3 py-2 text-xs flex items-center gap-2" style={{ background: 'color-mix(in srgb, var(--ok) 14%, transparent)', color: 'var(--ok)' }}>
+        <div className="mt-3 rounded-xl px-3 py-2 text-xs flex items-center gap-2" style={{ background: 'var(--tint-ok)', color: 'var(--ok)' }}>
           <CheckCircle2 size={14} /> Desconto aplicado e salvo no Bling · novo total {brl(aplicada)}
         </div>
       )}
@@ -1299,7 +1693,7 @@ function ConciliacaoShopee({ c, onFechar }) {
   }
   const div = c.divergente
   return (
-    <div className="mt-2 rounded-xl p-3.5 text-xs border" style={{ borderColor: div ? 'var(--warn)' : 'var(--ok)', background: div ? 'color-mix(in srgb, var(--warn) 8%, transparent)' : 'color-mix(in srgb, var(--ok) 7%, transparent)' }}>
+    <div className="mt-2 rounded-xl p-3.5 text-xs border" style={{ borderColor: div ? 'var(--warn)' : 'var(--ok)', background: div ? 'var(--tint-warn)' : 'var(--tint-ok)' }}>
       <div className="flex items-center justify-between mb-2">
         <span className="flex items-center gap-1.5 font-semibold" style={{ color: div ? 'var(--warn)' : 'var(--ok)' }}>
           {div ? <AlertTriangle size={13} /> : <CheckCircle2 size={13} />}
@@ -1518,178 +1912,302 @@ function Toggle({ label, desc, on, onChange }) {
   )
 }
 
-/* ------------------------- Nota completa (modal) ------------------------- */
-function NfeDetalhe({ nota, onClose }) {
+/* ------------- Nota completa (modal) — documento reformulado ------------ */
+// Código de barras Code 128-C real (mesmo padrão do DANFE) a partir da chave de 44 dígitos.
+// Sem dependência externa: encoder + tabela de padrões + checksum, renderizado em SVG.
+const CODE128_PATTERNS = [
+  '212222', '222122', '222221', '121223', '121322', '131222', '122213', '122312', '132212', '221213',
+  '221312', '231212', '112232', '122132', '122231', '113222', '123122', '123221', '223211', '221132',
+  '221231', '213212', '223112', '312131', '311222', '321122', '321221', '312212', '322112', '322211',
+  '212123', '212321', '232121', '111323', '131123', '131321', '112313', '132113', '132311', '211313',
+  '231113', '231311', '112133', '112331', '132131', '113123', '113321', '133121', '313121', '211331',
+  '231131', '213113', '213311', '213131', '311123', '311321', '331121', '312113', '312311', '332111',
+  '314111', '221411', '431111', '111224', '111422', '121124', '121421', '141122', '141221', '112214',
+  '112412', '122114', '122411', '142112', '142211', '241211', '221114', '413111', '241112', '134111',
+  '111242', '121142', '121241', '114212', '124112', '124211', '411212', '421112', '421211', '212141',
+  '214121', '412121', '111143', '111341', '131141', '114113', '114311', '411113', '411311', '113141',
+  '114131', '311141', '411131', '211412', '211214', '211232', '2331112',
+]
+
+function Barcode128({ value, height = 40 }) {
+  const code = String(value || '').replace(/\D/g, '')
+  // Code 128-C exige quantidade par de dígitos (codifica pares). A chave de NF-e tem 44.
+  if (!code || code.length % 2 !== 0) {
+    return <div className="h-9 rounded-md" style={{ background: 'repeating-linear-gradient(90deg,#111 0 2px,transparent 2px 4px,#111 4px 5px,transparent 5px 9px,#111 9px 12px,transparent 12px 14px)', opacity: 0.85 }} />
+  }
+  const codes = [105] // Start C
+  for (let i = 0; i < code.length; i += 2) codes.push(parseInt(code.slice(i, i + 2), 10))
+  let sum = 105
+  codes.slice(1).forEach((c, i) => { sum += c * (i + 1) })
+  codes.push(sum % 103) // dígito verificador
+  codes.push(106)       // Stop
+  const modules = codes.map((c) => CODE128_PATTERNS[c]).join('').split('').map(Number)
+  const QZ = 10 // quiet zone (módulos) de cada lado
+  const total = modules.reduce((s, w) => s + w, 0) + QZ * 2
+  let x = QZ
+  const rects = []
+  modules.forEach((w, i) => {
+    if (i % 2 === 0) rects.push(<rect key={i} x={x} y="0" width={w} height={height} fill="#111" />)
+    x += w
+  })
+  return (
+    <svg width="100%" height={height} viewBox={`0 0 ${total} ${height}`} preserveAspectRatio="none" style={{ display: 'block' }} shapeRendering="crispEdges">
+      {rects}
+    </svg>
+  )
+}
+
+function NfeDetalhe({ nota, cfg, onClose, onEditar }) {
   const n = nota
   const dest = n.destinatario || {}
   const itens = n.itens || []
-  const totalProdutos = itens.reduce((s, it) => s + (Number(it.valor_total) || 0), 0)
-  const totalTributos = itens.reduce((s, it) => s + (Number(it.tributos_aprox) || 0), 0)
   const parcelas = n.parcelas || []
-  const FRETE_CONTA = { '0': 'Por conta do emitente', '1': 'Por conta do destinatário', '2': 'Por conta de terceiros', '3': 'Transporte próprio (remetente)', '4': 'Transporte próprio (destinatário)', '9': 'Sem ocorrência de transporte' }
-  const fretePorConta = FRETE_CONTA[String(n.transporte?.frete_por_conta)] || '—'
-  const corSit = n.editavel ? 'var(--warn)' : (n.situacao === 2 ? 'var(--danger)' : 'var(--ok)')
+  const totalTributos = itens.reduce((s, it) => s + (Number(it.tributos_aprox) || 0), 0)
+  const totalProdutos = n.valor_produtos ?? itens.reduce((s, it) => s + (Number(it.valor_total) || 0), 0)
+  const qtdUnid = itens.reduce((s, it) => s + (Number(it.quantidade) || 0), 0)
+  const sit = Number(n.situacao)
+  const isRej = sit === 4
+  const isCanc = sit === 2 || sit === 9 || sit === 11
+  const isPend = sit === 1
+  const isAut = !n.editavel && !isCanc && !isRej && !isPend
+  const temDocs = !!(n.link_danfe || n.link_xml || n.link_pdf)
+  const [copiado, setCopiado] = useState(false)
+  const copiarChave = () => {
+    try { navigator.clipboard?.writeText(n.chave_acesso || ''); setCopiado(true); setTimeout(() => setCopiado(false), 1600) } catch {}
+  }
+  const sitCor = isRej ? 'var(--danger)' : isCanc ? 'var(--faint)' : isPend ? 'var(--warn)' : 'var(--ok)'
+  const sitTint = isRej ? 'var(--tint-danger)' : isCanc ? 'var(--glass-hover)' : isPend ? 'var(--tint-warn)' : 'var(--tint-ok)'
+  const destCidade = [dest.municipio, dest.uf].filter(Boolean).join('/')
+
+  // jornada da nota
+  const passo3 = isRej ? { label: 'Rejeitada', st: 'err' } : isCanc ? { label: 'Cancelada', st: 'err' } : { label: 'Autorizada', st: isAut ? 'done' : 'off' }
+  const steps = [
+    { label: 'Emitida', st: 'done', sub: n.data_emissao || '' },
+    { label: 'Transmitida', st: isPend ? 'now' : 'done', sub: '' },
+    { ...passo3, sub: '' },
+    { label: 'Documentos', st: temDocs ? 'done' : 'off', sub: temDocs ? 'DANFE · XML' : '' },
+  ]
+  const stCor = { done: 'var(--ok)', now: 'var(--warn)', err: 'var(--danger)', off: 'var(--faint)' }
+  const stIco = { done: '✓', now: '•', err: '✕', off: '' }
+
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center p-4 sm:p-8 overflow-y-auto"
+    <div className="fixed inset-0 z-50 flex items-start justify-center p-3 sm:p-6 overflow-y-auto"
          style={{ background: 'rgba(0,0,0,.6)', backdropFilter: 'blur(3px)' }} onClick={onClose}>
-      <div className="glass rounded-2xl w-full max-w-2xl my-auto" onClick={(e) => e.stopPropagation()} style={{ background: 'var(--bg)' }}>
-        {/* Cabeçalho */}
-        <div className="flex items-start gap-3 p-5 border-b" style={{ borderColor: 'var(--glass-border)' }}>
-          <div className="h-10 w-10 rounded-xl grid place-items-center shrink-0" style={{ background: 'linear-gradient(135deg, var(--accent), var(--accent2))' }}>
-            <FileText size={18} className="text-white" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="font-display font-semibold">NF-e nº {n.numero} <span className="text-faint font-normal">· série {n.serie}</span></div>
-            <div className="flex items-center gap-2 mt-1 flex-wrap">
-              <span className="text-[11px] px-2 py-0.5 rounded-full" style={{ background: corSit + '26', color: corSit }}>{n.situacao_label}</span>
-              {n.modelo_label && <span className="text-[11px] px-2 py-0.5 rounded-full font-medium" style={{ background: 'color-mix(in srgb, var(--accent) 16%, transparent)', color: 'var(--accent)' }}>{n.modelo_label}</span>}
-              {n.tipo_label && <span className="text-[11px] px-2 py-0.5 rounded-full" style={{ background: 'var(--glass-hover)', color: 'var(--text-dim)' }}>{n.tipo_label}</span>}
-              {n.finalidade_label && <span className="text-[11px] px-2 py-0.5 rounded-full" style={{ background: 'var(--glass-hover)', color: 'var(--text-dim)' }}>{n.finalidade_label}</span>}
-              {n.data_emissao && <span className="text-[11px] text-faint num">{n.data_emissao}</span>}
-              {n.simples_nacional && <span className="text-[11px] px-2 py-0.5 rounded-full flex items-center gap-1" style={{ background: 'var(--glass-hover)', color: 'var(--accent2)' }}><ShieldCheck size={11} /> Simples Nacional</span>}
-              <PlataformaBadge nome={n.plataforma} />
-              {n.pedido_loja && <span className="text-[11px] text-faint num flex items-center gap-1"><Hash size={10} /> pedido {n.pedido_loja}</span>}
+      <div className="rounded-2xl w-full my-auto overflow-hidden" onClick={(e) => e.stopPropagation()}
+           style={{ maxWidth: 'min(940px, 96vw)', background: 'var(--surface)', border: '1px solid var(--glass-border)', boxShadow: 'var(--shadow)' }}>
+
+        {/* HERO */}
+        <div className="px-5 sm:px-6 pt-5 pb-4" style={{ background: 'linear-gradient(180deg, var(--soft), var(--surface))', borderBottom: '1px solid var(--glass-border)' }}>
+          <div className="flex items-start gap-3">
+            <div className="h-11 w-11 rounded-xl grid place-items-center shrink-0" style={{ background: 'linear-gradient(135deg, var(--accent), var(--accent2))' }}>
+              <FileText size={20} className="text-white" />
             </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <span className="font-display font-bold" style={{ fontSize: 20 }}>NF-e {n.numero || '—'}</span>
+                <span className="text-faint text-xs">série {n.serie || '—'}{n.modelo_label ? ` · ${n.modelo_label}` : ''}</span>
+                <span className="text-xs font-bold px-2.5 py-1 rounded-full inline-flex items-center gap-1.5" style={{ background: sitTint, color: sitCor }}>● {n.situacao_label}</span>
+                {n.simples_nacional && <span className="text-[11px] px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'var(--glass-hover)', color: 'var(--accent2)' }}><ShieldCheck size={11} /> Simples Nacional</span>}
+              </div>
+              <div className="num text-xs text-dim mt-1.5">
+                {destCidade ? <>Destino {destCidade} · </> : ''}{n.data_emissao ? <>emitida {n.data_emissao} · </> : ''}<b className="text-fg">{brl(n.valor_nota)}</b>
+              </div>
+            </div>
+            <button onClick={onClose} className="text-dim hover:text-fg p-1 self-start"><X size={20} /></button>
           </div>
-          <button onClick={onClose} className="text-dim hover:text-fg p-1"><X size={20} /></button>
+
+          {/* Jornada da nota */}
+          <div className="flex items-center mt-4 overflow-x-auto pb-1">
+            {steps.map((s, i) => (
+              <div key={i} className="flex items-center" style={{ flex: i < steps.length - 1 ? '1 1 0' : '0 0 auto', minWidth: i < steps.length - 1 ? 120 : 92 }}>
+                <div className="flex flex-col items-center gap-1.5 shrink-0" style={{ width: 92 }}>
+                  <div className="h-6 w-6 rounded-full grid place-items-center text-[11px] shrink-0"
+                       style={{ background: s.st === 'off' ? 'var(--surface)' : stCor[s.st], border: s.st === 'off' ? '2px solid var(--glass-border)' : 'none', color: s.st === 'off' ? 'var(--faint)' : '#fff' }}>{stIco[s.st]}</div>
+                  <span className="text-[11px] font-medium" style={{ color: s.st === 'off' ? 'var(--faint)' : 'var(--text-dim)' }}>{s.label}</span>
+                  {s.sub && <span className="text-[9px] text-faint num leading-none">{s.sub}</span>}
+                </div>
+                {i < steps.length - 1 && <div className="h-[3px] rounded flex-1" style={{ background: (steps[i + 1].st === 'off' || s.st === 'off') ? 'var(--glass-border)' : stCor[s.st], marginTop: -18 }} />}
+              </div>
+            ))}
+          </div>
         </div>
 
-        <div className="p-5 space-y-4">
-          {/* Trava fiscal */}
-          {!n.editavel && (
-            <div className="rounded-xl px-3 py-2 text-xs flex items-start gap-2 border" style={{ borderColor: 'var(--ok)', background: 'var(--glass-hover)' }}>
-              <Lock size={13} className="mt-0.5 shrink-0" style={{ color: 'var(--ok)' }} />
-              <span className="text-dim">Nota <b className="text-fg">{(n.situacao_label || '').toLowerCase()}</b> — é um documento fiscal imutável. Para corrigir, use carta de correção ou cancelamento + reemissão (no Bling).</span>
-            </div>
-          )}
-
-          {/* Destinatário */}
-          <Bloco titulo="Destinatário" icon={<User size={14} />}>
-            <div className="text-sm font-medium">{dest.nome || '—'}</div>
-            <div className="text-xs text-dim num flex flex-wrap gap-x-2 mt-0.5">
-              {dest.documento && <span>{dest.documento}</span>}
-              {dest.ie && <span>· IE {dest.ie}</span>}
-              {dest.telefone && <span>· {dest.telefone}</span>}
-            </div>
-            {dest.email && <div className="text-xs text-dim truncate">{dest.email}</div>}
-            {(dest.logradouro || dest.endereco) && (
-              <div className="text-xs text-dim flex items-start gap-1.5 mt-1.5">
-                <MapPin size={12} className="mt-0.5 shrink-0" style={{ color: 'var(--accent)' }} />
-                <span>
-                  {dest.logradouro
-                    ? <>{dest.logradouro}{dest.numero ? `, ${dest.numero}` : ''}{dest.complemento ? ` — ${dest.complemento}` : ''}
-                        {dest.bairro ? <><br />{dest.bairro}</> : ''}
-                        {(dest.municipio || dest.uf) ? <><br />{dest.municipio}{dest.uf ? `/${dest.uf}` : ''}{dest.cep ? ` · CEP ${dest.cep}` : ''}</> : ''}</>
-                    : dest.endereco}
-                </span>
+        {/* BODY */}
+        <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_292px]">
+          {/* MAIN */}
+          <div className="p-4 sm:p-5 space-y-3.5">
+            {isRej && n.motivo && (
+              <div className="rounded-xl px-3 py-2 text-xs flex items-start gap-2" style={{ border: '1px solid var(--danger)', background: 'var(--tint-danger)' }}>
+                <CircleAlert size={14} className="mt-0.5 shrink-0" style={{ color: 'var(--danger)' }} />
+                <span className="text-dim"><b style={{ color: 'var(--danger)' }}>Rejeitada pela Sefaz:</b> {n.motivo}</span>
               </div>
             )}
-          </Bloco>
 
-          {/* Totais */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            <Mini label="Produtos" valor={brl(n.valor_produtos ?? totalProdutos)} />
-            <Mini label="Frete" valor={brl(n.valor_frete)} />
-            {Number(n.desconto_nota) > 0
-              ? <Mini label="Desconto da nota" valor={`- ${brl(n.desconto_nota)}`} />
-              : <Mini label="Tributos aprox." valor={brl(totalTributos)} />}
-            <Mini label="Total da nota" valor={brl(n.valor_nota)} forte />
-          </div>
-          {Number(n.desconto_nota) > 0 && (
-            <div className="text-[11px] text-dim flex items-center gap-1.5 -mt-2">
-              <Info size={11} className="shrink-0" />
-              {brl(n.valor_produtos ?? totalProdutos)} produtos + {brl(n.valor_frete)} frete − {brl(n.desconto_nota)} desconto = <b className="text-fg">{brl(n.valor_nota)}</b>. O desconto de pedido vem da plataforma.
+            {/* De -> Para: Emitente e Destinatário */}
+            <div className="flex flex-col sm:flex-row items-stretch gap-2">
+              {/* Emitente (sua empresa) */}
+              <div className="flex-1 rounded-2xl p-3.5" style={{ border: '1px solid var(--glass-border)' }}>
+                <div className="text-[10px] uppercase tracking-wide text-faint font-bold flex items-center gap-1.5 mb-2"><Store size={13} /> Emitente</div>
+                {n.emitente && (n.emitente.nome || n.emitente.cnpj) ? (
+                  <>
+                    <div className="text-sm font-bold">{n.emitente.nome || 'Sua empresa'}</div>
+                    {n.emitente.cnpj ? <div className="num text-[11.5px] text-dim mt-0.5">{n.emitente.cnpj}</div> : null}
+                    {(n.emitente.endereco || n.emitente.cidade) ? (
+                      <div className="text-[11.5px] text-dim flex items-start gap-1.5 mt-1.5">
+                        <MapPin size={12} className="mt-0.5 shrink-0" style={{ color: 'var(--accent2)' }} />
+                        <span>{n.emitente.endereco}{n.emitente.endereco && n.emitente.cidade ? <br /> : null}{n.emitente.cidade}</span>
+                      </div>
+                    ) : null}
+                  </>
+                ) : (
+                  <div className="text-[11.5px] text-dim flex items-start gap-1.5 mt-1">
+                    <Info size={12} className="mt-0.5 shrink-0" style={{ color: 'var(--accent2)' }} />
+                    <span>Preencha os dados da sua empresa na <b className="text-fg">Configuração de impressão</b> (etiqueta/folha) para aparecerem aqui.</span>
+                  </div>
+                )}
+              </div>
+              <div className="hidden sm:flex items-center justify-center shrink-0" style={{ color: 'var(--accent)' }}><ArrowRight size={18} /></div>
+              {/* Destinatário */}
+              <div className="flex-1 rounded-2xl p-3.5" style={{ border: '1px solid var(--glass-border)' }}>
+                <div className="text-[10px] uppercase tracking-wide text-faint font-bold flex items-center gap-1.5 mb-2"><User size={13} /> Destinatário</div>
+                <div className="text-sm font-bold">{dest.nome || '—'}</div>
+                <div className="num text-[11.5px] text-dim mt-0.5 flex flex-wrap gap-x-2">
+                  {dest.documento && <span>{dest.documento}</span>}
+                  {dest.ie && <span>· IE {dest.ie}</span>}
+                  {dest.telefone && <span>· {dest.telefone}</span>}
+                </div>
+                {(dest.logradouro || dest.endereco) && (
+                  <div className="text-[11.5px] text-dim flex items-start gap-1.5 mt-1.5">
+                    <MapPin size={12} className="mt-0.5 shrink-0" style={{ color: 'var(--accent)' }} />
+                    <span>{dest.logradouro
+                      ? <>{dest.logradouro}{dest.numero ? `, ${dest.numero}` : ''}{dest.complemento ? ` — ${dest.complemento}` : ''}{dest.bairro ? `, ${dest.bairro}` : ''}{destCidade ? <><br />{destCidade}{dest.cep ? ` · CEP ${dest.cep}` : ''}</> : ''}</>
+                      : dest.endereco}</span>
+                  </div>
+                )}
+              </div>
             </div>
-          )}
 
-          {/* Itens */}
-          <Bloco titulo={`Itens (${itens.length})`} icon={<Receipt size={14} />}>
-            <div className="space-y-1.5">
+            {/* Itens */}
+            <div className="rounded-2xl p-3.5" style={{ border: '1px solid var(--glass-border)' }}>
+              <div className="text-[10px] uppercase tracking-wide text-faint font-bold flex items-center gap-1.5 mb-2.5"><Receipt size={13} /> Itens · {itens.length} produto(s) · {qtdUnid} un</div>
+              <div className="flex items-center text-[9.5px] uppercase tracking-wide text-faint font-bold pb-1.5">
+                <span className="flex-1">Produto</span><span className="w-10 text-center">Qtd</span><span className="w-16 text-right">Unit.</span><span className="w-20 text-right">Total</span>
+              </div>
               {itens.map((it, i) => (
-                <div key={i} className="flex items-center gap-2 text-sm border-b last:border-0 pb-1.5" style={{ borderColor: 'var(--glass-border)' }}>
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate">{it.descricao}</div>
-                    <div className="text-[10px] text-faint num flex flex-wrap gap-x-1.5">
-                      <span>{it.codigo}</span>
+                <div key={i} className="flex items-start py-2" style={{ borderTop: '1px solid var(--glass-border)' }}>
+                  <div className="flex-1 min-w-0 pr-2">
+                    <div className="text-[13px] leading-snug">{it.descricao}</div>
+                    <div className="num text-[9.5px] text-faint mt-0.5 flex flex-wrap gap-x-1.5">
+                      {it.codigo && <span>cód {it.codigo}</span>}
                       <span>· NCM {it.ncm || '—'}</span>
                       <span>· CFOP {it.cfop || '—'}</span>
                       {it.cest && <span>· CEST {it.cest}</span>}
-                      {Number(it.peso_bruto) > 0 && <span>· {it.peso_bruto} kg</span>}
                       {Number(it.tributos_aprox) > 0 && <span>· trib. {brl(it.tributos_aprox)}</span>}
                     </div>
                   </div>
-                  <div className="text-xs text-dim num shrink-0 text-right">{it.quantidade} {it.unidade || 'un'}<br /><span className="text-faint">{brl(it.valor)}</span></div>
-                  <div className="num font-medium shrink-0 w-20 text-right">{brl(it.valor_total)}</div>
+                  <span className="num text-[12px] text-dim w-10 text-center shrink-0">{it.quantidade}</span>
+                  <span className="num text-[12px] text-dim w-16 text-right shrink-0">{brl(it.valor)}</span>
+                  <span className="num text-[13px] font-semibold w-20 text-right shrink-0">{brl(it.valor_total)}</span>
                 </div>
               ))}
             </div>
-          </Bloco>
 
-          {/* Transporte + Parcelas */}
-          <div className="grid sm:grid-cols-2 gap-2">
-            <Bloco titulo="Transporte" icon={<Truck size={14} />}>
-              <div className="text-xs text-dim">Frete: <span className="text-fg">{n.transporte?.frete_por_conta_label || fretePorConta}</span></div>
-              <div className="text-xs text-dim mt-0.5">Transportadora: <span className="text-fg">{n.transporte?.transportador || '—'}</span>{n.transporte?.transportador_documento ? <span className="text-faint num"> · {n.transporte.transportador_documento}</span> : ''}</div>
-              {Array.isArray(n.transporte?.volumes) && n.transporte.volumes.length > 0 && (
-                <div className="text-xs text-dim mt-1 flex items-center gap-1.5">
-                  <Package size={12} className="shrink-0" style={{ color: 'var(--accent2)' }} />
-                  {n.transporte.volumes.reduce((s, v) => s + (Number(v.quantidade) || 0), 0)} volume(s)
-                  {n.transporte.volumes[0]?.especie ? ` · ${n.transporte.volumes[0].especie}` : ''}
-                  {Number(n.transporte.volumes[0]?.peso_bruto) > 0 ? ` · ${n.transporte.volumes[0].peso_bruto} kg` : ''}
+            {/* Valores + Transporte/Pagamento */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="rounded-2xl p-3.5" style={{ border: '1px solid var(--glass-border)' }}>
+                <div className="text-[10px] uppercase tracking-wide text-faint font-bold flex items-center gap-1.5 mb-1.5"><DollarSign size={13} /> Valores</div>
+                <div className="flex justify-between text-[13px] py-1"><span className="text-dim">Produtos</span><span className="num font-medium">{brl(totalProdutos)}</span></div>
+                <div className="flex justify-between text-[13px] py-1"><span className="text-dim">Frete</span><span className="num font-medium">{brl(n.valor_frete)}</span></div>
+                {Number(n.desconto_nota) > 0 && <div className="flex justify-between text-[13px] py-1"><span className="text-dim">Desconto</span><span className="num font-medium" style={{ color: 'var(--ok)' }}>− {brl(n.desconto_nota)}</span></div>}
+                <div className="flex justify-between items-center pt-2 mt-1" style={{ borderTop: '1px dashed var(--glass-border)' }}>
+                  <span className="text-[13px] font-bold">Total da nota</span><span className="num font-extrabold" style={{ color: 'var(--accent)', fontSize: 17 }}>{brl(n.valor_nota)}</span>
                 </div>
-              )}
-            </Bloco>
-            <Bloco titulo="Pagamento" icon={<CreditCard size={14} />}>
-              {parcelas.length ? (
-                <div className="space-y-1">
-                  {parcelas.map((p, i) => (
-                    <div key={i} className="text-xs">
-                      <div className="text-dim flex items-center justify-between">
-                        <span className="num">{p.data || `parcela ${i + 1}`}</span>
-                        <span className="num text-fg">{brl(p.valor)}</span>
-                      </div>
-                      {(p.forma || p.observacoes) && <div className="text-[10px] text-faint truncate">{p.forma || p.observacoes}</div>}
-                    </div>
-                  ))}
-                </div>
-              ) : <div className="text-xs text-faint">À vista / não informado</div>}
-            </Bloco>
+                <div className="text-[10px] text-faint mt-2 flex items-center gap-1.5"><Landmark size={11} style={{ color: 'var(--warn)' }} /> Tributos aprox. (IBPT): {brl(totalTributos)}{totalProdutos > 0 ? ` · ~${((totalTributos / (n.valor_nota || totalProdutos)) * 100).toFixed(1)}%` : ''}</div>
+              </div>
+              <div className="rounded-2xl p-3.5" style={{ border: '1px solid var(--glass-border)' }}>
+                <div className="text-[10px] uppercase tracking-wide text-faint font-bold flex items-center gap-1.5 mb-1.5"><Truck size={13} /> Transporte &amp; pagamento</div>
+                <div className="flex justify-between text-[12px] py-1" style={{ borderBottom: '1px solid var(--glass-border)' }}><span className="text-faint">Frete por conta</span><span className="text-right">{n.transporte?.frete_por_conta_label || '—'}</span></div>
+                <div className="flex justify-between text-[12px] py-1" style={{ borderBottom: '1px solid var(--glass-border)' }}><span className="text-faint">Transportadora</span><span className="text-right truncate ml-2">{n.transporte?.transportador || '—'}</span></div>
+                {Array.isArray(n.transporte?.volumes) && n.transporte.volumes.length > 0 && (
+                  <div className="flex justify-between text-[12px] py-1" style={{ borderBottom: '1px solid var(--glass-border)' }}><span className="text-faint">Volumes</span><span className="num text-right">{n.transporte.volumes.reduce((s, v) => s + (Number(v.quantidade) || 0), 0)}{n.transporte.volumes[0]?.peso_bruto ? ` · ${n.transporte.volumes[0].peso_bruto} kg` : ''}</span></div>
+                )}
+                <div className="flex justify-between text-[12px] py-1"><span className="text-faint">Pagamento</span><span className="text-right">{parcelas[0]?.forma || (parcelas.length ? `${parcelas.length}x` : 'À vista / —')}</span></div>
+              </div>
+            </div>
           </div>
 
-          {/* Informações fiscais extras */}
-          {(n.natureza_operacao || n.intermediador || n.vendedor || n.data_operacao) && (
-            <Bloco titulo="Informações" icon={<Landmark size={14} />}>
-              <div className="grid sm:grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                {n.natureza_operacao && <InfoLinha rotulo="Natureza" valor={n.natureza_operacao} />}
-                {n.intermediador && <InfoLinha rotulo="Intermediador" valor={n.intermediador} />}
-                {n.vendedor && <InfoLinha rotulo="Vendedor" valor={n.vendedor} />}
-                {n.data_operacao && <InfoLinha rotulo="Operação" valor={n.data_operacao} />}
-              </div>
-            </Bloco>
-          )}
-
-          {/* Observações */}
-          {n.observacoes && (
-            <Bloco titulo="Observações" icon={<FileText size={14} />}>
-              <div className="text-xs text-dim whitespace-pre-wrap break-words">{n.observacoes}</div>
-            </Bloco>
-          )}
-
-          {/* Chave + documentos */}
-          {n.chave_acesso && (
-            <div className="rounded-xl border border-glassb px-3 py-2">
-              <div className="text-[10px] text-faint uppercase tracking-wide flex items-center gap-1.5 mb-1"><Landmark size={11} /> Chave de acesso</div>
-              <div className="text-[10px] text-dim num break-all">{n.chave_acesso}</div>
+          {/* RAIL */}
+          <div className="p-4 sm:p-5 space-y-3.5" style={{ background: 'var(--soft)', borderLeft: '1px solid var(--glass-border)' }}>
+            {/* Documentos */}
+            <div>
+              <div className="text-[10px] uppercase tracking-wide text-faint font-bold flex items-center gap-1.5 mb-2.5"><FileDown size={13} /> Documentos fiscais</div>
+              {temDocs ? (
+                <div className="space-y-2.5">
+                  {n.link_danfe && <a href={n.link_danfe} target="_blank" rel="noreferrer" className="w-full flex items-center justify-center gap-2 rounded-xl py-2.5 text-[13.5px] font-bold text-white" style={{ background: 'linear-gradient(135deg, var(--accent), var(--accent2))', boxShadow: '0 8px 20px var(--tint-accent-strong)' }}><Download size={15} /> Baixar DANFE</a>}
+                  <div className="flex gap-2.5">
+                    {n.link_pdf && <a href={n.link_pdf} target="_blank" rel="noreferrer" className="flex-1 flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-[13px] font-bold" style={{ border: '1px solid var(--accent)', color: 'var(--accent)' }}><Download size={14} /> PDF</a>}
+                    {n.link_xml && <a href={n.link_xml} target="_blank" rel="noreferrer" className="flex-1 flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-[13px] font-bold" style={{ border: '1px solid var(--accent)', color: 'var(--accent)' }}><Download size={14} /> XML</a>}
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  {n.editavel && onEditar && (
+                    <button onClick={() => onEditar(n.id)} className="w-full flex items-center justify-center gap-2 rounded-xl py-2.5 text-[13.5px] font-bold text-white" style={{ background: 'linear-gradient(135deg, var(--accent), var(--accent2))', boxShadow: '0 8px 20px var(--tint-accent-strong)' }}>
+                      <Percent size={15} /> Editar desconto
+                    </button>
+                  )}
+                  <div className="rounded-xl px-3 py-3 text-[11.5px] text-dim flex items-start gap-2" style={{ border: '1px solid var(--glass-border)', background: 'var(--surface)' }}>
+                    <Clock size={13} className="mt-0.5 shrink-0" style={{ color: 'var(--warn)' }} />
+                    <span>DANFE, PDF e XML ficam disponíveis <b className="text-fg">após a autorização</b> na Sefaz. {isPend ? 'Ajuste o desconto aqui e transmita no Bling.' : ''}</span>
+                  </div>
+                </div>
+              )}
             </div>
-          )}
-          <div className="flex flex-wrap gap-2">
-            {n.link_danfe && <Doc href={n.link_danfe} label="DANFE" />}
-            {n.link_pdf && <Doc href={n.link_pdf} label="PDF" />}
-            {n.link_xml && <Doc href={n.link_xml} label="XML" />}
-            {!n.link_danfe && !n.link_pdf && !n.link_xml && <span className="text-[11px] text-faint">Documentos (DANFE/XML) ficam disponíveis após a autorização na Sefaz.</span>}
+
+            {/* Chave de acesso */}
+            {n.chave_acesso && (
+              <div className="rounded-2xl p-3.5" style={{ border: '1px solid var(--glass-border)', background: 'var(--surface)' }}>
+                <div className="text-[10px] uppercase tracking-wide text-faint font-bold flex items-center gap-1.5"><Hash size={12} /> Chave de acesso</div>
+                <div className="num text-[10px] text-dim mt-1.5 break-all leading-relaxed">{n.chave_acesso}</div>
+                <div className="mt-2 rounded-md px-2 py-1.5" style={{ background: '#fff' }}>
+                  <Barcode128 value={n.chave_acesso} height={40} />
+                </div>
+                <button onClick={copiarChave} className="w-full mt-2 text-[11px] font-semibold py-1.5 rounded-lg flex items-center justify-center gap-1.5" style={{ background: 'var(--tint-accent)', color: 'var(--accent)' }}>
+                  {copiado ? <><CheckCircle2 size={12} /> copiada</> : <><Copy size={12} /> copiar chave</>}
+                </button>
+              </div>
+            )}
+
+            {/* Resumo fiscal */}
+            <div className="rounded-2xl p-3.5" style={{ border: '1px solid var(--glass-border)', background: 'var(--surface)' }}>
+              <div className="text-[10px] uppercase tracking-wide text-faint font-bold flex items-center gap-1.5 mb-1.5"><Receipt size={12} /> Resumo fiscal</div>
+              {n.natureza_operacao && <RF k="Natureza" v={n.natureza_operacao} />}
+              {n.finalidade_label && <RF k="Finalidade" v={n.finalidade_label} />}
+              {n.tipo_label && <RF k="Tipo" v={n.tipo_label} />}
+              <RF k="Regime" v={n.simples_nacional ? 'Simples Nacional' : 'Normal'} cor="var(--accent2)" />
+              {n.plataforma && <RF k="Plataforma" v={n.plataforma} />}
+              {n.pedido_loja && <RF k="Pedido" v={n.pedido_loja} mono />}
+              {n.vendedor && <RF k="Vendedor" v={n.vendedor} />}
+            </div>
+
+            {n.observacoes && (
+              <div className="rounded-2xl p-3.5" style={{ border: '1px solid var(--glass-border)', background: 'var(--surface)' }}>
+                <div className="text-[10px] uppercase tracking-wide text-faint font-bold flex items-center gap-1.5 mb-1.5"><FileText size={12} /> Observações</div>
+                <div className="text-[11px] text-dim whitespace-pre-wrap break-words">{n.observacoes}</div>
+              </div>
+            )}
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+function RF({ k, v, cor, mono }) {
+  return (
+    <div className="flex justify-between gap-2 text-[12px] py-1" style={{ borderBottom: '1px solid var(--glass-border)' }}>
+      <span className="text-faint shrink-0">{k}</span>
+      <span className={'text-right font-medium ' + (mono ? 'num' : '')} style={cor ? { color: cor, fontWeight: 700 } : undefined}>{v}</span>
     </div>
   )
 }

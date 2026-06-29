@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Search, RefreshCw, Plug, X, Check, Zap, Radar, Wand2, Database, Loader2, ImageOff, BadgePercent } from 'lucide-react'
+import { Search, RefreshCw, Plug, X, Check, Zap, Radar, Wand2, Database, Loader2, ImageOff, BadgePercent, PanelRight, Plus, Star, CheckCircle2, Boxes, BarChart3 } from 'lucide-react'
 import { api, DEFAULT_CUSTOS } from './api.js'
 import { useToast } from './toast.jsx'
 import RadarDrawer from './RadarDrawer.jsx'
@@ -52,8 +52,24 @@ export default function Catalogo() {
   const [loteIa, setLoteIa] = useState(null)
   const [syncStatus, setSyncStatus] = useState(null)
   const [shopeeSync, setShopeeSync] = useState(null)
+  const [vincSync, setVincSync] = useState(null)
   const [canal, setCanal] = useState('bling')
   const [cockpit, setCockpit] = useState(null)
+  const [canaisDisp, setCanaisDisp] = useState(CANAIS)
+  const [ajModo, setAjModo] = useState('pct')
+  const [ajDir, setAjDir] = useState('mais')
+  const [ajValor, setAjValor] = useState('')
+  const [ajLoading, setAjLoading] = useState(false)
+
+  useEffect(() => {
+    api.precificacaoConfig()
+      .then((cfg) => {
+        const ativos = (cfg.canais || []).filter((c) => c && c.canal && c.ativo !== false)
+          .map((c) => ({ id: c.canal, nome: c.nome || c.canal }))
+        if (ativos.length) setCanaisDisp([{ id: 'bling', nome: 'Bling' }, ...ativos])
+      })
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
     let timer
@@ -96,6 +112,36 @@ export default function Catalogo() {
     return () => clearTimeout(timer)
   }, [])
 
+  useEffect(() => {
+    let timer
+    const poll = async () => {
+      try {
+        const s = await api.vinculosStatus()
+        setVincSync(s)
+        if (s.status === 'rodando') timer = setTimeout(poll, 4000)
+      } catch { /* silencioso */ }
+    }
+    poll()
+    return () => clearTimeout(timer)
+  }, [])
+
+  const mapearCanais = async () => {
+    if (!window.confirm('Mapear os canais de todos os produtos lê o Bling item a item — pode levar ~30 min rodando em segundo plano. Pode continuar usando o sistema. Iniciar agora?')) return
+    try {
+      await api.vinculosEnriquecer()
+      notify('Mapeamento de canais iniciado. Roda em segundo plano; os badges vão aparecendo conforme avança.', 'ok')
+      setVincSync({ status: 'rodando', total: 0, processados: 0 })
+      const poll = async () => {
+        const s = await api.vinculosStatus()
+        setVincSync(s)
+        if (s.status === 'rodando') setTimeout(poll, 4000)
+        else if (s.status === 'concluido') { notify(`Canais mapeados em ${s.total} produto(s).`, 'ok'); carregar() }
+        else if (s.status === 'erro') notify('Erro no mapeamento de canais: ' + (s.erro || ''), 'danger')
+      }
+      setTimeout(poll, 3000)
+    } catch (e) { notify(e.message, 'danger') }
+  }
+
   const sincronizarShopee = async () => {
     try {
       await api.shopeeCatalogoSincronizar()
@@ -115,10 +161,33 @@ export default function Catalogo() {
   const carregar = () => {
     setItens(null); setErro('')
     api.monitoramento({ canal })
-      .then((d) => setItens(d.itens || []))
+      .then((d) => {
+        const its = d.itens || []
+        setItens(its)
+        api.catalogoVendas().then((v) => {
+          const mapa = v.vendas || {}
+          setItens((cur) => (cur || its).map((i) => ({ ...i, vendas: mapa[i.sku] || 0 })))
+        }).catch(() => {})
+      })
       .catch((e) => setErro(e.message))
   }
   useEffect(carregar, [canal])
+
+  const ajustarMassa = async () => {
+    const v = Number(String(ajValor).replace(',', '.'))
+    if (Number.isNaN(v) || v <= 0) { notify('Informe um valor de ajuste válido.', 'danger'); return }
+    const ids = [...sel]
+    if (!ids.length) return
+    const resumo = `${ajDir === 'mais' ? 'Aumentar' : 'Diminuir'} o Preço Bling de ${ids.length} produto(s) em ${ajModo === 'pct' ? v + '%' : 'R$ ' + v.toFixed(2)}? Isso grava no Bling.`
+    if (!window.confirm(resumo)) return
+    setAjLoading(true)
+    try {
+      const r = await api.catalogoAjustarPrecos({ ids, modo: ajModo, direcao: ajDir, valor: v })
+      notify(`${r.aplicados} de ${r.total} preço(s) ajustado(s) no Bling.`, r.aplicados ? 'ok' : 'warn')
+      setAjValor(''); setSel(new Set()); carregar()
+    } catch (e) { notify('Falha no ajuste: ' + (e.message || ''), 'danger') }
+    setAjLoading(false)
+  }
 
   const contagem = useMemo(() => {
     const c = { todos: (itens || []).length, lucro_ideal: 0, atencao: 0, critico: 0 }
@@ -190,8 +259,8 @@ export default function Catalogo() {
           <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar por nome ou SKU…"
                  className="bg-transparent outline-none text-sm flex-1 text-fg" />
         </div>
-        <div className="glass rounded-xl flex items-center gap-1 p-1">
-          {CANAIS.map((c) => (
+        <div className="glass rounded-xl flex items-center gap-1 p-1 flex-wrap">
+          {canaisDisp.map((c) => (
             <button key={c.id} onClick={() => setCanal(c.id)}
                     className="text-xs px-3 py-1.5 rounded-lg transition font-medium"
                     style={canal === c.id ? { background: 'var(--accent)', color: '#fff' } : { color: 'var(--dim)' }}>
@@ -211,6 +280,12 @@ export default function Catalogo() {
                 className="rounded-xl px-3 py-2 text-sm flex items-center gap-2 disabled:opacity-70"
                 style={{ background: 'rgba(238,77,45,.12)', color: '#EE4D2D', border: '1px solid #EE4D2D' }}>
           <Database size={15} /> {shopeeSync?.status === 'rodando' ? 'Sincronizando Shopee…' : 'Sincronizar Shopee'}
+        </button>
+        <button onClick={mapearCanais} disabled={vincSync?.status === 'rodando'}
+                className="rounded-xl px-3 py-2 text-sm flex items-center gap-2 disabled:opacity-70"
+                style={{ background: 'rgba(123,42,140,.14)', color: 'var(--accent2)', border: '1px solid var(--accent2)' }}
+                title="Lê o Bling produto a produto pra descobrir em quais marketplaces cada um está anunciado (~30 min)">
+          <Plug size={15} /> {vincSync?.status === 'rodando' ? `Mapeando canais… ${vincSync.processados}/${vincSync.total}` : 'Mapear canais'}
         </button>
       </div>
 
@@ -238,6 +313,18 @@ export default function Catalogo() {
         </div>
       )}
 
+      {vincSync && vincSync.status !== 'ocioso' && (
+        <div className="glass rounded-xl px-4 py-2.5 text-sm flex items-center gap-3"
+             style={{ border: `1px solid ${vincSync.status === 'erro' ? 'var(--danger)' : 'var(--accent2)'}` }}>
+          {vincSync.status === 'rodando' && <Loader2 size={15} className="animate-spin" style={{ color: 'var(--accent2)' }} />}
+          <span className="flex-1">
+            {vincSync.status === 'rodando' && <>Mapeando canais no Bling… <b className="num">{vincSync.processados}</b> de <b className="num">{vincSync.total}</b> produtos. Pode continuar usando o sistema; os badges vão aparecendo.</>}
+            {vincSync.status === 'concluido' && <>Canais mapeados em <b className="num">{vincSync.total}</b> produtos. Os badges de marketplace agora aparecem na lista.</>}
+            {vincSync.status === 'erro' && <span style={{ color: 'var(--danger)' }}>Erro no mapeamento: {vincSync.erro} — pode rodar de novo, ele recomeça do zero.</span>}
+          </span>
+        </div>
+      )}
+
       {/* Filtros por status */}
       <div className="flex flex-wrap gap-2">
         {chips.map((ch) => {
@@ -256,21 +343,40 @@ export default function Catalogo() {
 
       {/* Barra de ação em massa */}
       {sel.size > 0 && (
-        <div className="rounded-xl px-4 py-2.5 flex items-center justify-between flex-wrap gap-2" style={{ background: 'var(--glass-hover)', border: '1px solid var(--accent)' }}>
-          <span className="text-sm flex items-center gap-2">
-            <Zap size={15} className="text-accent" /> <b className="num">{sel.size}</b> selecionado(s)
-          </span>
-          <div className="flex items-center gap-2 flex-wrap">
-            <button onClick={() => setSel(new Set())} className="text-xs text-dim hover:text-fg flex items-center gap-1"><X size={13} /> limpar</button>
-            <button disabled={loteIa || aplicando} onClick={() => aplicarLoteIa('titulo')}
-                    className="rounded-lg px-3 py-1.5 text-sm font-medium flex items-center gap-1.5 disabled:opacity-60"
-                    style={{ background: 'rgba(79,227,201,.12)', color: 'var(--accent2)', border: '1px solid var(--accent2)' }}>
-              <Wand2 size={14} /> {loteIa === 'titulo' ? 'Gerando…' : 'Títulos IA'}
-            </button>
-            <button disabled={loteIa || aplicando} onClick={() => aplicarLoteIa('descricao')}
-                    className="rounded-lg px-3 py-1.5 text-sm font-medium flex items-center gap-1.5 disabled:opacity-60"
-                    style={{ background: 'rgba(201,160,255,.12)', color: '#C9A0FF', border: '1px solid #C9A0FF' }}>
-              <Wand2 size={14} /> {loteIa === 'descricao' ? 'Gerando…' : 'Descrições IA'}
+        <div className="rounded-xl px-4 py-3 flex flex-col gap-3" style={{ background: 'var(--glass-hover)', border: '1px solid var(--accent)' }}>
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <span className="text-sm flex items-center gap-2">
+              <Zap size={15} className="text-accent" /> <b className="num">{sel.size}</b> selecionado(s)
+            </span>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button onClick={() => setSel(new Set())} className="text-xs text-dim hover:text-fg flex items-center gap-1"><X size={13} /> limpar</button>
+              <button disabled={loteIa || aplicando} onClick={() => aplicarLoteIa('titulo')}
+                      className="rounded-lg px-3 py-1.5 text-sm font-medium flex items-center gap-1.5 disabled:opacity-60"
+                      style={{ background: 'rgba(79,227,201,.12)', color: 'var(--accent2)', border: '1px solid var(--accent2)' }}>
+                <Wand2 size={14} /> {loteIa === 'titulo' ? 'Gerando…' : 'Títulos IA'}
+              </button>
+              <button disabled={loteIa || aplicando} onClick={() => aplicarLoteIa('descricao')}
+                      className="rounded-lg px-3 py-1.5 text-sm font-medium flex items-center gap-1.5 disabled:opacity-60"
+                      style={{ background: 'rgba(201,160,255,.12)', color: '#C9A0FF', border: '1px solid #C9A0FF' }}>
+                <Wand2 size={14} /> {loteIa === 'descricao' ? 'Gerando…' : 'Descrições IA'}
+              </button>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap pt-3" style={{ borderTop: '1px solid var(--glass-border)' }}>
+            <span className="text-xs text-faint">Ajustar Preço Bling:</span>
+            <div className="flex items-center rounded-lg overflow-hidden" style={{ border: '1px solid var(--glass-border)' }}>
+              <button onClick={() => setAjDir('mais')} className="px-2.5 py-1 text-xs font-medium" style={ajDir === 'mais' ? { background: 'var(--ok)', color: '#06281f' } : { color: 'var(--dim)' }}>+ aumentar</button>
+              <button onClick={() => setAjDir('menos')} className="px-2.5 py-1 text-xs font-medium" style={ajDir === 'menos' ? { background: 'var(--danger)', color: '#2a0d0d' } : { color: 'var(--dim)' }}>− diminuir</button>
+            </div>
+            <div className="flex items-center rounded-lg overflow-hidden" style={{ border: '1px solid var(--glass-border)' }}>
+              <button onClick={() => setAjModo('pct')} className="px-2.5 py-1 text-xs font-medium" style={ajModo === 'pct' ? { background: 'var(--accent)', color: '#fff' } : { color: 'var(--dim)' }}>%</button>
+              <button onClick={() => setAjModo('fixo')} className="px-2.5 py-1 text-xs font-medium" style={ajModo === 'fixo' ? { background: 'var(--accent)', color: '#fff' } : { color: 'var(--dim)' }}>R$</button>
+            </div>
+            <input value={ajValor} onChange={(e) => setAjValor(e.target.value)} placeholder={ajModo === 'pct' ? 'ex: 10' : 'ex: 5,00'}
+                   className="w-24 bg-transparent outline-none text-sm num px-2 py-1 rounded-lg text-fg" style={{ border: '1px solid var(--glass-border)' }} />
+            <button onClick={ajustarMassa} disabled={ajLoading}
+                    className="rounded-lg px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60 flex items-center gap-1.5" style={{ background: 'var(--accent)' }}>
+              {ajLoading ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Aplicar a {sel.size}
             </button>
           </div>
         </div>
@@ -308,7 +414,7 @@ export default function Catalogo() {
                         ? <img src={i.imagem} alt="" className="w-10 h-10 rounded-lg object-cover flex-none" style={{ border: '1px solid var(--glass-border)' }} onError={(e) => { e.currentTarget.style.visibility = 'hidden' }} />
                         : <div className="w-10 h-10 rounded-lg flex-none grid place-items-center text-faint" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)' }}><ImageOff size={15} /></div>}
                       <div className="min-w-0">
-                        <button onClick={() => setCockpit(i)} className="font-medium truncate max-w-[240px] text-left hover:text-accent transition block">
+                        <button onClick={() => setCockpit(i)} className="font-medium text-left hover:text-accent transition block leading-snug">
                           {i.nome}
                         </button>
                         <div className="text-[11px] text-faint num">{i.sku}</div>
@@ -343,8 +449,8 @@ export default function Catalogo() {
                     <span className="text-xs px-2 py-1 rounded-full" style={{ background: s.cor + '26', color: s.cor }}>{s.txt}</span>
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <button onClick={() => setDrawer(i)} className="text-sm text-accent hover:underline inline-flex items-center gap-1">
-                      <Radar size={14} /> Radar / IA
+                    <button onClick={() => setCockpit(i)} className="text-sm text-accent hover:underline inline-flex items-center gap-1">
+                      <PanelRight size={14} /> Abrir
                     </button>
                   </td>
                 </tr>
@@ -374,6 +480,39 @@ function Tile({ label, val, cor, small }) {
       <div className="text-[8.5px] uppercase tracking-wide text-faint">{label}</div>
       <div className={`num font-bold mt-0.5 ${small ? 'text-[13px]' : 'text-base'}`} style={cor ? { color: cor } : undefined}>{val}</div>
     </div>
+  )
+}
+
+function Sparkline({ pontos, cor = 'var(--accent)', w = 132, h = 36 }) {
+  const pts = (pontos || []).filter((p) => p && p.preco != null)
+  if (pts.length < 2) return null
+  const ys = pts.map((p) => Number(p.preco))
+  const minY = Math.min(...ys), maxY = Math.max(...ys), rng = (maxY - minY) || 1, pad = 3
+  const sx = (i) => pad + (i / (pts.length - 1)) * (w - 2 * pad)
+  const sy = (v) => h - pad - ((v - minY) / rng) * (h - 2 * pad)
+  const d = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${sx(i).toFixed(1)} ${sy(ys[i]).toFixed(1)}`).join(' ')
+  return (
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className="flex-none">
+      <path d={d} fill="none" stroke={cor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+function PrecoChart({ pontos, w = 540, h = 84 }) {
+  const pts = (pontos || []).filter((p) => p && p.preco != null)
+  if (pts.length < 2) return null
+  const ys = pts.map((p) => Number(p.preco))
+  const minY = Math.min(...ys), maxY = Math.max(...ys), rng = (maxY - minY) || (maxY * 0.08) || 1, pad = 6, base = h - 14
+  const sx = (i) => pad + (i / (pts.length - 1)) * (w - 2 * pad)
+  const sy = (v) => base - ((v - minY) / rng) * (base - 10)
+  const line = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${sx(i).toFixed(1)} ${sy(ys[i]).toFixed(1)}`).join(' ')
+  const area = `${line} L ${sx(pts.length - 1).toFixed(1)} ${base} L ${sx(0).toFixed(1)} ${base} Z`
+  return (
+    <svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`}>
+      <path d={area} fill="rgba(214,0,127,.12)" />
+      <path d={line} fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx={sx(pts.length - 1).toFixed(1)} cy={sy(ys[ys.length - 1]).toFixed(1)} r="3" fill="var(--accent)" />
+    </svg>
   )
 }
 
@@ -413,6 +552,18 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
   const [reviews, setReviews] = useState(null)
   const [carregandoReviews, setCarregandoReviews] = useState(false)
   const [mostrarReviews, setMostrarReviews] = useState(false)
+  const [precoHist, setPrecoHist] = useState(null)
+  const [carregandoHist, setCarregandoHist] = useState(false)
+  const [mostrarHist, setMostrarHist] = useState(false)
+  const verHist = async () => {
+    if (mostrarHist) { setMostrarHist(false); return }
+    setMostrarHist(true)
+    if (precoHist !== null) return
+    setCarregandoHist(true)
+    try { const d = await api.precoHistorico(produto.id, 60); setPrecoHist(d.pontos || []) }
+    catch { setPrecoHist([]) }
+    setCarregandoHist(false)
+  }
   const verReviews = async () => {
     if (mostrarReviews) { setMostrarReviews(false); return }
     setMostrarReviews(true)
@@ -475,17 +626,35 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
   const faturamento = vendas * (produto.preco_bling || 0)
   const cobertura = vendas > 0 ? estoque / vendas : null
   const s = STATUS[produto.status] || STATUS.atencao
+  const canaisPainel = sinc?.canais_painel || []
   const vinculos = sinc?.vinculos || []
   const est = radarData?.estatisticas || {}
   const temRadar = (est.n || 0) > 0 && est.menor != null
   const meuShopee = vinculos.find((v) => v.canal === 'shopee')
   const meuPreco = meuShopee && meuShopee.preco_registrado > 0 ? meuShopee.preco_registrado : null
   const gap = (temRadar && meuPreco != null) ? meuPreco - est.menor : null
+  const liquidoAlvo = produto.preco_bling || 0
+  const sparkPontos = (() => {
+    const byDate = {}
+    ;(radarData?.series || []).forEach((sr) => (sr.pontos || []).forEach((p) => {
+      if (p && p.data && p.preco != null)
+        byDate[p.data] = byDate[p.data] == null ? Number(p.preco) : Math.min(byDate[p.data], Number(p.preco))
+    }))
+    return Object.keys(byDate).sort().map((k) => ({ data: k, preco: byDate[k] }))
+  })()
+  const STATUS_CANAL = {
+    no_padrao: { txt: 'No padrão', cor: 'var(--ok)' },
+    abaixo: { txt: 'Abaixo', cor: '#F5A623' },
+    prejuizo: { txt: 'Prejuízo', cor: '#FF6F6F' },
+    sem_preco: { txt: 'Sem preço', cor: 'var(--dim)' },
+    falta_anunciar: { txt: 'Falta anunciar', cor: 'var(--dim)' },
+  }
+  const anunciarCanal = (c) => notify(`Para vender na ${mkNome(c)}, crie o anúncio e vincule o produto no Bling. Depois ele aparece aqui pronto pra precificar.`, 'warn')
 
   return (
     <>
       <div className="fixed inset-0 z-40" style={{ background: 'rgba(0,0,0,.5)' }} onClick={onClose} />
-      <div className="fixed top-0 right-0 z-50 flex flex-col" style={{ width: 'min(520px, 96vw)', height: '100vh', background: 'var(--bg)', borderLeft: '1px solid var(--glass-border)' }}>
+      <div className="fixed top-0 right-0 z-50 flex flex-col" style={{ width: 'min(600px, 96vw)', height: '100vh', background: 'var(--bg)', borderLeft: '1px solid var(--glass-border)' }}>
         <div className="flex items-start gap-3 p-4" style={{ borderBottom: '1px solid var(--glass-border)' }}>
           {produto.imagem
             ? <img src={produto.imagem} alt="" className="w-14 h-14 rounded-lg object-cover flex-none" style={{ border: '1px solid var(--glass-border)' }} onError={(e) => { e.currentTarget.style.visibility = 'hidden' }} />
@@ -497,9 +666,11 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
               <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: s.cor + '26', color: s.cor }}>{s.txt}</span>
             </div>
             <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-              {(produto.marketplaces || []).filter((m) => m.publicado).map((m) => {
-                const mk = MK[m.canal] || { nome: m.nome || m.canal, cor: 'var(--dim)', bg: 'var(--glass-hover)' }
-                return <span key={m.canal} className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: mk.bg, color: mk.cor }}>{mk.nome}</span>
+              {canaisPainel.map((c) => {
+                const mk = MK[c.canal] || { nome: c.nome || c.canal, cor: 'var(--dim)', bg: 'var(--glass-hover)' }
+                return c.publicado
+                  ? <span key={c.canal} className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: mk.bg, color: mk.cor }}>{mk.nome}</span>
+                  : <span key={c.canal} className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ color: 'var(--faint)', border: '1px dashed var(--glass-border)' }}>{mk.nome}</span>
               })}
               {desde(produto.atualizado) && <span className="text-[10px] text-faint">· alterado {desde(produto.atualizado)}</span>}
             </div>
@@ -513,10 +684,10 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
             <div className="grid grid-cols-3 gap-2">
               <Tile label="Estoque" val={Math.round(estoque)} />
               <Tile label="Vendas 30d" val={vendas} cor={vendas > 0 ? 'var(--ok)' : undefined} />
-              <Tile label="Receita líq. 30d" val={brl(faturamento)} small />
-              <Tile label="Cobertura" val={cobertura != null ? `${cobertura.toFixed(1)} m` : '—'} small />
+              <Tile label="Faturam. 30d" val={brl(faturamento)} small />
+              <Tile label="Cobertura" val={cobertura != null ? `${cobertura.toFixed(1)} mês` : '—'} small />
               <Tile label="Margem real" val={produto.margem_real != null ? `${Number(produto.margem_real).toFixed(1)}%` : 'sem custo'} cor={produto.margem_real != null ? s.cor : undefined} small />
-              <Tile label="Custo" val={produto.custo > 0 ? brl(produto.custo) : '—'} small />
+              <Tile label="Giro/mês" val={`${vendas} un`} small />
             </div>
           </div>
 
@@ -527,37 +698,43 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
               <input value={precoBling} onChange={(e) => setPrecoBling(e.target.value)} className="bg-transparent outline-none num font-bold text-base flex-1 text-fg" style={{ minWidth: 0 }} />
               <button onClick={salvarPreco} disabled={salvando} className="text-xs font-medium px-3 py-1.5 rounded-lg text-white disabled:opacity-60 flex items-center gap-1.5 shrink-0" style={{ background: 'var(--accent)' }}><Database size={13} /> {salvando ? 'Salvando…' : 'Atualizar no Bling'}</button>
             </div>
-            <div className="text-[10px] text-faint mt-1.5">Reajusta o preço-base no Bling. É a base de todos os canais.</div>
+            <div className="text-[10px] text-faint mt-1.5">É a base de todos os canais. Custo, NCM, GTIN, peso, título e descrição você ajusta na <button onClick={onEditarCompleto} className="text-accent hover:underline">Edição completa</button>.</div>
           </div>
 
           <div>
-            <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Valor por marketplace</div>
+            <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Valor por marketplace — cada loja neta o Preço Bling</div>
             {carregandoSinc
               ? <div className="text-faint text-xs flex items-center gap-2 py-3"><Loader2 size={14} className="animate-spin" /> lendo os vínculos do Bling…</div>
-              : vinculos.length === 0
-                ? <div className="text-faint text-xs rounded-lg px-3 py-3" style={{ background: 'var(--glass-hover)' }}>Nenhum vínculo de marketplace encontrado para este produto no Bling.</div>
+              : canaisPainel.length === 0
+                ? <div className="text-faint text-xs rounded-lg px-3 py-3" style={{ background: 'var(--glass-hover)' }}>Nenhum canal de marketplace ativo na configuração de precificação.</div>
                 : <div className="rounded-lg overflow-hidden" style={{ border: '1px solid var(--glass-border)' }}>
                     <table className="w-full text-xs">
                       <thead><tr className="text-faint text-[9px] uppercase" style={{ background: 'var(--glass-hover)' }}>
-                        <th className="text-left px-2.5 py-2">Canal</th><th className="px-2 py-2">Anunc.</th><th className="text-right px-2 py-2">Atual</th><th className="text-right px-2.5 py-2">Pra netar</th><th className="text-right px-2.5 py-2">Ação</th>
+                        <th className="text-left px-2 py-2">Canal</th><th className="px-1 py-2">Anunc.</th><th className="text-right px-1.5 py-2">Atual</th><th className="text-right px-1.5 py-2">Pra netar</th><th className="text-right px-1.5 py-2">Líquido</th><th className="text-right px-2 py-2">Ação</th>
                       </tr></thead>
                       <tbody>
-                        {vinculos.map((v, idx) => {
-                          const mk = MK[v.canal] || { nome: v.nome || v.canal, cor: 'var(--dim)', bg: 'var(--glass-hover)' }
+                        {canaisPainel.map((c, idx) => {
+                          const mk = MK[c.canal] || { nome: c.nome || c.canal, cor: 'var(--dim)', bg: 'var(--glass-hover)' }
+                          const sc = STATUS_CANAL[c.status] || STATUS_CANAL.sem_preco
                           return (
-                            <tr key={idx} style={idx < vinculos.length - 1 ? { borderBottom: '1px solid var(--glass-border)' } : undefined}>
-                              <td className="px-2.5 py-2"><span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: mk.bg, color: mk.cor }}>{mk.nome}</span></td>
-                              <td className="px-2 py-2 text-center">{v.publicado ? <span style={{ color: 'var(--ok)' }}>✓</span> : <span className="text-faint">—</span>}</td>
-                              <td className="px-2 py-2 text-right num" style={v.prejuizo ? { color: '#FF6F6F' } : undefined}>{v.preco_registrado > 0 ? brl(v.preco_registrado) : '—'}</td>
-                              <td className="px-2.5 py-2 text-right num font-medium" style={{ color: 'var(--accent)' }}>{v.preco_alvo != null ? brl(v.preco_alvo) : '—'}</td>
-                              <td className="px-2.5 py-2 text-right">
-                                {v.id_loja && v.preco_alvo != null
-                                  ? (aplicandoCanal === v.id_loja
+                            <tr key={idx} style={idx < canaisPainel.length - 1 ? { borderBottom: '1px solid var(--glass-border)' } : undefined}>
+                              <td className="px-2 py-2">
+                                {c.publicado
+                                  ? <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: mk.bg, color: mk.cor }}>{mk.nome}</span>
+                                  : <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ color: 'var(--faint)', border: '1px dashed var(--glass-border)' }}>{mk.nome}</span>}
+                              </td>
+                              <td className="px-1 py-2 text-center">{c.publicado ? <span style={{ color: 'var(--ok)' }}>✓</span> : <span className="text-faint">✗</span>}</td>
+                              <td className="px-1.5 py-2 text-right num">{c.preco_registrado != null ? brl(c.preco_registrado) : '—'}</td>
+                              <td className="px-1.5 py-2 text-right num font-medium" style={{ color: 'var(--accent)' }}>{c.preco_alvo != null ? brl(c.preco_alvo) : '—'}</td>
+                              <td className="px-1.5 py-2 text-right num" style={{ color: c.liquido != null ? sc.cor : 'var(--faint)' }} title={sc.txt}>{c.liquido != null ? brl(c.liquido) : '—'}</td>
+                              <td className="px-2 py-2 text-right">
+                                {c.publicado && c.id_loja && c.preco_alvo != null
+                                  ? (aplicandoCanal === c.id_loja
                                       ? <span className="text-faint text-[10px] inline-flex items-center gap-1"><Loader2 size={11} className="animate-spin" />…</span>
-                                      : confirmarCanal === v.id_loja
-                                        ? <button onClick={() => aplicarCanal(v)} className="text-[10px] font-bold px-2 py-1 rounded" style={{ background: 'rgba(245,166,35,.18)', color: '#F5A623' }}>Confirmar</button>
-                                        : <button onClick={() => setConfirmarCanal(v.id_loja)} className="text-[10px] font-medium px-2 py-1 rounded" style={{ background: 'rgba(214,0,127,.14)', color: 'var(--accent)' }}>Aplicar</button>)
-                                  : <span className="text-faint text-[10px]">—</span>}
+                                      : confirmarCanal === c.id_loja
+                                        ? <button onClick={() => aplicarCanal(c)} className="text-[10px] font-bold px-2 py-1 rounded" style={{ background: 'rgba(245,166,35,.18)', color: '#F5A623' }}>Confirmar</button>
+                                        : <button onClick={() => setConfirmarCanal(c.id_loja)} className="text-[10px] font-medium px-2 py-1 rounded" style={{ background: 'rgba(214,0,127,.14)', color: 'var(--accent)' }}>Aplicar</button>)
+                                  : <button onClick={() => anunciarCanal(c)} className="text-[10px] font-medium px-2 py-1 rounded inline-flex items-center gap-1" style={{ background: 'var(--glass-hover)', color: 'var(--dim)' }}><Plus size={10} /> Anunciar</button>}
                               </td>
                             </tr>
                           )
@@ -565,18 +742,18 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
                       </tbody>
                     </table>
                   </div>}
-            <div className="text-[10px] text-faint mt-1.5">"Pra netar" = preço de lista que devolve o Preço Bling após as taxas do canal. "Aplicar" grava no vínculo do Bling (fonte da verdade) e, na Shopee, ainda empurra direto no anúncio se o cache estiver sincronizado — assim o ajuste não some na próxima sincronização.</div>
+            <div className="text-[10px] text-faint mt-1.5">"Pra netar" = preço de lista que devolve o Preço Bling após as taxas do canal. "Líquido" = o que sobra hoje no preço atual (vermelho = abaixo do Preço Bling). "Aplicar" grava no vínculo do Bling e, na Shopee, empurra direto no anúncio.</div>
           </div>
 
           <div>
-            <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Promoção na Shopee</div>
+            <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Promoção / Desconto</div>
             {carregandoShopee
               ? <div className="text-faint text-xs flex items-center gap-2 py-3"><Loader2 size={14} className="animate-spin" /> lendo a Shopee…</div>
               : !shopeeItem
                 ? <div className="text-faint text-xs rounded-lg px-3 py-3" style={{ background: 'var(--glass-hover)' }}>Sem dados da Shopee para este SKU. Rode "Sincronizar Shopee" no topo do Catálogo.</div>
                 : shopeeItem.em_promocao
                   ? <div className="rounded-lg p-3" style={{ background: 'rgba(245,166,35,.10)', border: '1px solid rgba(245,166,35,.4)' }}>
-                      <div className="flex items-center gap-2 mb-2">
+                      <div className="flex items-center gap-2 mb-2 flex-wrap">
                         <span className="text-[10px] font-bold px-2 py-0.5 rounded inline-flex items-center gap-1" style={{ background: 'rgba(245,166,35,.2)', color: '#F5A623' }}><BadgePercent size={11} /> Em campanha</span>
                         {shopeeItem.promo_nome && <span className="text-[11px] text-dim truncate">{shopeeItem.promo_nome}</span>}
                       </div>
@@ -585,6 +762,8 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
                         <Tile label="Preço cheio" val={shopeeItem.preco_original > 0 ? brl(shopeeItem.preco_original) : '—'} small />
                         <Tile label="Desconto" val={shopeeItem.preco_original > shopeeItem.preco ? `-${Math.round((1 - shopeeItem.preco / shopeeItem.preco_original) * 100)}%` : '—'} cor="#F5A623" small />
                       </div>
+                      <div className="text-[11px] text-dim mt-2">Líquido-alvo (Preço Bling) <b className="num" style={{ color: 'var(--ok)' }}>{brl(liquidoAlvo)}</b> — é o que você quer receber fora de campanha.</div>
+                      <div className="text-[10px] text-faint mt-1.5">Campanhas são criadas e retiradas no Seller Center da Shopee. Aqui a promo aparece pra você não confundir o desconto com erro de preço.</div>
                     </div>
                   : <div className="rounded-lg px-3 py-2.5 text-xs flex items-center justify-between" style={{ background: 'var(--glass-hover)' }}>
                       <span className="text-dim">Sem campanha ativa na Shopee.</span>
@@ -593,7 +772,7 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
           </div>
 
           <div>
-            <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Radar de concorrência</div>
+            <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Concorrência (Radar)</div>
             {carregandoRadar
               ? <div className="text-faint text-xs flex items-center gap-2 py-3"><Loader2 size={14} className="animate-spin" /> lendo o radar…</div>
               : !temRadar
@@ -602,40 +781,60 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
                     <button onClick={onRadar} className="text-[11px] font-medium px-2.5 py-1.5 rounded-lg shrink-0" style={{ background: 'rgba(214,0,127,.14)', color: 'var(--accent)' }}>Configurar radar</button>
                   </div>
                 : <div>
-                    <div className="grid grid-cols-3 gap-2">
-                      <Tile label="Menor concorrente" val={brl(est.menor)} small />
-                      <Tile label="Meu preço (Shopee)" val={meuPreco != null ? brl(meuPreco) : '—'} small />
-                      <Tile label="Gap" val={gap != null ? `${gap >= 0 ? '+' : '−'}${brl(Math.abs(gap)).replace('R$ ', 'R$ ')}` : '—'} cor={gap != null ? (gap > 0 ? '#FF6F6F' : 'var(--ok)') : undefined} small />
-                    </div>
-                    {gap != null && (
-                      <div className="text-[10px] mt-1.5" style={{ color: gap > 0 ? '#FF6F6F' : 'var(--ok)' }}>
-                        {gap > 0 ? `Você está ${brl(Math.abs(gap))} acima do menor concorrente.` : gap < 0 ? `Você está ${brl(Math.abs(gap))} abaixo do menor concorrente.` : 'Empatado com o menor concorrente.'}
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-sm min-w-0">
+                        <div>Menor concorrente <b className="num">{brl(est.menor)}</b></div>
+                        {gap != null && <div className="text-[11px] mt-0.5" style={{ color: gap > 0 ? '#FF6F6F' : 'var(--ok)' }}>{gap > 0 ? `você está ${brl(Math.abs(gap))} acima` : gap < 0 ? `você está ${brl(Math.abs(gap))} abaixo` : 'empatado com o menor'}</div>}
+                        {est.n ? <div className="text-[10px] text-faint mt-0.5">{est.n} anúncio(s) monitorado(s)</div> : null}
                       </div>
-                    )}
-                    <div className="mt-2 rounded-lg overflow-hidden" style={{ border: '1px solid var(--glass-border)' }}>
-                      {(radarData.series || []).slice(0, 5).map((sr, idx, arr) => {
-                        const last = sr.pontos && sr.pontos.length ? sr.pontos[sr.pontos.length - 1] : null
-                        const eMenor = last && est.menor != null && Math.abs(last.preco - est.menor) < 0.01
-                        return (
-                          <div key={idx} className="flex items-center justify-between px-2.5 py-1.5 text-xs" style={idx < arr.length - 1 ? { borderBottom: '1px solid var(--glass-border)' } : undefined}>
-                            <span className="text-dim truncate" style={{ maxWidth: '62%' }}>{sr.nome || '—'}</span>
-                            <span className="num" style={eMenor ? { color: 'var(--ok)', fontWeight: 600 } : undefined}>{last ? brl(last.preco) : '—'}</span>
-                          </div>
-                        )
-                      })}
+                      <Sparkline pontos={sparkPontos} cor="#4DA3FF" />
                     </div>
                     <button onClick={onRadar} className="text-[11px] mt-2 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)', color: 'var(--dim)' }}><Radar size={12} /> Abrir radar completo</button>
                   </div>}
           </div>
 
-          {shopeeItem && shopeeItem.item_id && (
-            <div>
-              <button onClick={verReviews} className="w-full flex items-center justify-between text-[10px] uppercase tracking-wide text-faint font-bold mb-2">
-                <span>Avaliações recentes na Shopee</span>
-                <span className="text-accent normal-case">{mostrarReviews ? 'ocultar' : 'ver'}</span>
-              </button>
-              {mostrarReviews && (
-                carregandoReviews
+          <div>
+            <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Performance & Funil (Shopee)</div>
+            <div className="rounded-lg px-3 py-3" style={{ background: 'var(--glass-hover)' }}>
+              <div className="grid grid-cols-3 gap-2 mb-2" style={{ opacity: 0.55 }}>
+                <Tile label="Impressões 30d" val="—" small />
+                <Tile label="Cliques" val="—" small />
+                <Tile label="Conversão" val="—" small />
+              </div>
+              <div className="text-[10px] text-faint">A API da Shopee não expõe impressões/cliques/conversão por produto — só agregado por loja/campanha. O funil da loja fica no módulo Desempenho.</div>
+            </div>
+          </div>
+
+          <div>
+            <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">+ Mais neste painel</div>
+            <div className="flex flex-wrap gap-2">
+              {shopeeItem && shopeeItem.item_id && (
+                <button onClick={verReviews} className="text-[11px] px-2.5 py-1.5 rounded-lg flex items-center gap-1.5" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)', color: 'var(--dim)' }}><Star size={12} /> Avaliações {mostrarReviews ? '▲' : '▼'}</button>
+              )}
+              <button onClick={onEditarCompleto} className="text-[11px] px-2.5 py-1.5 rounded-lg flex items-center gap-1.5" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)', color: 'var(--dim)' }}><CheckCircle2 size={12} /> Qualidade do anúncio</button>
+              <button onClick={onEditarCompleto} className="text-[11px] px-2.5 py-1.5 rounded-lg flex items-center gap-1.5" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)', color: 'var(--dim)' }}><Wand2 size={12} /> Conteúdo & IA</button>
+              <button onClick={() => notify('Impulsionamento e ADS ficam no módulo de Impulsionamento da Shopee.', 'warn')} className="text-[11px] px-2.5 py-1.5 rounded-lg flex items-center gap-1.5" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)', color: 'var(--dim)' }}><Zap size={12} /> Impulsionamento / ADS</button>
+              <button onClick={() => notify(cobertura != null ? `Cobertura: ${cobertura.toFixed(1)} mês(es) de estoque no ritmo atual de venda.` : 'Sem histórico de vendas pra estimar reposição.', 'ok')} className="text-[11px] px-2.5 py-1.5 rounded-lg flex items-center gap-1.5" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)', color: 'var(--dim)' }}><Boxes size={12} /> Reposição</button>
+              <button onClick={verHist} className="text-[11px] px-2.5 py-1.5 rounded-lg flex items-center gap-1.5" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)', color: 'var(--dim)' }}><BarChart3 size={12} /> Histórico de preço {mostrarHist ? '▲' : '▼'}</button>
+            </div>
+            {mostrarHist && (
+              <div className="mt-2">
+                {carregandoHist
+                  ? <div className="text-faint text-xs flex items-center gap-2 py-2"><Loader2 size={14} className="animate-spin" /> lendo o histórico…</div>
+                  : !precoHist || precoHist.length < 2
+                    ? <div className="text-faint text-xs rounded-lg px-3 py-2.5" style={{ background: 'var(--glass-hover)' }}>Começamos a registrar o Preço Bling a cada sincronização. O gráfico aparece com alguns dias de histórico.{precoHist && precoHist.length === 1 ? ` (1 ponto até agora: ${brl(precoHist[0].preco)})` : ''}</div>
+                    : <div className="rounded-lg px-3 py-2.5" style={{ background: 'var(--glass-hover)' }}>
+                        <PrecoChart pontos={precoHist} />
+                        <div className="flex items-center justify-between text-[10px] text-faint mt-1">
+                          <span>de <b className="num text-dim">{brl(precoHist[0].preco)}</b> ({precoHist[0].dia?.slice(5)})</span>
+                          <span>hoje <b className="num" style={{ color: 'var(--accent)' }}>{brl(precoHist[precoHist.length - 1].preco)}</b></span>
+                        </div>
+                      </div>}
+              </div>
+            )}
+            {mostrarReviews && (
+              <div className="mt-2">
+                {carregandoReviews
                   ? <div className="text-faint text-xs flex items-center gap-2 py-2"><Loader2 size={14} className="animate-spin" /> buscando avaliações…</div>
                   : !reviews || reviews.length === 0
                     ? <div className="text-faint text-xs rounded-lg px-3 py-2.5" style={{ background: 'var(--glass-hover)' }}>Sem avaliações recentes para este anúncio.</div>
@@ -652,10 +851,10 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
                             </div>
                           ))}
                         </div>
-                      </div>
-              )}
-            </div>
-          )}
+                      </div>}
+              </div>
+            )}
+          </div>
 
           <div className="flex items-center gap-2 pt-1">
             <button onClick={onEditarCompleto} className="text-xs px-3 py-2 rounded-lg flex items-center gap-1.5" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)', color: 'var(--dim)' }}><Zap size={13} /> Edição completa / Fotos / IA</button>
