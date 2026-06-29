@@ -2031,6 +2031,9 @@ function BadgeStatus({ s, lg }) {
   const { Icon } = m
   return <span className={`${lg ? 'px-2.5 py-1 text-[11px]' : 'px-2 py-0.5 text-[10px]'} rounded font-semibold inline-flex items-center gap-1 whitespace-nowrap`} style={{ background: `color-mix(in srgb, ${m.cor} 16%, transparent)`, color: m.cor }}><Icon size={lg ? 12 : 11} /> {m.label}</span>
 }
+function BadgePromo({ lg }) {
+  return <span className={`${lg ? 'px-2.5 py-1 text-[11px]' : 'px-2 py-0.5 text-[10px]'} rounded font-semibold inline-flex items-center gap-1 whitespace-nowrap`} style={{ background: 'color-mix(in srgb, #F5A623 18%, transparent)', color: '#F5A623' }}><BadgePercent size={lg ? 12 : 11} /> Em promoção</span>
+}
 
 /* ====================== Pedidos: utilitários ====================== */
 
@@ -3731,6 +3734,7 @@ function ProdutoCard({ l, sel, onAbrir }) {
         <div className="text-sm leading-snug" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{l.nome || `#${l.item_id}`}</div>
         <div className="text-[11px] text-faint flex items-center gap-1.5 flex-wrap mt-1">
           <BadgeStatus s={st} />
+          {l.em_promocao && <BadgePromo />}
           <span className="num">SKU {l.sku} · {brl(l.preco)}{l.saldo != null ? ` · ${l.saldo} un` : ''}</span>
         </div>
       </div>
@@ -3783,6 +3787,7 @@ function ProdutoDetalhe({ l, onClose, ajustar, ajustando, salvarPrecoBling, salv
           <div className="text-sm font-medium leading-snug" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{l.nome || `#${l.item_id}`}</div>
           <div className="flex items-center gap-2 mt-1.5 flex-wrap">
             <BadgeStatus s={st} lg />
+            {l.em_promocao && <BadgePromo lg />}
             <span className="text-[11px] text-faint num inline-flex items-center gap-1">SKU {l.sku}
               <span role="button" tabIndex={0} onClick={copiarSku} className="cursor-pointer hover:text-fg inline-flex items-center" title="Copiar SKU">{cop ? <Check size={11} style={{ color: '#2DD4BF' }} /> : <Copy size={11} />}</span>
             </span>
@@ -3799,10 +3804,21 @@ function ProdutoDetalhe({ l, onClose, ajustar, ajustando, salvarPrecoBling, salv
           <div className="rounded-lg px-2 py-2 text-center" style={{ background: 'var(--glass-hover)' }}><div className="text-[8.5px] uppercase tracking-wide text-faint">Estoque</div><div className="num text-[13px] mt-0.5">{l.saldo != null ? l.saldo : '—'}</div></div>
         </div>
 
+        {l.em_promocao && (
+          <div className="rounded-lg px-3 py-2.5" style={{ background: 'color-mix(in srgb, #F5A623 9%, transparent)', border: '1px solid color-mix(in srgb, #F5A623 28%, transparent)' }}>
+            <div className="flex items-center gap-1.5 font-bold text-[12px] mb-1.5" style={{ color: '#F5A623' }}><BadgePercent size={13} /> Em campanha de desconto{l.promo_nome ? `: ${l.promo_nome}` : ''}</div>
+            <div className="text-[11px] leading-relaxed text-dim">
+              {l.preco_original != null && l.preco_original > l.preco
+                ? <>O preço atual <b className="text-fg num">{brl(l.preco)}</b> é o <b>promocional</b>. No preço normal <b className="text-fg num">{brl(l.preco_original)}</b> você {l.cobre_normal ? <b style={{ color: '#2DD4BF' }}>neta o Preço Bling</b> : <b style={{ color: '#FF6F6F' }}>ainda fica abaixo</b>}{l.liquido_normal != null ? <> — líquido <b className="num" style={{ color: l.cobre_normal ? '#2DD4BF' : '#FF6F6F' }}>{brl(l.liquido_normal)}</b></> : ''}. {l.cobre_normal ? 'O "Abaixo do líquido" acima é o desconto, não erro de preço.' : ''}</>
+                : <>Este anúncio está em campanha de desconto. O líquido pode estar reduzido pelo preço promocional.</>}
+            </div>
+          </div>
+        )}
+
         {l.sem_base
           ? <div className="text-faint rounded-lg px-3 py-2.5" style={{ background: 'var(--glass-hover)' }}>Sem Preço Bling cadastrado. Informe abaixo o valor que você quer receber líquido — o cálculo sai na hora.</div>
           : <div className="space-y-1">
-              <Quebra label="Preço na Shopee" v={brl(l.preco)} forte />
+              <Quebra label={`Preço na Shopee${l.em_promocao ? ' (promo)' : ''}`} v={brl(l.preco)} forte />
               <Quebra label="− Comissão / taxa Shopee" v={'− ' + brl(l.taxa_shopee)} neg />
               {l.imposto > 0 && <Quebra label="− Imposto" v={'− ' + brl(l.imposto)} neg />}
               {l.embalagem > 0 && <Quebra label="− Embalagem" v={'− ' + brl(l.embalagem)} neg />}
