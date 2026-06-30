@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useRef } from 'react'
 import { Search, RefreshCw, Plug, X, Check, Zap, Radar, Wand2, Database, Loader2, ImageOff, BadgePercent, PanelRight, Plus, Star, CheckCircle2, Boxes, BarChart3, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, LayoutGrid, Percent, Layers, Flame, History, ShieldCheck, TrendingUp, Target } from 'lucide-react'
 import { api, DEFAULT_CUSTOS } from './api.js'
 import { useToast } from './toast.jsx'
@@ -609,6 +609,15 @@ function Tile({ label, val, cor, small }) {
   )
 }
 
+function Linha({ k, v, cor, bold }) {
+  return (
+    <div className="flex items-center justify-between text-xs">
+      <span className="text-dim">{k}</span>
+      <span className={`num ${bold ? 'font-bold' : ''}`} style={cor ? { color: cor } : undefined}>{v}</span>
+    </div>
+  )
+}
+
 function Sparkline({ pontos, cor = 'var(--accent)', w = 132, h = 36 }) {
   const pts = (pontos || []).filter((p) => p && p.preco != null)
   if (pts.length < 2) return null
@@ -647,6 +656,23 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
   const [salvando, setSalvando] = useState(false)
   const [aba, setAba] = useState('visao')
   const [precoCanalEdit, setPrecoCanalEdit] = useState({})
+  const [simCanal, setSimCanal] = useState({})
+  const simTimers = useRef({})
+  const [promoPreco, setPromoPreco] = useState('')
+  const [promoSim, setPromoSim] = useState(null)
+  const [simulandoPromo, setSimulandoPromo] = useState(false)
+
+  // edição manual por canal com simulação de líquido/margem ao vivo (debounced)
+  const editarCanalPreco = (id_loja, canal, val) => {
+    setPrecoCanalEdit((m) => ({ ...m, [id_loja]: val }))
+    clearTimeout(simTimers.current[id_loja])
+    const v = Number(String(val).replace(',', '.'))
+    if (!v || v <= 0) { setSimCanal((m) => ({ ...m, [id_loja]: undefined })); return }
+    simTimers.current[id_loja] = setTimeout(async () => {
+      try { const d = await api.produtoSimular(produto.id, canal, v); setSimCanal((m) => ({ ...m, [id_loja]: d })) }
+      catch { setSimCanal((m) => ({ ...m, [id_loja]: undefined })) }
+    }, 350)
+  }
   const [sinc, setSinc] = useState(null)
   const [carregandoSinc, setCarregandoSinc] = useState(true)
   const [aplicandoCanal, setAplicandoCanal] = useState(null)
@@ -740,6 +766,27 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
     return () => { vivo = false }
   }, [aba, shopeeItem, reviews, carregandoReviews])
 
+  // inicializa o preço de simulação da promoção com o preço atual da Shopee (ou Preço Bling)
+  useEffect(() => {
+    if (shopeeItem && promoPreco === '') {
+      const p = shopeeItem.preco || produto.preco_bling || ''
+      if (p) setPromoPreco(String(p).replace('.', ','))
+    }
+  }, [shopeeItem]) // eslint-disable-line
+
+  // simula líquido/margem da promoção ao vivo (debounced)
+  useEffect(() => {
+    const v = Number(String(promoPreco).replace(',', '.'))
+    if (!v || v <= 0) { setPromoSim(null); return }
+    setSimulandoPromo(true)
+    const t = setTimeout(async () => {
+      try { const d = await api.produtoSimular(produto.id, 'shopee', v); setPromoSim(d) }
+      catch { setPromoSim(null) }
+      setSimulandoPromo(false)
+    }, 350)
+    return () => clearTimeout(t)
+  }, [promoPreco, produto.id])
+
   const salvarPreco = async () => {
     const v = Number(String(precoBling).replace(',', '.'))
     if (Number.isNaN(v) || v < 0) { notify('Informe um Preço Bling válido.', 'danger'); return }
@@ -804,6 +851,7 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
     abaixo: { txt: 'Abaixo', cor: '#F5A623' },
     prejuizo: { txt: 'Prejuízo', cor: '#FF6F6F' },
     sem_preco: { txt: 'Sem preço', cor: 'var(--dim)' },
+    sem_taxas: { txt: 'Configurar taxas', cor: '#F5A623' },
     falta_anunciar: { txt: 'Falta anunciar', cor: 'var(--dim)' },
   }
   const anunciarCanal = (c) => notify(`Para vender na ${mkNome(c)}, crie o anúncio e vincule o produto no Bling. Depois ele aparece aqui pronto pra precificar.`, 'warn')
@@ -955,10 +1003,19 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
                                     <td className="px-1.5 py-2 text-right num">{c.preco_registrado != null ? brl(c.preco_registrado) : '—'}</td>
                                     <td className="px-1.5 py-2 text-right">
                                       {editavel
-                                        ? <input value={editVal != null ? editVal : (c.preco_alvo != null ? String(c.preco_alvo).replace('.', ',') : '')} onChange={(e) => setPrecoCanalEdit((m) => ({ ...m, [c.id_loja]: e.target.value }))} className="bg-transparent outline-none num text-right rounded px-1.5 py-1" style={{ width: 70, border: '1px solid ' + (editVal != null ? 'var(--accent)' : 'var(--glass-border)'), color: editVal != null ? 'var(--accent)' : 'var(--text-dim)' }} />
+                                        ? <input value={editVal != null ? editVal : (c.preco_alvo != null ? String(c.preco_alvo).replace('.', ',') : '')} onChange={(e) => editarCanalPreco(c.id_loja, c.canal, e.target.value)} className="bg-transparent outline-none num text-right rounded px-1.5 py-1" style={{ width: 70, border: '1px solid ' + (editVal != null ? 'var(--accent)' : 'var(--glass-border)'), color: editVal != null ? 'var(--accent)' : 'var(--text-dim)' }} />
                                         : <span className="num" style={{ color: 'var(--accent)' }}>{c.preco_alvo != null ? brl(c.preco_alvo) : '—'}</span>}
                                     </td>
-                                    <td className="px-1.5 py-2 text-right num" style={{ color: c.liquido != null ? sc.cor : 'var(--faint)' }} title={sc.txt}>{c.liquido != null ? brl(c.liquido) : '—'}</td>
+                                    <td className="px-1.5 py-2 text-right">
+                                      {(() => {
+                                        const sim = simCanal[c.id_loja]
+                                        if (editavel && editVal != null && editVal !== '' && sim) {
+                                          const cor = sim.abaixo_alvo ? 'var(--danger)' : 'var(--ok)'
+                                          return <div><span className="num" style={{ color: cor }}>{sim.liquido != null ? brl(sim.liquido) : '—'}</span>{sim.margem != null && <span className="num text-[9px] ml-1" style={{ color: cor }}>{sim.margem}%</span>}</div>
+                                        }
+                                        return <span className="num" style={{ color: c.liquido != null ? sc.cor : 'var(--faint)' }} title={sc.txt}>{c.liquido != null ? brl(c.liquido) : '—'}</span>
+                                      })()}
+                                    </td>
                                     <td className="px-2 py-2 text-right">
                                       {editavel
                                         ? (aplicandoCanal === c.id_loja
@@ -1004,30 +1061,60 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
             )}
 
             {aba === 'promo' && (
-              <div>
-                <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Promoção / Desconto</div>
+              <div className="space-y-3">
+                <div className="text-[10px] uppercase tracking-wide text-faint font-bold">Promoção / Desconto</div>
                 {carregandoShopee
                   ? <div className="text-faint text-xs flex items-center gap-2 py-3"><Loader2 size={14} className="animate-spin" /> lendo a Shopee…</div>
                   : !shopeeItem
                     ? <div className="text-faint text-xs rounded-lg px-3 py-3" style={{ background: 'var(--glass-hover)' }}>Sem dados da Shopee para este SKU. Rode "Sincronizar Shopee" no topo do Catálogo.</div>
-                    : shopeeItem.em_promocao
-                      ? <div className="rounded-lg p-3" style={{ background: 'rgba(245,166,35,.10)', border: '1px solid rgba(245,166,35,.4)' }}>
-                          <div className="flex items-center gap-2 mb-2 flex-wrap">
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded inline-flex items-center gap-1" style={{ background: 'rgba(245,166,35,.2)', color: '#F5A623' }}><BadgePercent size={11} /> Em campanha</span>
-                            {shopeeItem.promo_nome && <span className="text-[11px] text-dim truncate">{shopeeItem.promo_nome}</span>}
+                    : <>
+                        {shopeeItem.em_promocao && (
+                          <div className="rounded-lg p-3" style={{ background: 'rgba(245,166,35,.10)', border: '1px solid rgba(245,166,35,.4)' }}>
+                            <div className="flex items-center gap-2 mb-2 flex-wrap">
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded inline-flex items-center gap-1" style={{ background: 'rgba(245,166,35,.2)', color: '#F5A623' }}><BadgePercent size={11} /> Em campanha agora</span>
+                              {shopeeItem.promo_nome && <span className="text-[11px] text-dim truncate">{shopeeItem.promo_nome}</span>}
+                            </div>
+                            <div className="grid grid-cols-3 gap-2">
+                              <Tile label="Preço promo" val={brl(shopeeItem.preco)} cor="#F5A623" small />
+                              <Tile label="Preço cheio" val={shopeeItem.preco_original > 0 ? brl(shopeeItem.preco_original) : '—'} small />
+                              <Tile label="Desconto" val={shopeeItem.preco_original > shopeeItem.preco ? `-${Math.round((1 - shopeeItem.preco / shopeeItem.preco_original) * 100)}%` : '—'} cor="#F5A623" small />
+                            </div>
                           </div>
-                          <div className="grid grid-cols-3 gap-2">
-                            <Tile label="Preço promo" val={brl(shopeeItem.preco)} cor="#F5A623" small />
-                            <Tile label="Preço cheio" val={shopeeItem.preco_original > 0 ? brl(shopeeItem.preco_original) : '—'} small />
-                            <Tile label="Desconto" val={shopeeItem.preco_original > shopeeItem.preco ? `-${Math.round((1 - shopeeItem.preco / shopeeItem.preco_original) * 100)}%` : '—'} cor="#F5A623" small />
+                        )}
+                        <div className="rounded-lg p-3" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)' }}>
+                          <div className="flex items-center justify-between gap-3 mb-2.5">
+                            <div className="text-[11px] text-dim">Simular preço promocional</div>
+                            <div className="flex items-center gap-1.5 rounded-lg px-2 py-1" style={{ background: 'rgba(0,0,0,.2)', border: '1px solid var(--accent2)' }}>
+                              <span className="text-faint text-xs">R$</span>
+                              <input value={promoPreco} onChange={(e) => setPromoPreco(e.target.value)} className="bg-transparent outline-none num font-bold text-sm text-fg text-right" style={{ width: 74 }} />
+                            </div>
                           </div>
-                          <div className="text-[11px] text-dim mt-2">Líquido-alvo (Preço Bling) <b className="num" style={{ color: 'var(--ok)' }}>{brl(liquidoAlvo)}</b> — é o que você quer receber fora de campanha.</div>
-                          <div className="text-[10px] text-faint mt-1.5">Campanhas são criadas e retiradas no Seller Center da Shopee. Aqui a promo aparece pra você não confundir o desconto com erro de preço.</div>
+                          {simulandoPromo && !promoSim
+                            ? <div className="text-faint text-xs flex items-center gap-2 py-2"><Loader2 size={14} className="animate-spin" /> calculando…</div>
+                            : promoSim
+                              ? <div className="space-y-1.5">
+                                  <Linha k="Preço cheio (atual)" v={shopeeItem.preco_original > 0 ? brl(shopeeItem.preco_original) : (shopeeItem.preco > 0 ? brl(shopeeItem.preco) : '—')} />
+                                  {shopeeItem.preco_original > 0 && Number(String(promoPreco).replace(',', '.')) > 0 && (
+                                    <Linha k="Desconto aplicado" v={`-${Math.max(0, Math.round((1 - Number(String(promoPreco).replace(',', '.')) / shopeeItem.preco_original) * 100))}%`} cor="#ff7ac6" />
+                                  )}
+                                  <Linha k="Líquido após taxas Shopee" v={promoSim.liquido != null ? brl(promoSim.liquido) : '—'} cor={promoSim.abaixo_alvo ? 'var(--danger)' : 'var(--ok)'} bold />
+                                  <Linha k="Margem na promo" v={promoSim.margem != null ? `${promoSim.margem}%` : 'sem custo'} cor={promoSim.margem == null ? 'var(--faint)' : promoSim.margem < 0 ? 'var(--danger)' : promoSim.margem < 15 ? 'var(--warn)' : 'var(--ok)'} />
+                                  {promoSim.custo > 0 && promoSim.liquido != null && <Linha k="Lucro/un." v={brl(promoSim.liquido - promoSim.custo)} cor={(promoSim.liquido - promoSim.custo) < 0 ? 'var(--danger)' : 'var(--ok)'} />}
+                                  <div className="text-[11px] mt-1 pt-1.5" style={{ borderTop: '1px solid var(--glass-border)', color: promoSim.abaixo_alvo ? 'var(--danger)' : 'var(--faint)' }}>
+                                    {!promoSim.tem_faixas
+                                      ? 'Cadastre as taxas da Shopee na configuração de precificação pra calcular o líquido com exatidão.'
+                                      : promoSim.abaixo_alvo
+                                        ? `Atenção: neta ${brl(promoSim.liquido)}, abaixo do Preço Bling (${brl(promoSim.alvo)}).`
+                                        : `Líquido-alvo fora de campanha (Preço Bling): ${brl(promoSim.alvo)}.`}
+                                  </div>
+                                </div>
+                              : <div className="text-faint text-xs py-2">Digite um preço pra ver o líquido e a margem.</div>}
+                          <div className="rounded-lg px-2.5 py-2 mt-2.5 flex gap-2 items-start" style={{ background: 'rgba(224,162,60,.07)', border: '1px solid rgba(224,162,60,.3)' }}>
+                            <BadgePercent size={13} className="shrink-0 mt-0.5" style={{ color: '#F5A623' }} />
+                            <div className="text-[10px] text-dim">Criar/encerrar campanha é no Seller Center da Shopee (limite da API). Aqui você simula preço, desconto e líquido pra decidir com segurança.</div>
+                          </div>
                         </div>
-                      : <div className="rounded-lg px-3 py-2.5 text-xs flex items-center justify-between" style={{ background: 'var(--glass-hover)' }}>
-                          <span className="text-dim">Sem campanha ativa na Shopee.</span>
-                          <span className="num">{shopeeItem.preco > 0 ? brl(shopeeItem.preco) : '—'}</span>
-                        </div>}
+                      </>}
               </div>
             )}
 

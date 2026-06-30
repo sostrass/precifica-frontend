@@ -47,6 +47,7 @@ export const api = {
   produtoConselho: (id) => req(`/api/produtos/${id}/conselho`),
   produtoPosicionamento: (id, canal) => req(`/api/produtos/${id}/posicionamento` + (canal ? `?canal=${canal}` : '')),
   produtoSincronizacao: (id) => req(`/api/produtos/${id}/sincronizacao`),
+  produtoSimular: (id, canal, preco) => req(`/api/produtos/${id}/simular?canal=${encodeURIComponent(canal)}&preco=${encodeURIComponent(preco)}`),
   diagnosticoPrecos: (id) => req(`/api/diagnostico/precos/${id}`),
   diagnosticoMultiloja: (id) => req(`/api/diagnostico/multiloja/${id}`),
   webhookUrl: () => req('/api/webhooks/url'),
