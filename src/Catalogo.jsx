@@ -216,6 +216,9 @@ export default function Catalogo() {
     return c
   }, [itens])
 
+  const [kpiHist, setKpiHist] = useState([])
+  const kpiSnapEnviado = useRef(false)
+
   const kpis = useMemo(() => {
     const its = itens || []
     let saud = 0, aten = 0, prej = 0, semCusto = 0, valEstoque = 0
@@ -243,6 +246,22 @@ export default function Catalogo() {
       .sort((a, b) => b.n - a.n).slice(0, 4)
     return { total: its.length, saud, aten, prej, semCusto, valEstoque, margMedia, cobertura, semAnuncio }
   }, [itens])
+
+  // histórico de KPIs (alimenta a tendência e os sparklines do topo)
+  useEffect(() => {
+    let vivo = true
+    api.kpiHistorico(30).then((d) => { if (vivo) setKpiHist(d.pontos || []) }).catch(() => {})
+    return () => { vivo = false }
+  }, [])
+
+  // foto de hoje dos KPIs — uma vez por carga, quando o catálogo já tem números
+  useEffect(() => {
+    if (kpiSnapEnviado.current || !kpis || kpis.total <= 0) return
+    kpiSnapEnviado.current = true
+    api.kpiSnapshot({ total: kpis.total, saud: kpis.saud, aten: kpis.aten, prej: kpis.prej, semCusto: kpis.semCusto, valEstoque: kpis.valEstoque, margMedia: kpis.margMedia, cobertura: kpis.cobertura })
+      .then(() => api.kpiHistorico(30)).then((d) => { if (d) setKpiHist(d.pontos || []) })
+      .catch(() => {})
+  }, [kpis])
 
   const filtrados = useMemo(() => {
     const q = busca.toLowerCase()
@@ -385,7 +404,7 @@ export default function Catalogo() {
       )}
 
       {/* Dashboard de catálogo (KPIs agregados) */}
-      <PainelKpis kpis={kpis} brl={brl} onSemCusto={() => setFiltro('sem_custo')} />
+      <PainelKpis kpis={kpis} hist={kpiHist} brl={brl} onSemCusto={() => setFiltro('sem_custo')} />
 
       {/* Faixa de oportunidades */}
       {(kpis.prej > 0 || kpis.semAnuncio > 0 || kpis.semCusto > 0) && (
@@ -818,7 +837,7 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
   // auto-carrega avaliações quando a aba é aberta
   useEffect(() => {
     if (aba !== 'aval') return
-    if (reviews !== null || carregandoReviews) return
+    if (reviews !== null) return
     if (!(shopeeItem && shopeeItem.item_id)) return
     let vivo = true
     setCarregandoReviews(true)
@@ -827,11 +846,11 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
       .catch(() => { if (vivo) setReviews([]) })
       .finally(() => { if (vivo) setCarregandoReviews(false) })
     return () => { vivo = false }
-  }, [aba, shopeeItem, reviews, carregandoReviews])
+  }, [aba, shopeeItem, reviews])
 
   // carrega o diagnóstico de Qualidade quando a aba é aberta
   useEffect(() => {
-    if (aba !== 'qual' || qual !== null || carregandoQual) return
+    if (aba !== 'qual' || qual !== null) return
     let vivo = true
     setCarregandoQual(true)
     api.produtoQualidade(produto.id)
@@ -839,7 +858,7 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
       .catch(() => { if (vivo) setQual({ erro: true }) })
       .finally(() => { if (vivo) setCarregandoQual(false) })
     return () => { vivo = false }
-  }, [aba, qual, carregandoQual, produto.id])
+  }, [aba, qual, produto.id])
 
   // anatomia do líquido (cascata) na aba Preço & Margem — simula a Shopee no preço de lista atual
   useEffect(() => {
@@ -1603,8 +1622,31 @@ function Donut({ saud, aten, prej, size = 64 }) {
   )
 }
 
-function PainelKpis({ kpis, brl, onSemCusto }) {
+function PainelKpis({ kpis, hist = [], brl, onSemCusto }) {
   const lbl = 'text-[9.5px] uppercase tracking-wide text-faint font-bold'
+  const serie = (campo) => (hist || []).map((p) => ({ preco: p[campo] })).filter((x) => Number.isFinite(Number(x.preco)))
+  const trend = (campo, { pp = false, lowerBetter = false, neutral = false } = {}) => {
+    const s = serie(campo)
+    if (s.length < 2) return null
+    const a = Number(s[0].preco), b = Number(s[s.length - 1].preco)
+    const d = b - a
+    if (Math.abs(d) < 1e-9) return { txt: '0', cor: 'var(--faint)' }
+    const up = d > 0
+    const cor = neutral ? 'var(--dim)' : ((lowerBetter ? !up : up) ? 'var(--ok)' : 'var(--danger)')
+    const arr = up ? '▲' : '▼'
+    const txt = pp ? `${arr} ${Math.abs(d).toFixed(1)}pp` : `${arr} ${Math.abs(a ? d / a * 100 : 0).toFixed(1)}%`
+    return { txt, cor }
+  }
+  const Cab = ({ children, t }) => (
+    <div className="flex items-start justify-between gap-1">
+      <div className={lbl}>{children}</div>
+      {t && <span className="num text-[10px] font-bold shrink-0" style={{ color: t.cor }}>{t.txt}</span>}
+    </div>
+  )
+  const tTotal = trend('total', { neutral: true })
+  const tSem = trend('sem_custo', { lowerBetter: true })
+  const tVal = trend('val_estoque', { neutral: true })
+  const tMarg = trend('marg_media', { pp: true })
   return (
     <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(168px, 1fr))' }}>
       <div className="glass rounded-2xl p-4 flex items-center gap-3">
@@ -1620,26 +1662,26 @@ function PainelKpis({ kpis, brl, onSemCusto }) {
         </div>
       </div>
       <div className="glass rounded-2xl p-4">
-        <div className={lbl}>Produtos</div>
+        <Cab t={tTotal}>Produtos</Cab>
         <div className="num text-2xl font-bold mt-1.5">{kpis.total.toLocaleString('pt-BR')}</div>
-        <div className="text-[10px] text-faint mt-1">no catálogo</div>
+        {serie('total').length >= 2 ? <div className="mt-1"><MiniSpark pontos={serie('total')} cor="#c98bd8" /></div> : <div className="text-[10px] text-faint mt-1">no catálogo</div>}
       </div>
       <button onClick={onSemCusto} className="glass rounded-2xl p-4 text-left" style={{ border: '1px solid rgba(224,162,60,.3)' }}>
-        <div className={lbl}>Sem custo</div>
+        <Cab t={tSem}>Sem custo</Cab>
         <div className="num text-2xl font-bold mt-1.5" style={{ color: 'var(--warn)' }}>{kpis.semCusto.toLocaleString('pt-BR')}</div>
         <div className="text-[10px] mt-1.5 font-semibold" style={{ color: 'var(--accent)' }}>filtrar e resolver →</div>
       </button>
       <div className="glass rounded-2xl p-4">
-        <div className={lbl}>Valor em estoque</div>
+        <Cab t={tVal}>Valor em estoque</Cab>
         <div className="num text-2xl font-bold mt-1.5">{brl(kpis.valEstoque)}</div>
-        <div className="text-[10px] text-faint mt-1">custo × saldo</div>
+        {serie('val_estoque').length >= 2 ? <div className="mt-1"><MiniSpark pontos={serie('val_estoque')} cor="#5fd0a8" /></div> : <div className="text-[10px] text-faint mt-1">custo × saldo</div>}
       </div>
       <div className="glass rounded-2xl p-4">
-        <div className={lbl}>Margem mediana</div>
+        <Cab t={tMarg}>Margem mediana</Cab>
         <div className="num text-2xl font-bold mt-1.5" style={{ color: kpis.margMedia != null ? 'var(--ok)' : 'var(--text-faint)' }}>
           {kpis.margMedia != null ? kpis.margMedia.toFixed(1) + '%' : '—'}
         </div>
-        <div className="text-[10px] text-faint mt-1">típica dos com custo</div>
+        {serie('marg_media').length >= 2 ? <div className="mt-1"><MiniSpark pontos={serie('marg_media')} cor="#5fd0a8" /></div> : <div className="text-[10px] text-faint mt-1">típica dos com custo</div>}
       </div>
       {kpis.cobertura.length > 0 && (
         <div className="glass rounded-2xl p-4">

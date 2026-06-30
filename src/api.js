@@ -49,6 +49,8 @@ export const api = {
   produtoSincronizacao: (id) => req(`/api/produtos/${id}/sincronizacao`),
   produtoSimular: (id, canal, preco) => req(`/api/produtos/${id}/simular?canal=${encodeURIComponent(canal)}&preco=${encodeURIComponent(preco)}`),
   produtoQualidade: (id) => req(`/api/produtos/${id}/qualidade`),
+  kpiSnapshot: (b) => req('/api/catalogo/kpi-snapshot', { method: 'POST', body: b }),
+  kpiHistorico: (dias = 30) => req('/api/catalogo/kpi-historico?dias=' + dias),
   diagnosticoPrecos: (id) => req(`/api/diagnostico/precos/${id}`),
   diagnosticoMultiloja: (id) => req(`/api/diagnostico/multiloja/${id}`),
   webhookUrl: () => req('/api/webhooks/url'),
