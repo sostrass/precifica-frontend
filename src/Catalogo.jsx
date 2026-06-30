@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useRef } from 'react'
-import { Search, RefreshCw, Plug, X, Check, Zap, Radar, Wand2, Database, Loader2, ImageOff, BadgePercent, PanelRight, Plus, Star, CheckCircle2, Boxes, BarChart3, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, LayoutGrid, Percent, Layers, Flame, History, ShieldCheck, TrendingUp, Target } from 'lucide-react'
+import { Search, RefreshCw, Plug, X, Check, Zap, Radar, Wand2, Database, Loader2, ImageOff, BadgePercent, PanelRight, Plus, Star, CheckCircle2, Boxes, BarChart3, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, LayoutGrid, Percent, Layers, Flame, History, ShieldCheck, TrendingUp, Target, ArrowDown, ArrowUp } from 'lucide-react'
 import { api, DEFAULT_CUSTOS } from './api.js'
 import { useToast } from './toast.jsx'
 import RadarDrawer from './RadarDrawer.jsx'
@@ -26,6 +26,13 @@ const MK = {
   shein: { nome: 'Shein', cor: '#C9A0FF', bg: 'rgba(201,160,255,.16)' },
   tiktok: { nome: 'TikTok', cor: '#69C9D0', bg: 'rgba(105,201,208,.16)' },
   nuvemshop: { nome: 'Nuvemshop', cor: '#7AA5FF', bg: 'rgba(122,165,255,.16)' },
+}
+// status do preço praticado num canal vs Preço Bling (alvo)
+const FLAG_CANAL = {
+  ok: { cor: 'var(--ok)', Icon: Check, txt: 'No alvo — bate o Preço Bling' },
+  abaixo: { cor: 'var(--warn)', Icon: ArrowDown, txt: 'Abaixo do alvo — neta menos que o Preço Bling' },
+  prejuizo: { cor: 'var(--danger)', Icon: ArrowDown, txt: 'Prejuízo — neta abaixo do custo' },
+  acima: { cor: '#6cc8ff', Icon: ArrowUp, txt: 'Acima do alvo — folga de margem' },
 }
 const desde = (iso) => {
   if (!iso) return null
@@ -516,10 +523,20 @@ export default function Catalogo() {
                       const pubs = (i.marketplaces || []).filter((m) => m.publicado)
                       if (!pubs.length) return <span className="text-[9px] font-semibold px-2 py-0.5 rounded" style={{ border: '1px dashed var(--glass-border)', color: 'var(--text-faint)' }}>sem anúncio</span>
                       return (
-                        <div className="flex items-center gap-1 flex-wrap" style={{ maxWidth: 150 }}>
+                        <div className="flex flex-col gap-1" style={{ minWidth: 138 }}>
                           {pubs.map((m) => {
                             const mk = MK[m.canal] || { nome: m.nome || m.canal, cor: 'var(--dim)', bg: 'var(--glass-hover)' }
-                            return <span key={m.canal} className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: mk.bg, color: mk.cor }}>{mk.nome}</span>
+                            const f = m.preco > 0 ? FLAG_CANAL[m.flag] : null
+                            return (
+                              <div key={m.canal} className="flex items-center gap-1.5">
+                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded flex-none" style={{ background: mk.bg, color: mk.cor }}>{mk.nome}</span>
+                                {m.preco > 0
+                                  ? <span className="num text-[11px] font-semibold" style={{ color: f ? f.cor : 'var(--text)' }}>{brl(m.preco)}</span>
+                                  : <span className="text-[10px] text-faint" title="Preço deste canal ainda não disponível (vem com a API direta do canal)">—</span>}
+                                {f && <span title={f.txt} className="flex-none inline-flex"><f.Icon size={11} style={{ color: f.cor }} /></span>}
+                                {m.promo && <span className="text-[8px] font-bold px-1 rounded flex-none" style={{ background: 'rgba(238,77,45,.16)', color: '#EE4D2D' }}>promo</span>}
+                              </div>
+                            )
                           })}
                         </div>
                       )
@@ -673,6 +690,8 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
   const [simCanal, setSimCanal] = useState({})
   const simTimers = useRef({})
   const [promoPreco, setPromoPreco] = useState('')
+  const [promoModo, setPromoModo] = useState('preco')
+  const [promoDesc, setPromoDesc] = useState('')
   const [promoSim, setPromoSim] = useState(null)
   const [simulandoPromo, setSimulandoPromo] = useState(false)
   const [radarPreco, setRadarPreco] = useState('')
@@ -695,7 +714,20 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
   const [confirmarCanal, setConfirmarCanal] = useState(null)
   const [radarData, setRadarData] = useState(null)
   const [carregandoRadar, setCarregandoRadar] = useState(true)
+  const [qual, setQual] = useState(null)
+  const [carregandoQual, setCarregandoQual] = useState(false)
+  const [anatomia, setAnatomia] = useState(null)
+  const [mNome, setMNome] = useState('')
+  const [mPreco, setMPreco] = useState('')
+  const [salvandoManual, setSalvandoManual] = useState(false)
 
+  const recarregarRadar = () => {
+    setCarregandoRadar(true)
+    api.radarHistorico(produto.sku, 14)
+      .then((d) => setRadarData(d))
+      .catch(() => setRadarData(null))
+      .finally(() => setCarregandoRadar(false))
+  }
   useEffect(() => {
     let vivo = true
     setCarregandoRadar(true)
@@ -705,6 +737,21 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
       .finally(() => { if (vivo) setCarregandoRadar(false) })
     return () => { vivo = false }
   }, [produto.sku])
+
+  const adicionarConcorrenteManual = async () => {
+    const nome = mNome.trim()
+    const preco = Number(String(mPreco).replace(',', '.'))
+    if (!nome) { notify('Dê um nome ao concorrente (ex.: "Loja Aviamentos X").', 'danger'); return }
+    if (!preco || preco <= 0) { notify('Informe o preço do concorrente.', 'danger'); return }
+    setSalvandoManual(true)
+    try {
+      await api.radarManual({ sku: produto.sku, nome, preco, marketplace: 'shopee' })
+      notify(`Concorrente "${nome}" adicionado ao radar a ${brl(preco)}.`, 'ok')
+      setMNome(''); setMPreco('')
+      recarregarRadar()
+    } catch (e) { notify('Não consegui adicionar: ' + (e.message || ''), 'danger') }
+    setSalvandoManual(false)
+  }
 
   const [shopeeItem, setShopeeItem] = useState(null)
   const [carregandoShopee, setCarregandoShopee] = useState(true)
@@ -781,6 +828,30 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
       .finally(() => { if (vivo) setCarregandoReviews(false) })
     return () => { vivo = false }
   }, [aba, shopeeItem, reviews, carregandoReviews])
+
+  // carrega o diagnóstico de Qualidade quando a aba é aberta
+  useEffect(() => {
+    if (aba !== 'qual' || qual !== null || carregandoQual) return
+    let vivo = true
+    setCarregandoQual(true)
+    api.produtoQualidade(produto.id)
+      .then((d) => { if (vivo) setQual(d) })
+      .catch(() => { if (vivo) setQual({ erro: true }) })
+      .finally(() => { if (vivo) setCarregandoQual(false) })
+    return () => { vivo = false }
+  }, [aba, qual, carregandoQual, produto.id])
+
+  // anatomia do líquido (cascata) na aba Preço & Margem — simula a Shopee no preço de lista atual
+  useEffect(() => {
+    if (aba !== 'preco' || !shopeeItem) return
+    const lista = Number(shopeeItem.preco_original || shopeeItem.preco || 0)
+    if (!lista || lista <= 0) { setAnatomia(null); return }
+    let vivo = true
+    api.produtoSimular(produto.id, 'shopee', lista)
+      .then((d) => { if (vivo) setAnatomia({ ...d, lista }) })
+      .catch(() => { if (vivo) setAnatomia(null) })
+    return () => { vivo = false }
+  }, [aba, shopeeItem, produto.id])
 
   // inicializa o preço de simulação da promoção com o preço atual da Shopee (ou Preço Bling)
   useEffect(() => {
@@ -1046,6 +1117,38 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
                   <div className="text-[10px] text-faint mt-1.5">Mude aqui e todos os canais são recalculados (back-cálculo). Custo, NCM, GTIN, peso, título e descrição você ajusta na <button onClick={onEditarCompleto} className="text-accent hover:underline">Edição completa</button>.</div>
                 </div>
                 <div>
+                  {anatomia && anatomia.quebra && anatomia.quebra.length > 0 && (
+                    <div className="rounded-lg p-3 mb-3" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)' }}>
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="text-[10px] uppercase tracking-wide text-faint font-bold">Anatomia do líquido · Shopee</div>
+                        <div className="text-[11px]"><span className="num text-dim">{brl(anatomia.lista)}</span><span className="text-faint mx-1">→</span><span className="num font-bold" style={{ color: 'var(--ok)' }}>{brl(anatomia.liquido)}</span></div>
+                      </div>
+                      <div className="space-y-1">
+                        {(() => {
+                          const base = anatomia.lista || 1
+                          const rows = [{ rotulo: 'Preço de lista', valor: anatomia.lista, tipo: 'lista' },
+                            ...anatomia.quebra.map((q) => ({ ...q, tipo: 'ded' })),
+                            { rotulo: 'Líquido (Preço Bling)', valor: anatomia.liquido, tipo: 'liq' }]
+                          return rows.map((r, i) => {
+                            const pct = Math.min(100, Math.abs(r.valor) / base * 100)
+                            const cor = r.tipo === 'ded' ? 'var(--danger)' : 'var(--ok)'
+                            return (
+                              <div key={i} className="flex items-center gap-2 text-[11px]">
+                                <span className="text-dim truncate" style={{ width: 134 }}>{r.rotulo}</span>
+                                <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,.05)' }}>
+                                  <div style={{ width: pct + '%', height: '100%', background: cor, opacity: r.tipo === 'ded' ? 0.5 : 1, borderRadius: 99 }} />
+                                </div>
+                                <span className="num text-right" style={{ width: 66, color: r.tipo === 'ded' ? 'var(--danger)' : (r.tipo === 'liq' ? 'var(--ok)' : 'var(--text-dim)') }}>{brl(r.valor)}</span>
+                              </div>
+                            )
+                          })
+                        })()}
+                      </div>
+                      {anatomia.margem != null
+                        ? <div className="text-[10px] text-faint mt-2">Margem real neste preço: <b style={{ color: anatomia.margem < 0 ? 'var(--danger)' : 'var(--ok)' }}>{anatomia.margem}%</b>{anatomia.lucro != null ? ` · lucro ${brl(anatomia.lucro)}/un.` : ''}</div>
+                        : <div className="text-[10px] text-faint mt-2">Cadastre o custo do produto pra ver a margem real desta venda.</div>}
+                    </div>
+                  )}
                   <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Valor por marketplace — edite a lista e aplique</div>
                   {carregandoSinc
                     ? <div className="text-faint text-xs flex items-center gap-2 py-3"><Loader2 size={14} className="animate-spin" /> lendo os vínculos do Bling…</div>
@@ -1152,13 +1255,23 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
                           </div>
                         )}
                         <div className="rounded-lg p-3" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)' }}>
-                          <div className="flex items-center justify-between gap-3 mb-2.5">
-                            <div className="text-[11px] text-dim">Simular preço promocional</div>
-                            <div className="flex items-center gap-1.5 rounded-lg px-2 py-1" style={{ background: 'rgba(0,0,0,.2)', border: '1px solid var(--accent2)' }}>
-                              <span className="text-faint text-xs">R$</span>
-                              <input value={promoPreco} onChange={(e) => setPromoPreco(e.target.value)} className="bg-transparent outline-none num font-bold text-sm text-fg text-right" style={{ width: 74 }} />
-                            </div>
+                          <div className="flex items-center gap-1 p-0.5 rounded-lg mb-2.5" style={{ background: 'rgba(0,0,0,.2)', width: 'fit-content' }}>
+                            <button onClick={() => setPromoModo('preco')} className="text-[11px] font-medium px-2.5 py-1 rounded-md" style={promoModo === 'preco' ? { background: 'var(--accent)', color: '#fff' } : { color: 'var(--dim)' }}>Por preço (R$)</button>
+                            <button onClick={() => setPromoModo('desc')} className="text-[11px] font-medium px-2.5 py-1 rounded-md" style={promoModo === 'desc' ? { background: 'var(--accent)', color: '#fff' } : { color: 'var(--dim)' }}>Por desconto (%)</button>
                           </div>
+                          <div className="flex items-center justify-between gap-3 mb-2.5">
+                            <div className="text-[11px] text-dim">{promoModo === 'preco' ? 'Simular preço promocional' : 'Desconto sobre o preço cheio'}</div>
+                            {promoModo === 'preco'
+                              ? <div className="flex items-center gap-1.5 rounded-lg px-2 py-1" style={{ background: 'rgba(0,0,0,.2)', border: '1px solid var(--accent2)' }}>
+                                  <span className="text-faint text-xs">R$</span>
+                                  <input value={promoPreco} onChange={(e) => setPromoPreco(e.target.value)} className="bg-transparent outline-none num font-bold text-sm text-fg text-right" style={{ width: 74 }} />
+                                </div>
+                              : <div className="flex items-center gap-1.5 rounded-lg px-2 py-1" style={{ background: 'rgba(0,0,0,.2)', border: '1px solid var(--accent2)' }}>
+                                  <input value={promoDesc} onChange={(e) => { const dv = e.target.value; setPromoDesc(dv); const d = Number(String(dv).replace(',', '.')); const cheio = Number(shopeeItem.preco_original || shopeeItem.preco || 0); if (cheio > 0 && d >= 0 && d < 100) setPromoPreco((cheio * (1 - d / 100)).toFixed(2).replace('.', ',')) }} className="bg-transparent outline-none num font-bold text-sm text-fg text-right" style={{ width: 50 }} />
+                                  <span className="text-faint text-xs">%</span>
+                                </div>}
+                          </div>
+                          {promoModo === 'desc' && Number(String(promoPreco).replace(',', '.')) > 0 && <div className="text-[10px] text-faint -mt-1.5 mb-1.5 text-right">vira <b className="num text-dim">{brl(Number(String(promoPreco).replace(',', '.')))}</b> na Shopee</div>}
                           {simulandoPromo && !promoSim
                             ? <div className="text-faint text-xs flex items-center gap-2 py-2"><Loader2 size={14} className="animate-spin" /> calculando…</div>
                             : promoSim
@@ -1194,9 +1307,19 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
                 {carregandoRadar
                   ? <div className="text-faint text-xs flex items-center gap-2 py-3"><Loader2 size={14} className="animate-spin" /> lendo o radar…</div>
                   : !temRadar
-                    ? <div className="rounded-lg px-3 py-3 text-xs flex items-center justify-between gap-2" style={{ background: 'var(--glass-hover)' }}>
-                        <span className="text-faint">Sem alvos de concorrência para este SKU.</span>
-                        <button onClick={onRadar} className="text-[11px] font-medium px-2.5 py-1.5 rounded-lg shrink-0" style={{ background: 'rgba(214,0,127,.14)', color: 'var(--accent)' }}>Configurar radar</button>
+                    ? <div className="space-y-2">
+                        <div className="rounded-lg px-3 py-3" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)' }}>
+                          <div className="text-[11px] text-dim mb-2">Sem concorrentes ainda. Adicione na mão o nome e o preço que você viu na Shopee — o painel calcula sua posição e margem na hora.</div>
+                          <div className="flex items-center gap-2">
+                            <input value={mNome} onChange={(e) => setMNome(e.target.value)} placeholder="Nome do concorrente" className="flex-1 bg-transparent outline-none text-xs rounded-lg px-2.5 py-2" style={{ border: '1px solid var(--glass-border)', color: 'var(--text-dim)' }} />
+                            <div className="flex items-center gap-1 rounded-lg px-2 py-1.5" style={{ background: 'rgba(0,0,0,.2)', border: '1px solid var(--accent2)' }}>
+                              <span className="text-faint text-xs">R$</span>
+                              <input value={mPreco} onChange={(e) => setMPreco(e.target.value)} placeholder="0,00" className="bg-transparent outline-none num text-sm text-fg text-right" style={{ width: 56 }} />
+                            </div>
+                            <button onClick={adicionarConcorrenteManual} disabled={salvandoManual} className="text-xs font-medium px-3 py-2 rounded-lg text-white shrink-0 disabled:opacity-60 inline-flex items-center gap-1" style={{ background: 'var(--accent)' }}>{salvandoManual ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}</button>
+                          </div>
+                        </div>
+                        <button onClick={onRadar} className="text-[11px] px-2.5 py-1.5 rounded-lg flex items-center gap-1.5" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)', color: 'var(--dim)' }}><Radar size={12} /> Monitorar por URL (radar automático)</button>
                       </div>
                     : (() => {
                         const concorrentes = (radarData?.series || []).map((sr) => {
@@ -1249,6 +1372,17 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
                                 </div>
                               </div>
                             )}
+                            <div className="rounded-lg px-3 py-2.5" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)' }}>
+                              <div className="text-[10px] text-faint mb-1.5">Adicionar outro concorrente (manual)</div>
+                              <div className="flex items-center gap-2">
+                                <input value={mNome} onChange={(e) => setMNome(e.target.value)} placeholder="Nome" className="flex-1 bg-transparent outline-none text-xs rounded-lg px-2.5 py-1.5" style={{ border: '1px solid var(--glass-border)', color: 'var(--text-dim)' }} />
+                                <div className="flex items-center gap-1 rounded-lg px-2 py-1" style={{ background: 'rgba(0,0,0,.2)', border: '1px solid var(--accent2)' }}>
+                                  <span className="text-faint text-xs">R$</span>
+                                  <input value={mPreco} onChange={(e) => setMPreco(e.target.value)} placeholder="0,00" className="bg-transparent outline-none num text-sm text-fg text-right" style={{ width: 52 }} />
+                                </div>
+                                <button onClick={adicionarConcorrenteManual} disabled={salvandoManual} className="text-xs font-medium px-2.5 py-1.5 rounded-lg text-white shrink-0 disabled:opacity-60 inline-flex items-center gap-1" style={{ background: 'var(--accent)' }}>{salvandoManual ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}</button>
+                              </div>
+                            </div>
                             <button onClick={onRadar} className="text-[11px] px-2.5 py-1.5 rounded-lg flex items-center gap-1.5" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)', color: 'var(--dim)' }}><Radar size={12} /> Abrir radar completo</button>
                           </>
                         )
@@ -1282,32 +1416,123 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
                     ? <div className="text-faint text-xs flex items-center gap-2 py-2"><Loader2 size={14} className="animate-spin" /> buscando avaliações…</div>
                     : !reviews || reviews.length === 0
                       ? <div className="text-faint text-xs rounded-lg px-3 py-2.5" style={{ background: 'var(--glass-hover)' }}>Sem avaliações recentes para este anúncio.</div>
-                      : <div>
-                          <div className="flex items-center gap-3 mb-2">
-                            <span className="text-sm font-bold num" style={{ color: '#F5A623' }}>{(reviews.reduce((a, c) => a + (c.rating_star || 0), 0) / reviews.length).toFixed(1)} ★</span>
-                            <span className="text-[11px] text-faint">{reviews.length} avaliação(ões) recente(s)</span>
-                          </div>
-                          <div className="space-y-1.5">
-                            {reviews.slice(0, 6).map((c, i) => (
-                              <div key={i} className="rounded-lg px-2.5 py-2 text-xs" style={{ background: 'var(--glass-hover)' }}>
-                                <div className="num text-[11px]"><span style={{ color: '#F5A623' }}>{'★'.repeat(Math.round(c.rating_star || 0))}</span><span className="text-faint">{'★'.repeat(Math.max(0, 5 - Math.round(c.rating_star || 0)))}</span></div>
-                                {c.comment && <div className="text-dim mt-0.5">{c.comment.length > 160 ? c.comment.slice(0, 160) + '…' : c.comment}</div>}
+                      : (() => {
+                          const n = reviews.length
+                          const avg = reviews.reduce((a, c) => a + (c.rating_star || 0), 0) / n
+                          const dist = [5, 4, 3, 2, 1].map((s) => reviews.filter((c) => Math.round(c.rating_star || 0) === s).length)
+                          const positivas = reviews.filter((c) => (c.rating_star || 0) >= 4).length
+                          const comFoto = reviews.filter((c) => (c.images && c.images.length) || (c.media && c.media.length) || (c.comment_image && c.comment_image.length)).length
+                          const comentadas = reviews.filter((c) => (c.comment || '').trim()).length
+                          const maxd = Math.max(1, ...dist)
+                          const dt = (c) => { const t = c.ctime || c.mtime; if (!t) return ''; const d = new Date(t * 1000); return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}` }
+                          const ini = (c) => { const u = (c.buyer_username || c.author_username || '').trim(); return u ? u[0].toUpperCase() : '·' }
+                          return (
+                            <div>
+                              <div className="flex items-stretch gap-3 mb-2.5">
+                                <div className="flex flex-col items-center justify-center rounded-lg px-3 py-2" style={{ background: 'var(--glass-hover)', minWidth: 86 }}>
+                                  <span className="text-2xl font-bold num" style={{ color: '#F5A623' }}>{avg.toFixed(1)}</span>
+                                  <span className="num text-[11px]" style={{ color: '#F5A623' }}>{'★'.repeat(Math.round(avg))}<span className="text-faint">{'★'.repeat(Math.max(0, 5 - Math.round(avg)))}</span></span>
+                                  <span className="text-[10px] text-faint mt-0.5">{n} recente(s)</span>
+                                </div>
+                                <div className="flex-1 flex flex-col justify-center gap-1">
+                                  {[5, 4, 3, 2, 1].map((s, i) => (
+                                    <div key={s} className="flex items-center gap-1.5 text-[10px]">
+                                      <span className="text-faint num" style={{ width: 18 }}>{s}★</span>
+                                      <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,.05)' }}>
+                                        <div style={{ width: (dist[i] / maxd * 100) + '%', height: '100%', background: '#F5A623', borderRadius: 99 }} />
+                                      </div>
+                                      <span className="text-faint num" style={{ width: 18, textAlign: 'right' }}>{dist[i]}</span>
+                                    </div>
+                                  ))}
+                                </div>
                               </div>
-                            ))}
-                          </div>
-                        </div>}
+                              <div className="flex flex-wrap gap-1.5 mb-2">
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded" style={{ background: 'rgba(34,197,128,.14)', color: 'var(--ok)' }}>{Math.round(positivas / n * 100)}% positivas</span>
+                                {comFoto > 0 && <span className="text-[10px] px-2 py-0.5 rounded text-dim" style={{ background: 'var(--glass-hover)' }}>com foto {comFoto}</span>}
+                                {comentadas > 0 && <span className="text-[10px] px-2 py-0.5 rounded text-dim" style={{ background: 'var(--glass-hover)' }}>comentadas {comentadas}</span>}
+                              </div>
+                              <div className="space-y-1.5">
+                                {reviews.slice(0, 6).map((c, i) => (
+                                  <div key={i} className="rounded-lg px-2.5 py-2 text-xs" style={{ background: 'var(--glass-hover)' }}>
+                                    <div className="flex items-center gap-2 mb-0.5">
+                                      <span className="flex items-center justify-center rounded-full text-[10px] font-bold" style={{ width: 20, height: 20, background: 'var(--accent2)', color: 'var(--accent)' }}>{ini(c)}</span>
+                                      <span className="num text-[11px]"><span style={{ color: '#F5A623' }}>{'★'.repeat(Math.round(c.rating_star || 0))}</span><span className="text-faint">{'★'.repeat(Math.max(0, 5 - Math.round(c.rating_star || 0)))}</span></span>
+                                      {dt(c) && <span className="text-[10px] text-faint ml-auto num">{dt(c)}</span>}
+                                    </div>
+                                    {c.comment && <div className="text-dim">{c.comment.length > 160 ? c.comment.slice(0, 160) + '…' : c.comment}</div>}
+                                  </div>
+                                ))}
+                              </div>
+                              <div className="text-[10px] text-faint mt-2">Com base nas {n} avaliações mais recentes do anúncio (API da Shopee).</div>
+                            </div>
+                          )
+                        })()}
               </div>
             )}
 
             {aba === 'qual' && (
               <div>
                 <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Qualidade do anúncio</div>
-                <div className="rounded-lg px-3 py-4 text-center" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)' }}>
-                  <ShieldCheck size={22} className="mx-auto mb-2" style={{ color: 'var(--accent)' }} />
-                  <div className="text-sm font-medium">Diagnóstico de qualidade</div>
-                  <div className="text-[11px] text-faint mt-1 mb-3">Fotos, título, atributos, descrição, vídeo e o Conselho de IA com o plano de melhoria ficam na edição completa do anúncio.</div>
-                  <button onClick={onEditarCompleto} className="text-xs font-medium px-3 py-2 rounded-lg text-white inline-flex items-center gap-1.5" style={{ background: 'var(--accent)' }}><Wand2 size={13} /> Abrir Qualidade & IA</button>
-                </div>
+                {carregandoQual
+                  ? <div className="text-faint text-xs flex items-center gap-2 py-3"><Loader2 size={14} className="animate-spin" /> diagnosticando o anúncio…</div>
+                  : !qual || qual.erro
+                    ? <div className="rounded-lg px-3 py-4 text-center" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)' }}>
+                        <ShieldCheck size={22} className="mx-auto mb-2" style={{ color: 'var(--accent)' }} />
+                        <div className="text-sm font-medium">Não consegui ler o diagnóstico</div>
+                        <div className="text-[11px] text-faint mt-1 mb-3">Verifique a sincronização da Shopee e do Bling, ou ajuste a ficha na edição completa.</div>
+                        <button onClick={onEditarCompleto} className="text-xs font-medium px-3 py-2 rounded-lg text-white inline-flex items-center gap-1.5" style={{ background: 'var(--accent)' }}><Wand2 size={13} /> Abrir Qualidade & IA</button>
+                      </div>
+                    : (() => {
+                        const cor = (st) => st === 'ok' ? 'var(--ok)' : st === 'atencao' ? 'var(--warn)' : st === 'falta' ? 'var(--danger)' : 'var(--faint)'
+                        const ring = qual.score >= 85 ? 'var(--ok)' : qual.score >= 70 ? '#5fd0a8' : qual.score >= 50 ? 'var(--warn)' : 'var(--danger)'
+                        const C = 2 * Math.PI * 15.5
+                        return (
+                          <div className="space-y-2.5">
+                            <div className="flex items-center gap-3 rounded-lg px-3 py-3" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)' }}>
+                              <svg width="58" height="58" viewBox="0 0 36 36" style={{ color: 'var(--fg)', flexShrink: 0 }}>
+                                <circle cx="18" cy="18" r="15.5" fill="none" stroke="rgba(255,255,255,.08)" strokeWidth="3" />
+                                <circle cx="18" cy="18" r="15.5" fill="none" stroke={ring} strokeWidth="3" strokeLinecap="round" strokeDasharray={`${qual.score / 100 * C} ${C}`} transform="rotate(-90 18 18)" />
+                                <text x="18" y="19" textAnchor="middle" fontSize="10" fontWeight="700" fill="currentColor">{qual.score}</text>
+                                <text x="18" y="25" textAnchor="middle" fontSize="4" fill="var(--faint)">/100</text>
+                              </svg>
+                              <div className="min-w-0">
+                                <div className="text-sm font-bold" style={{ color: ring }}>{qual.label}</div>
+                                {qual.potencial > qual.score && <div className="text-[11px] text-dim mt-0.5">Potencial: subir pra <b style={{ color: 'var(--ok)' }}>{qual.potencial}/100</b> e ganhar ranqueamento.</div>}
+                                {!qual.tem_shopee && <div className="text-[10px] text-faint mt-0.5">Sem anúncio Shopee vinculado — fotos e vídeo não puderam ser lidos.</div>}
+                              </div>
+                            </div>
+                            <div className="space-y-1.5">
+                              {qual.componentes.map((c, i) => (
+                                <div key={i} className="flex items-start gap-2 rounded-lg px-2.5 py-2" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)' }}>
+                                  <span style={{ width: 8, height: 8, borderRadius: 99, background: cor(c.status), marginTop: 5, flexShrink: 0 }} />
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <span className="text-xs font-medium">{c.label}</span>
+                                      <span className="num text-[10px]" style={{ color: cor(c.status) }}>{c.valor}/{c.max}</span>
+                                    </div>
+                                    <div className="text-[10px] text-faint">{c.detalhe}</div>
+                                    {c.acao && <div className="text-[10px] mt-0.5" style={{ color: 'var(--accent)' }}>{c.acao}</div>}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                            {qual.plano && qual.plano.length > 0 && (
+                              <div className="rounded-lg p-3" style={{ background: 'rgba(214,0,127,.06)', border: '1px solid var(--accent2)' }}>
+                                <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-1.5">Plano priorizado</div>
+                                <div className="space-y-1">
+                                  {qual.plano.map((p, i) => (
+                                    <div key={i} className="flex items-center justify-between gap-2 text-[11px]">
+                                      <span className="text-dim truncate"><b className="text-fg">{p.label}:</b> {p.acao}</span>
+                                      <span className="num text-[10px] shrink-0" style={{ color: 'var(--ok)' }}>+{p.ganho}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                            <button onClick={onEditarCompleto} className="w-full text-xs font-medium px-3 py-2 rounded-lg text-white inline-flex items-center justify-center gap-1.5" style={{ background: 'var(--accent)' }}><Wand2 size={13} /> Melhorar com IA · edição completa</button>
+                          </div>
+                        )
+                      })()}
               </div>
             )}
 

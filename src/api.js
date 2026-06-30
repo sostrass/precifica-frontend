@@ -48,6 +48,7 @@ export const api = {
   produtoPosicionamento: (id, canal) => req(`/api/produtos/${id}/posicionamento` + (canal ? `?canal=${canal}` : '')),
   produtoSincronizacao: (id) => req(`/api/produtos/${id}/sincronizacao`),
   produtoSimular: (id, canal, preco) => req(`/api/produtos/${id}/simular?canal=${encodeURIComponent(canal)}&preco=${encodeURIComponent(preco)}`),
+  produtoQualidade: (id) => req(`/api/produtos/${id}/qualidade`),
   diagnosticoPrecos: (id) => req(`/api/diagnostico/precos/${id}`),
   diagnosticoMultiloja: (id) => req(`/api/diagnostico/multiloja/${id}`),
   webhookUrl: () => req('/api/webhooks/url'),
@@ -186,6 +187,7 @@ export const api = {
   precificacaoCalcular: (b) => req('/api/precificacao/calcular', { method: 'POST', body: b }),
   // Radar
   radarAlvos: (sku) => req('/api/radar/alvos' + (sku ? `?sku=${encodeURIComponent(sku)}` : '')),
+  radarManual: (b) => req('/api/radar/manual', { method: 'POST', body: b }),
   addRadarAlvo: (b) => req('/api/radar/alvos', { method: 'POST', body: b }),
   removeRadarAlvo: (id) => req(`/api/radar/alvos/${id}`, { method: 'DELETE' }),
   radarSnapshot: (b) => req('/api/radar/snapshot', { method: 'POST', body: b }),
