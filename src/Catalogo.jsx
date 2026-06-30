@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Search, RefreshCw, Plug, X, Check, Zap, Radar, Wand2, Database, Loader2, ImageOff, BadgePercent, PanelRight, Plus, Star, CheckCircle2, Boxes, BarChart3, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react'
+import { Search, RefreshCw, Plug, X, Check, Zap, Radar, Wand2, Database, Loader2, ImageOff, BadgePercent, PanelRight, Plus, Star, CheckCircle2, Boxes, BarChart3, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, LayoutGrid, Percent, Layers, Flame, History, ShieldCheck, TrendingUp, Target } from 'lucide-react'
 import { api, DEFAULT_CUSTOS } from './api.js'
 import { useToast } from './toast.jsx'
 import RadarDrawer from './RadarDrawer.jsx'
@@ -38,6 +38,18 @@ const desde = (iso) => {
   return `há ${Math.floor(dias / 30)}m`
 }
 const brl = (n) => 'R$ ' + Number(n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+const ABAS_COCKPIT = [
+  { id: 'visao', icon: LayoutGrid, label: 'Visão geral' },
+  { id: 'preco', icon: Percent, label: 'Preço & Margem' },
+  { id: 'canais', icon: Layers, label: 'Canais' },
+  { id: 'promo', icon: Flame, label: 'Promoção' },
+  { id: 'radar', icon: Target, label: 'Radar' },
+  { id: 'hist', icon: History, label: 'Histórico' },
+  { id: 'aval', icon: Star, label: 'Avaliações' },
+  { id: 'qual', icon: ShieldCheck, label: 'Qualidade' },
+  { id: 'funil', icon: TrendingUp, label: 'Funil' },
+]
 
 export default function Catalogo() {
   const notify = useToast()
@@ -199,7 +211,8 @@ export default function Catalogo() {
 
   const kpis = useMemo(() => {
     const its = itens || []
-    let saud = 0, aten = 0, prej = 0, semCusto = 0, valEstoque = 0, margSum = 0, margN = 0
+    let saud = 0, aten = 0, prej = 0, semCusto = 0, valEstoque = 0
+    const margens = []
     const canalCount = {}
     for (const i of its) {
       if (i.status === 'lucro_ideal') saud++
@@ -207,17 +220,21 @@ export default function Catalogo() {
       else if (i.status === 'critico') prej++
       if (!(i.custo > 0) || i.status === 'sem_custo') semCusto++
       if (i.custo > 0 && i.estoque > 0) valEstoque += i.custo * i.estoque
-      if (i.margem_real != null) { margSum += Number(i.margem_real); margN++ }
+      if (i.margem_real != null && Number.isFinite(Number(i.margem_real))) margens.push(Number(i.margem_real))
       for (const m of (i.marketplaces || [])) if (m.publicado && m.canal) canalCount[m.canal] = (canalCount[m.canal] || 0) + 1
+    }
+    // mediana: robusta a outliers (um produto com custo absurdo não detona a métrica)
+    let margMedia = null
+    if (margens.length) {
+      const ord = margens.slice().sort((a, b) => a - b)
+      const mid = Math.floor(ord.length / 2)
+      margMedia = ord.length % 2 ? ord[mid] : (ord[mid - 1] + ord[mid]) / 2
     }
     const semAnuncio = its.filter((i) => !((i.marketplaces || []).some((m) => m.publicado))).length
     const total = its.length || 1
     const cobertura = Object.entries(canalCount).map(([c, n]) => ({ canal: c, n, pct: (n / total) * 100 }))
       .sort((a, b) => b.n - a.n).slice(0, 4)
-    return {
-      total: its.length, saud, aten, prej, semCusto, valEstoque,
-      margMedia: margN ? margSum / margN : null, cobertura, semAnuncio,
-    }
+    return { total: its.length, saud, aten, prej, semCusto, valEstoque, margMedia, cobertura, semAnuncio }
   }, [itens])
 
   const filtrados = useMemo(() => {
@@ -286,7 +303,7 @@ export default function Catalogo() {
   ]
 
   return (
-    <div className="space-y-3 max-w-6xl">
+    <div className="space-y-3">
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="glass rounded-xl flex items-center gap-2 px-3 py-2 flex-1 min-w-[200px]">
@@ -452,7 +469,7 @@ export default function Catalogo() {
       )}
 
       {/* Lista + cockpit lado a lado (split não-bloqueante, igual ao Pedidos & Financeiro) */}
-      <div className={cockpit ? 'grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(360px,440px)] gap-4 items-start' : ''}>
+      <div className={cockpit ? 'grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(440px,520px)] gap-4 items-start' : ''}>
         <div className="min-w-0">
           {/* Tabela */}
           <div className="glass rounded-2xl overflow-hidden">
@@ -628,6 +645,8 @@ function PrecoChart({ pontos, w = 540, h = 84 }) {
 function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, notify }) {
   const [precoBling, setPrecoBling] = useState(String(produto.preco_bling ?? '').replace('.', ','))
   const [salvando, setSalvando] = useState(false)
+  const [aba, setAba] = useState('visao')
+  const [precoCanalEdit, setPrecoCanalEdit] = useState({})
   const [sinc, setSinc] = useState(null)
   const [carregandoSinc, setCarregandoSinc] = useState(true)
   const [aplicandoCanal, setAplicandoCanal] = useState(null)
@@ -696,6 +715,31 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
     return () => { vivo = false }
   }, [produto.id])
 
+  // auto-carrega o histórico de Preço Bling (alimenta o gráfico da Visão geral)
+  useEffect(() => {
+    let vivo = true
+    setCarregandoHist(true)
+    api.precoHistorico(produto.id, 60)
+      .then((d) => { if (vivo) setPrecoHist(d.pontos || []) })
+      .catch(() => { if (vivo) setPrecoHist([]) })
+      .finally(() => { if (vivo) setCarregandoHist(false) })
+    return () => { vivo = false }
+  }, [produto.id])
+
+  // auto-carrega avaliações quando a aba é aberta
+  useEffect(() => {
+    if (aba !== 'aval') return
+    if (reviews !== null || carregandoReviews) return
+    if (!(shopeeItem && shopeeItem.item_id)) return
+    let vivo = true
+    setCarregandoReviews(true)
+    api.shopeeItemAvaliacoes(shopeeItem.item_id)
+      .then((d) => { const lista = (d && d.response && d.response.item_comment_list) || (d && d.item_comment_list) || []; if (vivo) setReviews(lista) })
+      .catch(() => { if (vivo) setReviews([]) })
+      .finally(() => { if (vivo) setCarregandoReviews(false) })
+    return () => { vivo = false }
+  }, [aba, shopeeItem, reviews, carregandoReviews])
+
   const salvarPreco = async () => {
     const v = Number(String(precoBling).replace(',', '.'))
     if (Number.isNaN(v) || v < 0) { notify('Informe um Preço Bling válido.', 'danger'); return }
@@ -710,21 +754,25 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
 
   const mkNome = (v) => (MK[v.canal] && MK[v.canal].nome) || v.nome || v.canal
   const aplicarCanal = async (v) => {
-    if (!v.id_loja || v.preco_alvo == null) return
+    if (!v.id_loja) return
+    const editado = precoCanalEdit[v.id_loja]
+    const preco = (editado != null && editado !== '') ? Number(String(editado).replace(',', '.')) : v.preco_alvo
+    if (preco == null || Number.isNaN(preco) || preco <= 0) { notify('Informe um preço de lista válido.', 'danger'); return }
     setConfirmarCanal(null)
     setAplicandoCanal(v.id_loja)
     try {
       // 1) Bling (crítico — garante que o ajuste não some na próxima sincronização)
-      await api.precoCanal(produto.id, { id_loja: v.id_loja, preco: v.preco_alvo })
+      await api.precoCanal(produto.id, { id_loja: v.id_loja, preco })
       // 2) Shopee: empurra direto no anúncio (imediato), se temos o item_id no cache
       let avisoShopee = ''
       let empurrouShopee = false
       if (v.canal === 'shopee' && shopeeItem && shopeeItem.item_id) {
-        try { await api.shopeeItemPreco(shopeeItem.item_id, v.preco_alvo); empurrouShopee = true }
+        try { await api.shopeeItemPreco(shopeeItem.item_id, preco); empurrouShopee = true }
         catch (e2) { avisoShopee = ` — Bling ok, mas o empurrão direto na Shopee falhou (${e2.message || ''}); o Bling vai propagar.` }
       }
       const onde = empurrouShopee ? 'no Bling e na Shopee' : 'no Bling'
-      notify(`${mkNome(v)} ajustado pra ${brl(v.preco_alvo)} ${onde}.${avisoShopee}`, avisoShopee ? 'warn' : 'ok')
+      notify(`${mkNome(v)} ajustado pra ${brl(preco)} ${onde}.${avisoShopee}`, avisoShopee ? 'warn' : 'ok')
+      setPrecoCanalEdit((m) => { const n = { ...m }; delete n[v.id_loja]; return n })
       try { const d = await api.produtoSincronizacao(produto.id); setSinc(d) } catch { /* mantém a tabela atual */ }
     } catch (e) { notify('Falha ao aplicar no canal: ' + (e.message || ''), 'danger') }
     setAplicandoCanal(null)
@@ -785,149 +833,233 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
           <button onClick={onClose} className="text-faint hover:text-fg"><X size={18} /></button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-4" style={{ minHeight: 0 }}>
-          <div>
-            <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Resumo</div>
-            <div className="grid grid-cols-3 gap-2">
-              <Tile label="Estoque" val={Math.round(estoque)} />
-              <Tile label="Vendas 30d" val={vendas} cor={vendas > 0 ? 'var(--ok)' : undefined} />
-              <Tile label="Faturam. 30d" val={brl(faturamento)} small />
-              <Tile label="Cobertura" val={cobertura != null ? `${cobertura.toFixed(1)} mês` : '—'} small />
-              <Tile label="Margem real" val={produto.margem_real != null ? `${Number(produto.margem_real).toFixed(1)}%` : 'sem custo'} cor={produto.margem_real != null ? s.cor : undefined} small />
-              <Tile label="Giro/mês" val={`${vendas} un`} small />
-            </div>
+        <div className="flex-1 flex overflow-hidden" style={{ minHeight: 0 }}>
+          {/* Rail de ícones */}
+          <div className="flex flex-col gap-1 p-2 shrink-0" style={{ borderRight: '1px solid var(--glass-border)', width: 54 }}>
+            {ABAS_COCKPIT.map((a) => {
+              const on = aba === a.id
+              const Ico = a.icon
+              return (
+                <button key={a.id} title={a.label} onClick={() => setAba(a.id)} className="grid place-items-center rounded-lg transition relative" style={{ height: 40, ...(on ? { background: 'linear-gradient(135deg, var(--accent), var(--accent2))', color: '#fff' } : { color: 'var(--text-faint)' }) }}>
+                  {on && <span style={{ position: 'absolute', left: -2, top: 8, bottom: 8, width: 3, borderRadius: 99, background: 'var(--accent)' }} />}
+                  <Ico size={17} />
+                </button>
+              )
+            })}
           </div>
 
-          <div>
-            <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Preço Bling — líquido a receber (fonte da verdade)</div>
-            <div className="flex items-center gap-2 rounded-lg p-2.5" style={{ background: 'rgba(0,0,0,.2)', border: '1px solid var(--accent2)' }}>
-              <span className="text-faint text-sm">R$</span>
-              <input value={precoBling} onChange={(e) => setPrecoBling(e.target.value)} className="bg-transparent outline-none num font-bold text-base flex-1 text-fg" style={{ minWidth: 0 }} />
-              <button onClick={salvarPreco} disabled={salvando} className="text-xs font-medium px-3 py-1.5 rounded-lg text-white disabled:opacity-60 flex items-center gap-1.5 shrink-0" style={{ background: 'var(--accent)' }}><Database size={13} /> {salvando ? 'Salvando…' : 'Atualizar no Bling'}</button>
+          {/* Conteúdo da aba */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-4" style={{ minHeight: 0 }}>
+            <div className="flex items-center justify-between">
+              <div className="font-semibold text-sm">{(ABAS_COCKPIT.find((a) => a.id === aba) || {}).label}</div>
+              {desde(produto.atualizado) && <div className="text-[10px] text-faint">atualizado {desde(produto.atualizado)}</div>}
             </div>
-            <div className="text-[10px] text-faint mt-1.5">É a base de todos os canais. Custo, NCM, GTIN, peso, título e descrição você ajusta na <button onClick={onEditarCompleto} className="text-accent hover:underline">Edição completa</button>.</div>
-          </div>
 
-          <div>
-            <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Valor por marketplace — cada loja neta o Preço Bling</div>
-            {carregandoSinc
-              ? <div className="text-faint text-xs flex items-center gap-2 py-3"><Loader2 size={14} className="animate-spin" /> lendo os vínculos do Bling…</div>
-              : canaisPainel.length === 0
-                ? <div className="text-faint text-xs rounded-lg px-3 py-3" style={{ background: 'var(--glass-hover)' }}>Nenhum canal de marketplace ativo na configuração de precificação.</div>
-                : <div className="rounded-lg overflow-hidden" style={{ border: '1px solid var(--glass-border)' }}>
-                    <table className="w-full text-xs">
-                      <thead><tr className="text-faint text-[9px] uppercase" style={{ background: 'var(--glass-hover)' }}>
-                        <th className="text-left px-2 py-2">Canal</th><th className="px-1 py-2">Anunc.</th><th className="text-right px-1.5 py-2">Atual</th><th className="text-right px-1.5 py-2">Pra netar</th><th className="text-right px-1.5 py-2">Líquido</th><th className="text-right px-2 py-2">Ação</th>
-                      </tr></thead>
-                      <tbody>
-                        {canaisPainel.map((c, idx) => {
+            {aba === 'visao' && (
+              <>
+                <div className="grid grid-cols-3 gap-2">
+                  <Tile label="Preço Bling" val={brl(produto.preco_bling)} cor="#c98bd8" small />
+                  <Tile label="Margem real" val={produto.margem_real != null ? `${Number(produto.margem_real).toFixed(1)}%` : 'sem custo'} cor={produto.margem_real != null ? s.cor : undefined} small />
+                  <Tile label="Lucro/un." val={produto.custo > 0 ? brl((produto.preco_bling || 0) - produto.custo) : '—'} cor={produto.custo > 0 ? 'var(--ok)' : undefined} small />
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Preço Bling × vendas — histórico</div>
+                  {carregandoHist
+                    ? <div className="text-faint text-xs flex items-center gap-2 py-3"><Loader2 size={14} className="animate-spin" /> lendo o histórico…</div>
+                    : !precoHist || precoHist.length < 2
+                      ? <div className="text-faint text-xs rounded-lg px-3 py-3" style={{ background: 'var(--glass-hover)' }}>Começamos a registrar o Preço Bling a cada sincronização — o gráfico aparece com alguns dias de histórico.{precoHist && precoHist.length === 1 ? ` (1 ponto: ${brl(precoHist[0].preco)})` : ''}</div>
+                      : <div className="rounded-lg px-3 py-2.5" style={{ background: 'var(--glass-hover)' }}>
+                          <PrecoChart pontos={precoHist} />
+                          <div className="flex items-center justify-between text-[10px] text-faint mt-1">
+                            <span>de <b className="num text-dim">{brl(precoHist[0].preco)}</b> ({precoHist[0].dia?.slice(5)})</span>
+                            <span>hoje <b className="num" style={{ color: 'var(--accent)' }}>{brl(precoHist[precoHist.length - 1].preco)}</b></span>
+                          </div>
+                        </div>}
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Resumo</div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <Tile label="Estoque" val={Math.round(estoque)} />
+                    <Tile label="Vendas 30d" val={vendas} cor={vendas > 0 ? 'var(--ok)' : undefined} />
+                    <Tile label="Faturam. 30d" val={brl(faturamento)} small />
+                    <Tile label="Cobertura" val={cobertura != null ? `${cobertura.toFixed(1)} mês` : '—'} small />
+                    <Tile label="Giro/mês" val={`${vendas} un`} small />
+                    <Tile label="Status" val={s.txt} cor={s.cor} small />
+                  </div>
+                </div>
+                {canaisPainel.some((c) => c.publicado && c.liquido != null) && (
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Líquido por canal (vs Preço Bling)</div>
+                    <div className="flex flex-col gap-2">
+                      {canaisPainel.filter((c) => c.publicado && c.liquido != null).map((c, i) => {
+                        const mk = MK[c.canal] || { nome: c.nome || c.canal, cor: 'var(--dim)', bg: 'var(--glass-hover)' }
+                        const alvo = produto.preco_bling || 0
+                        const pct = alvo > 0 ? Math.max(0, Math.min(120, (c.liquido / alvo) * 100)) : 0
+                        const cor = c.liquido >= alvo - 0.005 ? 'var(--ok)' : c.liquido >= alvo * 0.95 ? 'var(--warn)' : 'var(--danger)'
+                        return (
+                          <div key={i} className="flex items-center gap-2">
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded text-center" style={{ background: mk.bg, color: mk.cor, width: 58, flex: 'none' }}>{mk.nome}</span>
+                            <div className="flex-1 rounded-full overflow-hidden" style={{ height: 7, background: 'rgba(255,255,255,.07)' }}>
+                              <div style={{ height: '100%', width: `${Math.min(100, pct)}%`, background: cor, borderRadius: 99 }} />
+                            </div>
+                            <span className="num text-[10px]" style={{ width: 92, textAlign: 'right', color: cor }}>{brl(c.liquido)} · {Math.round(pct)}%</span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                    <div className="text-[10px] text-faint mt-1.5">Quanto cada canal neta hoje frente ao Preço Bling (100% = bate o alvo).</div>
+                  </div>
+                )}
+                <div className="flex items-center gap-2 pt-1">
+                  <button onClick={() => setAba('preco')} className="text-xs px-3 py-2 rounded-lg flex items-center gap-1.5 text-white" style={{ background: 'var(--accent)' }}><Percent size={13} /> Ajustar preço</button>
+                  <button onClick={onEditarCompleto} className="text-xs px-3 py-2 rounded-lg flex items-center gap-1.5" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)', color: 'var(--dim)' }}><Wand2 size={13} /> IA / Edição completa</button>
+                </div>
+              </>
+            )}
+
+            {aba === 'preco' && (
+              <>
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Preço Bling — líquido a receber (fonte da verdade)</div>
+                  <div className="flex items-center gap-2 rounded-lg p-2.5" style={{ background: 'rgba(0,0,0,.2)', border: '1px solid var(--accent2)' }}>
+                    <span className="text-faint text-sm">R$</span>
+                    <input value={precoBling} onChange={(e) => setPrecoBling(e.target.value)} className="bg-transparent outline-none num font-bold text-base flex-1 text-fg" style={{ minWidth: 0 }} />
+                    <button onClick={salvarPreco} disabled={salvando} className="text-xs font-medium px-3 py-1.5 rounded-lg text-white disabled:opacity-60 flex items-center gap-1.5 shrink-0" style={{ background: 'var(--accent)' }}><Database size={13} /> {salvando ? 'Salvando…' : 'Atualizar no Bling'}</button>
+                  </div>
+                  <div className="text-[10px] text-faint mt-1.5">Mude aqui e todos os canais são recalculados (back-cálculo). Custo, NCM, GTIN, peso, título e descrição você ajusta na <button onClick={onEditarCompleto} className="text-accent hover:underline">Edição completa</button>.</div>
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Valor por marketplace — edite a lista e aplique</div>
+                  {carregandoSinc
+                    ? <div className="text-faint text-xs flex items-center gap-2 py-3"><Loader2 size={14} className="animate-spin" /> lendo os vínculos do Bling…</div>
+                    : canaisPainel.length === 0
+                      ? <div className="text-faint text-xs rounded-lg px-3 py-3" style={{ background: 'var(--glass-hover)' }}>Nenhum canal de marketplace ativo na configuração de precificação.</div>
+                      : <div className="rounded-lg overflow-hidden" style={{ border: '1px solid var(--glass-border)' }}>
+                          <table className="w-full text-xs">
+                            <thead><tr className="text-faint text-[9px] uppercase" style={{ background: 'var(--glass-hover)' }}>
+                              <th className="text-left px-2 py-2">Canal</th><th className="text-right px-1.5 py-2">Atual</th><th className="text-right px-1.5 py-2">Lista (edite)</th><th className="text-right px-1.5 py-2">Líquido</th><th className="text-right px-2 py-2">Ação</th>
+                            </tr></thead>
+                            <tbody>
+                              {canaisPainel.map((c, idx) => {
+                                const mk = MK[c.canal] || { nome: c.nome || c.canal, cor: 'var(--dim)', bg: 'var(--glass-hover)' }
+                                const sc = STATUS_CANAL[c.status] || STATUS_CANAL.sem_preco
+                                const editVal = precoCanalEdit[c.id_loja]
+                                const editavel = c.publicado && c.id_loja
+                                return (
+                                  <tr key={idx} style={idx < canaisPainel.length - 1 ? { borderBottom: '1px solid var(--glass-border)' } : undefined}>
+                                    <td className="px-2 py-2">
+                                      {c.publicado
+                                        ? <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: mk.bg, color: mk.cor }}>{mk.nome}</span>
+                                        : <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ color: 'var(--faint)', border: '1px dashed var(--glass-border)' }}>{mk.nome}</span>}
+                                    </td>
+                                    <td className="px-1.5 py-2 text-right num">{c.preco_registrado != null ? brl(c.preco_registrado) : '—'}</td>
+                                    <td className="px-1.5 py-2 text-right">
+                                      {editavel
+                                        ? <input value={editVal != null ? editVal : (c.preco_alvo != null ? String(c.preco_alvo).replace('.', ',') : '')} onChange={(e) => setPrecoCanalEdit((m) => ({ ...m, [c.id_loja]: e.target.value }))} className="bg-transparent outline-none num text-right rounded px-1.5 py-1" style={{ width: 70, border: '1px solid ' + (editVal != null ? 'var(--accent)' : 'var(--glass-border)'), color: editVal != null ? 'var(--accent)' : 'var(--text-dim)' }} />
+                                        : <span className="num" style={{ color: 'var(--accent)' }}>{c.preco_alvo != null ? brl(c.preco_alvo) : '—'}</span>}
+                                    </td>
+                                    <td className="px-1.5 py-2 text-right num" style={{ color: c.liquido != null ? sc.cor : 'var(--faint)' }} title={sc.txt}>{c.liquido != null ? brl(c.liquido) : '—'}</td>
+                                    <td className="px-2 py-2 text-right">
+                                      {editavel
+                                        ? (aplicandoCanal === c.id_loja
+                                            ? <span className="text-faint text-[10px] inline-flex items-center gap-1"><Loader2 size={11} className="animate-spin" />…</span>
+                                            : confirmarCanal === c.id_loja
+                                              ? <button onClick={() => aplicarCanal(c)} className="text-[10px] font-bold px-2 py-1 rounded" style={{ background: 'rgba(245,166,35,.18)', color: '#F5A623' }}>Confirmar</button>
+                                              : <button onClick={() => setConfirmarCanal(c.id_loja)} className="text-[10px] font-medium px-2 py-1 rounded" style={{ background: 'rgba(214,0,127,.14)', color: 'var(--accent)' }}>Aplicar</button>)
+                                        : <button onClick={() => anunciarCanal(c)} className="text-[10px] font-medium px-2 py-1 rounded inline-flex items-center gap-1" style={{ background: 'var(--glass-hover)', color: 'var(--dim)' }}><Plus size={10} /> Anunciar</button>}
+                                    </td>
+                                  </tr>
+                                )
+                              })}
+                            </tbody>
+                          </table>
+                        </div>}
+                  <div className="text-[10px] text-faint mt-1.5">"Lista" vem pré-preenchida com o preço que neta o Preço Bling — você pode digitar outro valor e <b className="text-fg">Aplicar</b>. Grava no vínculo do Bling e, na Shopee, empurra direto no anúncio. O "Líquido" recalcula após aplicar.</div>
+                </div>
+              </>
+            )}
+
+            {aba === 'canais' && (
+              <div>
+                <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Presença por canal</div>
+                {carregandoSinc
+                  ? <div className="text-faint text-xs flex items-center gap-2 py-3"><Loader2 size={14} className="animate-spin" /> lendo os vínculos…</div>
+                  : canaisPainel.length === 0
+                    ? <div className="text-faint text-xs rounded-lg px-3 py-3" style={{ background: 'var(--glass-hover)' }}>Nenhum canal configurado.</div>
+                    : <div className="flex flex-col gap-2">
+                        {canaisPainel.map((c, i) => {
                           const mk = MK[c.canal] || { nome: c.nome || c.canal, cor: 'var(--dim)', bg: 'var(--glass-hover)' }
-                          const sc = STATUS_CANAL[c.status] || STATUS_CANAL.sem_preco
                           return (
-                            <tr key={idx} style={idx < canaisPainel.length - 1 ? { borderBottom: '1px solid var(--glass-border)' } : undefined}>
-                              <td className="px-2 py-2">
-                                {c.publicado
-                                  ? <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: mk.bg, color: mk.cor }}>{mk.nome}</span>
-                                  : <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ color: 'var(--faint)', border: '1px dashed var(--glass-border)' }}>{mk.nome}</span>}
-                              </td>
-                              <td className="px-1 py-2 text-center">{c.publicado ? <span style={{ color: 'var(--ok)' }}>✓</span> : <span className="text-faint">✗</span>}</td>
-                              <td className="px-1.5 py-2 text-right num">{c.preco_registrado != null ? brl(c.preco_registrado) : '—'}</td>
-                              <td className="px-1.5 py-2 text-right num font-medium" style={{ color: 'var(--accent)' }}>{c.preco_alvo != null ? brl(c.preco_alvo) : '—'}</td>
-                              <td className="px-1.5 py-2 text-right num" style={{ color: c.liquido != null ? sc.cor : 'var(--faint)' }} title={sc.txt}>{c.liquido != null ? brl(c.liquido) : '—'}</td>
-                              <td className="px-2 py-2 text-right">
-                                {c.publicado && c.id_loja && c.preco_alvo != null
-                                  ? (aplicandoCanal === c.id_loja
-                                      ? <span className="text-faint text-[10px] inline-flex items-center gap-1"><Loader2 size={11} className="animate-spin" />…</span>
-                                      : confirmarCanal === c.id_loja
-                                        ? <button onClick={() => aplicarCanal(c)} className="text-[10px] font-bold px-2 py-1 rounded" style={{ background: 'rgba(245,166,35,.18)', color: '#F5A623' }}>Confirmar</button>
-                                        : <button onClick={() => setConfirmarCanal(c.id_loja)} className="text-[10px] font-medium px-2 py-1 rounded" style={{ background: 'rgba(214,0,127,.14)', color: 'var(--accent)' }}>Aplicar</button>)
-                                  : <button onClick={() => anunciarCanal(c)} className="text-[10px] font-medium px-2 py-1 rounded inline-flex items-center gap-1" style={{ background: 'var(--glass-hover)', color: 'var(--dim)' }}><Plus size={10} /> Anunciar</button>}
-                              </td>
-                            </tr>
+                            <div key={i} className="flex items-center justify-between rounded-lg px-3 py-2.5" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)' }}>
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded" style={{ background: mk.bg, color: mk.cor }}>{mk.nome}</span>
+                              {c.publicado
+                                ? <span className="text-xs flex items-center gap-2"><span style={{ color: 'var(--ok)' }}>● publicado</span>{c.preco_registrado != null && <span className="num text-dim">{brl(c.preco_registrado)}</span>}</span>
+                                : <button onClick={() => anunciarCanal(c)} className="text-[11px] font-medium px-2.5 py-1.5 rounded-lg inline-flex items-center gap-1" style={{ background: 'rgba(214,0,127,.14)', color: 'var(--accent)' }}><Plus size={11} /> Anunciar</button>}
+                            </div>
                           )
                         })}
-                      </tbody>
-                    </table>
-                  </div>}
-            <div className="text-[10px] text-faint mt-1.5">"Pra netar" = preço de lista que devolve o Preço Bling após as taxas do canal. "Líquido" = o que sobra hoje no preço atual (vermelho = abaixo do Preço Bling). "Aplicar" grava no vínculo do Bling e, na Shopee, empurra direto no anúncio.</div>
-          </div>
-
-          <div>
-            <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Promoção / Desconto</div>
-            {carregandoShopee
-              ? <div className="text-faint text-xs flex items-center gap-2 py-3"><Loader2 size={14} className="animate-spin" /> lendo a Shopee…</div>
-              : !shopeeItem
-                ? <div className="text-faint text-xs rounded-lg px-3 py-3" style={{ background: 'var(--glass-hover)' }}>Sem dados da Shopee para este SKU. Rode "Sincronizar Shopee" no topo do Catálogo.</div>
-                : shopeeItem.em_promocao
-                  ? <div className="rounded-lg p-3" style={{ background: 'rgba(245,166,35,.10)', border: '1px solid rgba(245,166,35,.4)' }}>
-                      <div className="flex items-center gap-2 mb-2 flex-wrap">
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded inline-flex items-center gap-1" style={{ background: 'rgba(245,166,35,.2)', color: '#F5A623' }}><BadgePercent size={11} /> Em campanha</span>
-                        {shopeeItem.promo_nome && <span className="text-[11px] text-dim truncate">{shopeeItem.promo_nome}</span>}
-                      </div>
-                      <div className="grid grid-cols-3 gap-2">
-                        <Tile label="Preço promo" val={brl(shopeeItem.preco)} cor="#F5A623" small />
-                        <Tile label="Preço cheio" val={shopeeItem.preco_original > 0 ? brl(shopeeItem.preco_original) : '—'} small />
-                        <Tile label="Desconto" val={shopeeItem.preco_original > shopeeItem.preco ? `-${Math.round((1 - shopeeItem.preco / shopeeItem.preco_original) * 100)}%` : '—'} cor="#F5A623" small />
-                      </div>
-                      <div className="text-[11px] text-dim mt-2">Líquido-alvo (Preço Bling) <b className="num" style={{ color: 'var(--ok)' }}>{brl(liquidoAlvo)}</b> — é o que você quer receber fora de campanha.</div>
-                      <div className="text-[10px] text-faint mt-1.5">Campanhas são criadas e retiradas no Seller Center da Shopee. Aqui a promo aparece pra você não confundir o desconto com erro de preço.</div>
-                    </div>
-                  : <div className="rounded-lg px-3 py-2.5 text-xs flex items-center justify-between" style={{ background: 'var(--glass-hover)' }}>
-                      <span className="text-dim">Sem campanha ativa na Shopee.</span>
-                      <span className="num">{shopeeItem.preco > 0 ? brl(shopeeItem.preco) : '—'}</span>
-                    </div>}
-          </div>
-
-          <div>
-            <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Concorrência (Radar)</div>
-            {carregandoRadar
-              ? <div className="text-faint text-xs flex items-center gap-2 py-3"><Loader2 size={14} className="animate-spin" /> lendo o radar…</div>
-              : !temRadar
-                ? <div className="rounded-lg px-3 py-3 text-xs flex items-center justify-between gap-2" style={{ background: 'var(--glass-hover)' }}>
-                    <span className="text-faint">Sem alvos de concorrência para este SKU.</span>
-                    <button onClick={onRadar} className="text-[11px] font-medium px-2.5 py-1.5 rounded-lg shrink-0" style={{ background: 'rgba(214,0,127,.14)', color: 'var(--accent)' }}>Configurar radar</button>
-                  </div>
-                : <div>
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="text-sm min-w-0">
-                        <div>Menor concorrente <b className="num">{brl(est.menor)}</b></div>
-                        {gap != null && <div className="text-[11px] mt-0.5" style={{ color: gap > 0 ? '#FF6F6F' : 'var(--ok)' }}>{gap > 0 ? `você está ${brl(Math.abs(gap))} acima` : gap < 0 ? `você está ${brl(Math.abs(gap))} abaixo` : 'empatado com o menor'}</div>}
-                        {est.n ? <div className="text-[10px] text-faint mt-0.5">{est.n} anúncio(s) monitorado(s)</div> : null}
-                      </div>
-                      <Sparkline pontos={sparkPontos} cor="#4DA3FF" />
-                    </div>
-                    <button onClick={onRadar} className="text-[11px] mt-2 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)', color: 'var(--dim)' }}><Radar size={12} /> Abrir radar completo</button>
-                  </div>}
-          </div>
-
-          <div>
-            <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Performance & Funil (Shopee)</div>
-            <div className="rounded-lg px-3 py-3" style={{ background: 'var(--glass-hover)' }}>
-              <div className="grid grid-cols-3 gap-2 mb-2" style={{ opacity: 0.55 }}>
-                <Tile label="Impressões 30d" val="—" small />
-                <Tile label="Cliques" val="—" small />
-                <Tile label="Conversão" val="—" small />
+                      </div>}
+                <div className="text-[10px] text-faint mt-1.5">Para vender num canal novo, crie o anúncio e vincule o produto no Bling — ele aparece aqui pronto pra precificar.</div>
               </div>
-              <div className="text-[10px] text-faint">A API da Shopee não expõe impressões/cliques/conversão por produto — só agregado por loja/campanha. O funil da loja fica no módulo Desempenho.</div>
-            </div>
-          </div>
+            )}
 
-          <div>
-            <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">+ Mais neste painel</div>
-            <div className="flex flex-wrap gap-2">
-              {shopeeItem && shopeeItem.item_id && (
-                <button onClick={verReviews} className="text-[11px] px-2.5 py-1.5 rounded-lg flex items-center gap-1.5" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)', color: 'var(--dim)' }}><Star size={12} /> Avaliações {mostrarReviews ? '▲' : '▼'}</button>
-              )}
-              <button onClick={onEditarCompleto} className="text-[11px] px-2.5 py-1.5 rounded-lg flex items-center gap-1.5" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)', color: 'var(--dim)' }}><CheckCircle2 size={12} /> Qualidade do anúncio</button>
-              <button onClick={onEditarCompleto} className="text-[11px] px-2.5 py-1.5 rounded-lg flex items-center gap-1.5" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)', color: 'var(--dim)' }}><Wand2 size={12} /> Conteúdo & IA</button>
-              <button onClick={() => notify('Impulsionamento e ADS ficam no módulo de Impulsionamento da Shopee.', 'warn')} className="text-[11px] px-2.5 py-1.5 rounded-lg flex items-center gap-1.5" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)', color: 'var(--dim)' }}><Zap size={12} /> Impulsionamento / ADS</button>
-              <button onClick={() => notify(cobertura != null ? `Cobertura: ${cobertura.toFixed(1)} mês(es) de estoque no ritmo atual de venda.` : 'Sem histórico de vendas pra estimar reposição.', 'ok')} className="text-[11px] px-2.5 py-1.5 rounded-lg flex items-center gap-1.5" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)', color: 'var(--dim)' }}><Boxes size={12} /> Reposição</button>
-              <button onClick={verHist} className="text-[11px] px-2.5 py-1.5 rounded-lg flex items-center gap-1.5" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)', color: 'var(--dim)' }}><BarChart3 size={12} /> Histórico de preço {mostrarHist ? '▲' : '▼'}</button>
-            </div>
-            {mostrarHist && (
-              <div className="mt-2">
+            {aba === 'promo' && (
+              <div>
+                <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Promoção / Desconto</div>
+                {carregandoShopee
+                  ? <div className="text-faint text-xs flex items-center gap-2 py-3"><Loader2 size={14} className="animate-spin" /> lendo a Shopee…</div>
+                  : !shopeeItem
+                    ? <div className="text-faint text-xs rounded-lg px-3 py-3" style={{ background: 'var(--glass-hover)' }}>Sem dados da Shopee para este SKU. Rode "Sincronizar Shopee" no topo do Catálogo.</div>
+                    : shopeeItem.em_promocao
+                      ? <div className="rounded-lg p-3" style={{ background: 'rgba(245,166,35,.10)', border: '1px solid rgba(245,166,35,.4)' }}>
+                          <div className="flex items-center gap-2 mb-2 flex-wrap">
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded inline-flex items-center gap-1" style={{ background: 'rgba(245,166,35,.2)', color: '#F5A623' }}><BadgePercent size={11} /> Em campanha</span>
+                            {shopeeItem.promo_nome && <span className="text-[11px] text-dim truncate">{shopeeItem.promo_nome}</span>}
+                          </div>
+                          <div className="grid grid-cols-3 gap-2">
+                            <Tile label="Preço promo" val={brl(shopeeItem.preco)} cor="#F5A623" small />
+                            <Tile label="Preço cheio" val={shopeeItem.preco_original > 0 ? brl(shopeeItem.preco_original) : '—'} small />
+                            <Tile label="Desconto" val={shopeeItem.preco_original > shopeeItem.preco ? `-${Math.round((1 - shopeeItem.preco / shopeeItem.preco_original) * 100)}%` : '—'} cor="#F5A623" small />
+                          </div>
+                          <div className="text-[11px] text-dim mt-2">Líquido-alvo (Preço Bling) <b className="num" style={{ color: 'var(--ok)' }}>{brl(liquidoAlvo)}</b> — é o que você quer receber fora de campanha.</div>
+                          <div className="text-[10px] text-faint mt-1.5">Campanhas são criadas e retiradas no Seller Center da Shopee. Aqui a promo aparece pra você não confundir o desconto com erro de preço.</div>
+                        </div>
+                      : <div className="rounded-lg px-3 py-2.5 text-xs flex items-center justify-between" style={{ background: 'var(--glass-hover)' }}>
+                          <span className="text-dim">Sem campanha ativa na Shopee.</span>
+                          <span className="num">{shopeeItem.preco > 0 ? brl(shopeeItem.preco) : '—'}</span>
+                        </div>}
+              </div>
+            )}
+
+            {aba === 'radar' && (
+              <div>
+                <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Concorrência (Radar)</div>
+                {carregandoRadar
+                  ? <div className="text-faint text-xs flex items-center gap-2 py-3"><Loader2 size={14} className="animate-spin" /> lendo o radar…</div>
+                  : !temRadar
+                    ? <div className="rounded-lg px-3 py-3 text-xs flex items-center justify-between gap-2" style={{ background: 'var(--glass-hover)' }}>
+                        <span className="text-faint">Sem alvos de concorrência para este SKU.</span>
+                        <button onClick={onRadar} className="text-[11px] font-medium px-2.5 py-1.5 rounded-lg shrink-0" style={{ background: 'rgba(214,0,127,.14)', color: 'var(--accent)' }}>Configurar radar</button>
+                      </div>
+                    : <div>
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-sm min-w-0">
+                            <div>Menor concorrente <b className="num">{brl(est.menor)}</b></div>
+                            {gap != null && <div className="text-[11px] mt-0.5" style={{ color: gap > 0 ? '#FF6F6F' : 'var(--ok)' }}>{gap > 0 ? `você está ${brl(Math.abs(gap))} acima` : gap < 0 ? `você está ${brl(Math.abs(gap))} abaixo` : 'empatado com o menor'}</div>}
+                            {est.n ? <div className="text-[10px] text-faint mt-0.5">{est.n} anúncio(s) monitorado(s)</div> : null}
+                          </div>
+                          <Sparkline pontos={sparkPontos} cor="#4DA3FF" />
+                        </div>
+                        <button onClick={onRadar} className="text-[11px] mt-2 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)', color: 'var(--dim)' }}><Radar size={12} /> Abrir radar completo</button>
+                      </div>}
+              </div>
+            )}
+
+            {aba === 'hist' && (
+              <div>
+                <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Histórico de Preço Bling</div>
                 {carregandoHist
-                  ? <div className="text-faint text-xs flex items-center gap-2 py-2"><Loader2 size={14} className="animate-spin" /> lendo o histórico…</div>
+                  ? <div className="text-faint text-xs flex items-center gap-2 py-3"><Loader2 size={14} className="animate-spin" /> lendo o histórico…</div>
                   : !precoHist || precoHist.length < 2
                     ? <div className="text-faint text-xs rounded-lg px-3 py-2.5" style={{ background: 'var(--glass-hover)' }}>Começamos a registrar o Preço Bling a cada sincronização. O gráfico aparece com alguns dias de histórico.{precoHist && precoHist.length === 1 ? ` (1 ponto até agora: ${brl(precoHist[0].preco)})` : ''}</div>
                     : <div className="rounded-lg px-3 py-2.5" style={{ background: 'var(--glass-hover)' }}>
@@ -939,32 +1071,58 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
                       </div>}
               </div>
             )}
-            {mostrarReviews && (
-              <div className="mt-2">
-                {carregandoReviews
-                  ? <div className="text-faint text-xs flex items-center gap-2 py-2"><Loader2 size={14} className="animate-spin" /> buscando avaliações…</div>
-                  : !reviews || reviews.length === 0
-                    ? <div className="text-faint text-xs rounded-lg px-3 py-2.5" style={{ background: 'var(--glass-hover)' }}>Sem avaliações recentes para este anúncio.</div>
-                    : <div>
-                        <div className="flex items-center gap-3 mb-2">
-                          <span className="text-sm font-bold num" style={{ color: '#F5A623' }}>{(reviews.reduce((a, c) => a + (c.rating_star || 0), 0) / reviews.length).toFixed(1)} ★</span>
-                          <span className="text-[11px] text-faint">{reviews.length} avaliação(ões) recente(s)</span>
-                        </div>
-                        <div className="space-y-1.5">
-                          {reviews.slice(0, 3).map((c, i) => (
-                            <div key={i} className="rounded-lg px-2.5 py-2 text-xs" style={{ background: 'var(--glass-hover)' }}>
-                              <div className="num text-[11px]"><span style={{ color: '#F5A623' }}>{'★'.repeat(Math.round(c.rating_star || 0))}</span><span className="text-faint">{'★'.repeat(Math.max(0, 5 - Math.round(c.rating_star || 0)))}</span></div>
-                              {c.comment && <div className="text-dim mt-0.5">{c.comment.length > 120 ? c.comment.slice(0, 120) + '…' : c.comment}</div>}
-                            </div>
-                          ))}
-                        </div>
-                      </div>}
+
+            {aba === 'aval' && (
+              <div>
+                <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Avaliações (Shopee)</div>
+                {!(shopeeItem && shopeeItem.item_id)
+                  ? <div className="text-faint text-xs rounded-lg px-3 py-3" style={{ background: 'var(--glass-hover)' }}>Sem anúncio Shopee vinculado para buscar avaliações. Rode "Sincronizar Shopee".</div>
+                  : carregandoReviews
+                    ? <div className="text-faint text-xs flex items-center gap-2 py-2"><Loader2 size={14} className="animate-spin" /> buscando avaliações…</div>
+                    : !reviews || reviews.length === 0
+                      ? <div className="text-faint text-xs rounded-lg px-3 py-2.5" style={{ background: 'var(--glass-hover)' }}>Sem avaliações recentes para este anúncio.</div>
+                      : <div>
+                          <div className="flex items-center gap-3 mb-2">
+                            <span className="text-sm font-bold num" style={{ color: '#F5A623' }}>{(reviews.reduce((a, c) => a + (c.rating_star || 0), 0) / reviews.length).toFixed(1)} ★</span>
+                            <span className="text-[11px] text-faint">{reviews.length} avaliação(ões) recente(s)</span>
+                          </div>
+                          <div className="space-y-1.5">
+                            {reviews.slice(0, 6).map((c, i) => (
+                              <div key={i} className="rounded-lg px-2.5 py-2 text-xs" style={{ background: 'var(--glass-hover)' }}>
+                                <div className="num text-[11px]"><span style={{ color: '#F5A623' }}>{'★'.repeat(Math.round(c.rating_star || 0))}</span><span className="text-faint">{'★'.repeat(Math.max(0, 5 - Math.round(c.rating_star || 0)))}</span></div>
+                                {c.comment && <div className="text-dim mt-0.5">{c.comment.length > 160 ? c.comment.slice(0, 160) + '…' : c.comment}</div>}
+                              </div>
+                            ))}
+                          </div>
+                        </div>}
               </div>
             )}
-          </div>
 
-          <div className="flex items-center gap-2 pt-1">
-            <button onClick={onEditarCompleto} className="text-xs px-3 py-2 rounded-lg flex items-center gap-1.5" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)', color: 'var(--dim)' }}><Zap size={13} /> Edição completa / Fotos / IA</button>
+            {aba === 'qual' && (
+              <div>
+                <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Qualidade do anúncio</div>
+                <div className="rounded-lg px-3 py-4 text-center" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)' }}>
+                  <ShieldCheck size={22} className="mx-auto mb-2" style={{ color: 'var(--accent)' }} />
+                  <div className="text-sm font-medium">Diagnóstico de qualidade</div>
+                  <div className="text-[11px] text-faint mt-1 mb-3">Fotos, título, atributos, descrição, vídeo e o Conselho de IA com o plano de melhoria ficam na edição completa do anúncio.</div>
+                  <button onClick={onEditarCompleto} className="text-xs font-medium px-3 py-2 rounded-lg text-white inline-flex items-center gap-1.5" style={{ background: 'var(--accent)' }}><Wand2 size={13} /> Abrir Qualidade & IA</button>
+                </div>
+              </div>
+            )}
+
+            {aba === 'funil' && (
+              <div>
+                <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Performance & Funil (Shopee)</div>
+                <div className="rounded-lg px-3 py-3" style={{ background: 'var(--glass-hover)' }}>
+                  <div className="grid grid-cols-3 gap-2 mb-2" style={{ opacity: 0.55 }}>
+                    <Tile label="Impressões 30d" val="—" small />
+                    <Tile label="Cliques" val="—" small />
+                    <Tile label="Conversão" val="—" small />
+                  </div>
+                  <div className="text-[10px] text-faint">A API da Shopee não expõe impressões/cliques/conversão por produto — só agregado por loja/campanha. O funil da loja fica no módulo Desempenho.</div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
     </div>
@@ -1051,11 +1209,11 @@ function PainelKpis({ kpis, brl, onSemCusto }) {
         <div className="text-[10px] text-faint mt-1">custo × saldo</div>
       </div>
       <div className="glass rounded-2xl p-4">
-        <div className={lbl}>Margem média</div>
+        <div className={lbl}>Margem mediana</div>
         <div className="num text-2xl font-bold mt-1.5" style={{ color: kpis.margMedia != null ? 'var(--ok)' : 'var(--text-faint)' }}>
           {kpis.margMedia != null ? kpis.margMedia.toFixed(1) + '%' : '—'}
         </div>
-        <div className="text-[10px] text-faint mt-1">média dos com custo</div>
+        <div className="text-[10px] text-faint mt-1">típica dos com custo</div>
       </div>
       {kpis.cobertura.length > 0 && (
         <div className="glass rounded-2xl p-4">
@@ -1082,7 +1240,7 @@ function PainelKpis({ kpis, brl, onSemCusto }) {
 
 function Skeleton() {
   return (
-    <div className="space-y-3 max-w-6xl animate-pulse">
+    <div className="space-y-3 animate-pulse">
       <div className="glass rounded-xl h-11" />
       <div className="glass rounded-2xl h-80" />
     </div>
@@ -1091,7 +1249,7 @@ function Skeleton() {
 
 function SemDados() {
   return (
-    <div className="glass rounded-2xl p-10 grid place-items-center text-center max-w-6xl">
+    <div className="glass rounded-2xl p-10 grid place-items-center text-center">
       <div className="h-14 w-14 rounded-2xl grid place-items-center mb-3" style={{ background: 'linear-gradient(135deg, var(--accent), var(--accent2))' }}>
         <Plug size={26} className="text-white" />
       </div>
