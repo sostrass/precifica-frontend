@@ -848,19 +848,22 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
     setConfirmarCanal(null)
     setAplicandoCanal(rowKey)
     try {
-      let ondeBling = false
-      // 1) Bling (se temos o vínculo) — garante que o ajuste não some na próxima sincronização
-      if (v.id_loja) { await api.precoCanal(produto.id, { id_loja: v.id_loja, preco }); ondeBling = true }
-      // 2) Shopee: empurra direto no anúncio (imediato), via item_id do cache/Shopee
-      let avisoShopee = ''
-      let empurrouShopee = false
+      // 1) Bling é o hub (fonte da verdade) — grava primeiro pra não ser sobrescrito na sync
+      let ondeBling = false, avisoBling = ''
+      if (v.id_loja) {
+        try { await api.precoCanal(produto.id, { id_loja: v.id_loja, preco }); ondeBling = true }
+        catch (eB) { avisoBling = ` — gravação no Bling falhou (${eB.message || ''})` }
+      }
+      // 2) Shopee: empurra direto no anúncio (imediato), via item_id
+      let empurrouShopee = false, avisoShopee = ''
       if (v.canal === 'shopee' && itemId) {
         try { await api.shopeeItemPreco(itemId, preco); empurrouShopee = true }
         catch (e2) { avisoShopee = ` — empurrão direto na Shopee falhou (${e2.message || ''})` }
       }
-      if (!ondeBling && !empurrouShopee) throw new Error('sem destino pra aplicar este preço')
-      const onde = ondeBling && empurrouShopee ? 'no Bling e na Shopee' : empurrouShopee ? 'na Shopee' : 'no Bling'
-      notify(`${mkNome(v)} ajustado pra ${brl(preco)} ${onde}.${avisoShopee}`, avisoShopee ? 'warn' : 'ok')
+      if (!ondeBling && !empurrouShopee) throw new Error('não consegui aplicar em nenhum destino')
+      const onde = ondeBling && empurrouShopee ? 'no Bling e na Shopee'
+        : ondeBling ? 'no Bling' : 'só na Shopee (Bling pendente)'
+      notify(`${mkNome(v)} → ${brl(preco)} ${onde}.${avisoBling}${avisoShopee}`, (avisoBling || avisoShopee) ? 'warn' : 'ok')
       setPrecoCanalEdit((m) => { const n = { ...m }; delete n[rowKey]; return n })
       try { const d = await api.produtoSincronizacao(produto.id); setSinc(d) } catch { /* mantém a tabela atual */ }
     } catch (e) { notify('Falha ao aplicar no canal: ' + (e.message || ''), 'danger') }
