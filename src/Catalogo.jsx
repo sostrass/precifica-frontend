@@ -197,6 +197,29 @@ export default function Catalogo() {
     return c
   }, [itens])
 
+  const kpis = useMemo(() => {
+    const its = itens || []
+    let saud = 0, aten = 0, prej = 0, semCusto = 0, valEstoque = 0, margSum = 0, margN = 0
+    const canalCount = {}
+    for (const i of its) {
+      if (i.status === 'lucro_ideal') saud++
+      else if (i.status === 'atencao') aten++
+      else if (i.status === 'critico') prej++
+      if (!(i.custo > 0) || i.status === 'sem_custo') semCusto++
+      if (i.custo > 0 && i.estoque > 0) valEstoque += i.custo * i.estoque
+      if (i.margem_real != null) { margSum += Number(i.margem_real); margN++ }
+      for (const m of (i.marketplaces || [])) if (m.publicado && m.canal) canalCount[m.canal] = (canalCount[m.canal] || 0) + 1
+    }
+    const semAnuncio = its.filter((i) => !((i.marketplaces || []).some((m) => m.publicado))).length
+    const total = its.length || 1
+    const cobertura = Object.entries(canalCount).map(([c, n]) => ({ canal: c, n, pct: (n / total) * 100 }))
+      .sort((a, b) => b.n - a.n).slice(0, 4)
+    return {
+      total: its.length, saud, aten, prej, semCusto, valEstoque,
+      margMedia: margN ? margSum / margN : null, cobertura, semAnuncio,
+    }
+  }, [itens])
+
   const filtrados = useMemo(() => {
     const q = busca.toLowerCase()
     return (itens || []).filter((i) =>
@@ -337,6 +360,24 @@ export default function Catalogo() {
         </div>
       )}
 
+      {/* Dashboard de catálogo (KPIs agregados) */}
+      <PainelKpis kpis={kpis} brl={brl} onSemCusto={() => setFiltro('sem_custo')} />
+
+      {/* Faixa de oportunidades */}
+      {(kpis.prej > 0 || kpis.semAnuncio > 0 || kpis.semCusto > 0) && (
+        <div className="glass rounded-xl px-4 py-2.5 flex items-center gap-3 flex-wrap" style={{ border: '1px solid var(--accent2)', background: 'linear-gradient(90deg, rgba(123,42,140,.08), transparent)' }}>
+          <Wand2 size={16} className="shrink-0" style={{ color: 'var(--accent2)' }} />
+          <span className="text-[13px] text-dim">
+            <b className="text-fg">Oportunidades:</b>{' '}
+            {kpis.prej > 0 && <button onClick={() => setFiltro('critico')} className="hover:underline" style={{ color: 'var(--danger)' }}>{kpis.prej} no prejuízo</button>}
+            {kpis.prej > 0 && (kpis.semAnuncio > 0 || kpis.semCusto > 0) && <span className="text-faint"> · </span>}
+            {kpis.semAnuncio > 0 && <span style={{ color: 'var(--warn)' }}>{kpis.semAnuncio} sem anúncio</span>}
+            {kpis.semAnuncio > 0 && kpis.semCusto > 0 && <span className="text-faint"> · </span>}
+            {kpis.semCusto > 0 && <button onClick={() => setFiltro('sem_custo')} className="hover:underline" style={{ color: 'var(--dim)' }}>{kpis.semCusto} sem custo</button>}
+          </span>
+        </div>
+      )}
+
       {/* Filtros por status */}
       <div className="flex flex-wrap gap-2">
         {chips.map((ch) => {
@@ -422,6 +463,7 @@ export default function Catalogo() {
                 <input type="checkbox" checked={todosMarcados} onChange={toggleTodos} />
               </th>
               <th className="px-4 py-3">Produto</th>
+              <th className="px-4 py-3">Canais</th>
               <th className="px-4 py-3 text-right">Custo</th>
               <th className="px-4 py-3 text-right">Estoque</th>
               <th className="px-4 py-3 text-right">Vendas 30d</th>
@@ -448,18 +490,23 @@ export default function Catalogo() {
                         <button onClick={() => setCockpit(i)} className="font-medium text-left hover:text-accent transition block leading-snug">
                           {i.nome}
                         </button>
-                        <div className="text-[11px] text-faint num">{i.sku}</div>
-                        {(((i.marketplaces || []).some((m) => m.publicado)) || desde(i.atualizado)) && (
-                          <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                            {(i.marketplaces || []).filter((m) => m.publicado).map((m) => {
-                              const mk = MK[m.canal] || { nome: m.nome || m.canal, cor: 'var(--dim)', bg: 'var(--glass-hover)' }
-                              return <span key={m.canal} className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: mk.bg, color: mk.cor }}>{mk.nome}</span>
-                            })}
-                            {desde(i.atualizado) && <span className="text-[10px] text-faint">· alterado {desde(i.atualizado)}</span>}
-                          </div>
-                        )}
+                        <div className="text-[11px] text-faint num">{i.sku}{desde(i.atualizado) ? <span className="ml-1.5">· alterado {desde(i.atualizado)}</span> : null}</div>
                       </div>
                     </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    {(() => {
+                      const pubs = (i.marketplaces || []).filter((m) => m.publicado)
+                      if (!pubs.length) return <span className="text-[9px] font-semibold px-2 py-0.5 rounded" style={{ border: '1px dashed var(--glass-border)', color: 'var(--text-faint)' }}>sem anúncio</span>
+                      return (
+                        <div className="flex items-center gap-1 flex-wrap" style={{ maxWidth: 150 }}>
+                          {pubs.map((m) => {
+                            const mk = MK[m.canal] || { nome: m.nome || m.canal, cor: 'var(--dim)', bg: 'var(--glass-hover)' }
+                            return <span key={m.canal} className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: mk.bg, color: mk.cor }}>{mk.nome}</span>
+                          })}
+                        </div>
+                      )
+                    })()}
                   </td>
                   <td className="px-4 py-3 num text-dim text-right">{i.custo > 0 ? brl(i.custo) : '—'}</td>
                   <td className="px-4 py-3 num text-right">{i.estoque != null ? Math.round(i.estoque) : '—'}</td>
@@ -473,8 +520,15 @@ export default function Catalogo() {
                       )}
                     </td>
                   )}
-                  <td className="px-4 py-3 num font-semibold text-right" style={{ color: i.margem_real != null ? s.cor : 'var(--text-faint)' }}>
-                    {i.margem_real != null ? `${Number(i.margem_real).toFixed(1)}%` : 'sem custo'}
+                  <td className="px-4 py-3 text-right">
+                    <div className="num font-semibold" style={{ color: i.margem_real != null ? s.cor : 'var(--text-faint)' }}>
+                      {i.margem_real != null ? `${Number(i.margem_real).toFixed(1)}%` : 'sem custo'}
+                    </div>
+                    {i.margem_real != null && (
+                      <div className="rounded-full overflow-hidden ml-auto mt-1" style={{ height: 4, width: 54, background: 'rgba(255,255,255,.07)' }}>
+                        <div style={{ height: '100%', width: `${Math.max(0, Math.min(100, Number(i.margem_real)))}%`, background: s.cor, borderRadius: 99 }} />
+                      </div>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     <span className="text-xs px-2 py-1 rounded-full" style={{ background: s.cor + '26', color: s.cor }}>{s.txt}</span>
@@ -488,7 +542,7 @@ export default function Catalogo() {
               )
             })}
             {filtrados.length === 0 && (
-              <tr><td colSpan={canal !== 'bling' ? 10 : 9} className="px-4 py-10 text-center text-dim text-sm">Nenhum produto neste filtro.</td></tr>
+              <tr><td colSpan={canal !== 'bling' ? 11 : 10} className="px-4 py-10 text-center text-dim text-sm">Nenhum produto neste filtro.</td></tr>
             )}
           </tbody>
         </table>
@@ -942,6 +996,86 @@ function Paginacao({ page, total, onIr }) {
         ? <span key={'e' + i} className="px-1 text-faint text-xs select-none">…</span>
         : <button key={p} onClick={() => onIr(p)} aria-current={p === page ? 'page' : undefined} className={cls} style={p === page ? on : off}>{p}</button>)}
       <button onClick={() => onIr(page + 1)} disabled={page >= total} className={cls} style={off} aria-label="Próxima página"><ChevronRight size={15} /></button>
+    </div>
+  )
+}
+
+function Donut({ saud, aten, prej, size = 64 }) {
+  const denom = saud + aten + prej
+  const r = 15.5, C = 2 * Math.PI * r
+  const aOff = denom ? (saud / denom) * C : 0
+  const pOff = denom ? aOff + (aten / denom) * C : 0
+  const seg = (v, color, offset) => denom > 0
+    ? <circle cx="18" cy="18" r={r} fill="none" stroke={color} strokeWidth="5"
+              strokeDasharray={`${(v / denom) * C} ${C}`} strokeDashoffset={-offset} />
+    : null
+  return (
+    <svg viewBox="0 0 36 36" style={{ width: size, height: size, transform: 'rotate(-90deg)', flex: 'none' }}>
+      <circle cx="18" cy="18" r={r} fill="none" stroke="rgba(255,255,255,.07)" strokeWidth="5" />
+      {seg(saud, 'var(--ok)', 0)}
+      {seg(aten, 'var(--warn)', aOff)}
+      {seg(prej, 'var(--danger)', pOff)}
+    </svg>
+  )
+}
+
+function PainelKpis({ kpis, brl, onSemCusto }) {
+  const lbl = 'text-[9.5px] uppercase tracking-wide text-faint font-bold'
+  return (
+    <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(168px, 1fr))' }}>
+      <div className="glass rounded-2xl p-4 flex items-center gap-3">
+        <Donut saud={kpis.saud} aten={kpis.aten} prej={kpis.prej} />
+        <div className="min-w-0">
+          <div className={lbl}>Saúde da margem</div>
+          <div className="flex items-baseline gap-2 mt-1.5">
+            <span className="num text-xl font-bold" style={{ color: 'var(--ok)' }}>{kpis.saud}</span>
+            <span className="num text-xs" style={{ color: 'var(--warn)' }}>{kpis.aten}</span>
+            <span className="num text-xs" style={{ color: 'var(--danger)' }}>{kpis.prej}</span>
+          </div>
+          <div className="text-[10px] text-faint mt-1">saudável · atenção · prejuízo</div>
+        </div>
+      </div>
+      <div className="glass rounded-2xl p-4">
+        <div className={lbl}>Produtos</div>
+        <div className="num text-2xl font-bold mt-1.5">{kpis.total.toLocaleString('pt-BR')}</div>
+        <div className="text-[10px] text-faint mt-1">no catálogo</div>
+      </div>
+      <button onClick={onSemCusto} className="glass rounded-2xl p-4 text-left" style={{ border: '1px solid rgba(224,162,60,.3)' }}>
+        <div className={lbl}>Sem custo</div>
+        <div className="num text-2xl font-bold mt-1.5" style={{ color: 'var(--warn)' }}>{kpis.semCusto.toLocaleString('pt-BR')}</div>
+        <div className="text-[10px] mt-1.5 font-semibold" style={{ color: 'var(--accent)' }}>filtrar e resolver →</div>
+      </button>
+      <div className="glass rounded-2xl p-4">
+        <div className={lbl}>Valor em estoque</div>
+        <div className="num text-2xl font-bold mt-1.5">{brl(kpis.valEstoque)}</div>
+        <div className="text-[10px] text-faint mt-1">custo × saldo</div>
+      </div>
+      <div className="glass rounded-2xl p-4">
+        <div className={lbl}>Margem média</div>
+        <div className="num text-2xl font-bold mt-1.5" style={{ color: kpis.margMedia != null ? 'var(--ok)' : 'var(--text-faint)' }}>
+          {kpis.margMedia != null ? kpis.margMedia.toFixed(1) + '%' : '—'}
+        </div>
+        <div className="text-[10px] text-faint mt-1">média dos com custo</div>
+      </div>
+      {kpis.cobertura.length > 0 && (
+        <div className="glass rounded-2xl p-4">
+          <div className={lbl}>Cobertura por canal</div>
+          <div className="flex flex-col gap-1.5 mt-2.5">
+            {kpis.cobertura.map((c) => {
+              const mk = MK[c.canal] || { nome: c.canal, cor: 'var(--dim)', bg: 'var(--glass-hover)' }
+              return (
+                <div key={c.canal} className="flex items-center gap-2">
+                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded text-center" style={{ background: mk.bg, color: mk.cor, width: 58, flex: 'none' }}>{mk.nome}</span>
+                  <div className="flex-1 rounded-full overflow-hidden" style={{ height: 6, background: 'rgba(255,255,255,.07)' }}>
+                    <div style={{ height: '100%', width: `${c.pct}%`, background: mk.cor, borderRadius: 99 }} />
+                  </div>
+                  <span className="num text-[10px] text-dim" style={{ width: 30, textAlign: 'right' }}>{Math.round(c.pct)}%</span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
