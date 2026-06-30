@@ -400,9 +400,22 @@ export default function Catalogo() {
         </div>
       )}
 
-      {/* Tabela */}
-      <div className="glass rounded-2xl overflow-hidden">
-        <table className="w-full text-sm">
+      {/* Aviso: imagens/custos não vêm da lista do Bling — precisam de um job */}
+      {itens && itens.length > 0 && itens.filter((i) => !i.imagem).length > itens.length * 0.4 && (
+        <div className="glass rounded-xl px-4 py-2.5 text-sm flex items-start gap-2" style={{ border: '1px solid var(--accent2)' }}>
+          <ImageOff size={15} className="mt-0.5 shrink-0" style={{ color: 'var(--accent2)' }} />
+          <span className="text-dim">
+            Muitos produtos ainda <b className="text-fg">sem imagem/custo</b>. A lista do Bling não traz isso — só vem lendo produto a produto. Clique em <b className="text-fg">Sincronizar Shopee</b> (imagens e badges Shopee na hora, pelos anúncios da loja) ou em <b className="text-fg">Carregar imagens, custos e canais</b> (catálogo inteiro, ~30 min em segundo plano).
+          </span>
+        </div>
+      )}
+
+      {/* Lista + cockpit lado a lado (split não-bloqueante, igual ao Pedidos & Financeiro) */}
+      <div className={cockpit ? 'grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(360px,440px)] gap-4 items-start' : ''}>
+        <div className="min-w-0">
+          {/* Tabela */}
+          <div className="glass rounded-2xl overflow-hidden">
+            <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-faint text-[10px] uppercase tracking-wide border-b" style={{ borderColor: 'var(--glass-border)' }}>
               <th className="px-4 py-3 w-8">
@@ -481,38 +494,35 @@ export default function Catalogo() {
         </table>
       </div>
 
-      {/* Paginação */}
-      {filtrados.length > 0 && (
-        <div className="flex items-center justify-between gap-3 flex-wrap mt-3 text-sm">
-          <div className="flex items-center gap-2 text-dim">
-            <span className="num">{ini}–{fim}</span> de <span className="num font-medium text-fg">{filtrados.length}</span> produto(s)
-            <label className="flex items-center gap-1.5 ml-2">
-              <span className="text-faint text-xs">por página</span>
-              <select value={porPagina} onChange={(e) => setPorPagina(Number(e.target.value))}
-                      className="glass rounded-lg px-2 py-1 text-xs num outline-none">
-                {[25, 50, 100, 200, 500].map((n) => <option key={n} value={n}>{n}</option>)}
-              </select>
-            </label>
-          </div>
-          <div className="flex items-center gap-1">
-            <button onClick={() => setPagina(1)} disabled={pageSafe <= 1}
-                    className="glass rounded-lg p-1.5 disabled:opacity-40" title="Primeira"><ChevronsLeft size={16} /></button>
-            <button onClick={() => setPagina((p) => Math.max(1, p - 1))} disabled={pageSafe <= 1}
-                    className="glass rounded-lg p-1.5 disabled:opacity-40" title="Anterior"><ChevronLeft size={16} /></button>
-            <span className="px-3 text-dim">página <span className="num font-medium text-fg">{pageSafe}</span> de <span className="num">{totalPaginas}</span></span>
-            <button onClick={() => setPagina((p) => Math.min(totalPaginas, p + 1))} disabled={pageSafe >= totalPaginas}
-                    className="glass rounded-lg p-1.5 disabled:opacity-40" title="Próxima"><ChevronRight size={16} /></button>
-            <button onClick={() => setPagina(totalPaginas)} disabled={pageSafe >= totalPaginas}
-                    className="glass rounded-lg p-1.5 disabled:opacity-40" title="Última"><ChevronsRight size={16} /></button>
-          </div>
+          {/* Paginação (igual ao Pedidos & Financeiro) */}
+          {filtrados.length > 0 && (
+            <div className="mt-1">
+              <div className="flex items-center justify-between gap-3 flex-wrap text-xs text-faint num px-1">
+                <span>{ini}–{fim} de {filtrados.length} produto(s)</span>
+                <label className="flex items-center gap-1.5">
+                  <span>por página</span>
+                  <select value={porPagina} onChange={(e) => setPorPagina(Number(e.target.value))}
+                          className="glass rounded-lg px-2 py-1 text-xs num outline-none">
+                    {[25, 50, 100, 200, 500].map((n) => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </label>
+              </div>
+              <Paginacao page={pageSafe} total={totalPaginas} onIr={setPagina} />
+              <div className="text-center text-[11px] text-faint num mt-2">{filtrados.length} produto(s) · página {pageSafe} de {totalPaginas}</div>
+            </div>
+          )}
         </div>
-      )}
 
-      {cockpit && <CockpitProduto produto={cockpit} canalSel={canal} notify={notify}
-        onClose={() => setCockpit(null)}
-        onEditarCompleto={() => { const id = cockpit.id; setCockpit(null); setAbrir(id) }}
-        onRadar={() => { const p = cockpit; setCockpit(null); setDrawer(p) }}
-        onSaved={() => { setCockpit(null); carregar() }} />}
+        {cockpit && (
+          <div className="xl:sticky xl:top-4">
+            <CockpitProduto produto={cockpit} canalSel={canal} notify={notify}
+              onClose={() => setCockpit(null)}
+              onEditarCompleto={() => { const id = cockpit.id; setCockpit(null); setAbrir(id) }}
+              onRadar={() => { const p = cockpit; setCockpit(null); setDrawer(p) }}
+              onSaved={() => { setCockpit(null); carregar() }} />
+          </div>
+        )}
+      </div>
       {drawer && <RadarDrawer produto={drawer} onClose={() => setDrawer(null)} />}
       {abrir && <ProdutoModal produtoId={abrir} onClose={() => setAbrir(null)} onSaved={carregar} />}
     </div>
@@ -697,9 +707,7 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
   const anunciarCanal = (c) => notify(`Para vender na ${mkNome(c)}, crie o anúncio e vincule o produto no Bling. Depois ele aparece aqui pronto pra precificar.`, 'warn')
 
   return (
-    <>
-      <div className="fixed inset-0 z-40" style={{ background: 'rgba(0,0,0,.5)' }} onClick={onClose} />
-      <div className="fixed top-0 right-0 z-50 flex flex-col" style={{ width: 'min(600px, 96vw)', height: '100vh', background: 'var(--bg)', borderLeft: '1px solid var(--glass-border)' }}>
+    <div className="glass rounded-2xl flex flex-col overflow-hidden drawer-in" style={{ maxHeight: 'calc(100vh - 88px)', background: 'var(--bg)', border: '1px solid rgba(214,0,127,.24)' }}>
         <div className="flex items-start gap-3 p-4" style={{ borderBottom: '1px solid var(--glass-border)' }}>
           {produto.imagem
             ? <img src={produto.imagem} alt="" className="w-14 h-14 rounded-lg object-cover flex-none" style={{ border: '1px solid var(--glass-border)' }} onError={(e) => { e.currentTarget.style.visibility = 'hidden' }} />
@@ -905,8 +913,36 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
             <button onClick={onEditarCompleto} className="text-xs px-3 py-2 rounded-lg flex items-center gap-1.5" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)', color: 'var(--dim)' }}><Zap size={13} /> Edição completa / Fotos / IA</button>
           </div>
         </div>
-      </div>
-    </>
+    </div>
+  )
+}
+
+function janelaPaginas(page, total) {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1)
+  const out = [1]
+  let ini = Math.max(2, page - 1), fim = Math.min(total - 1, page + 1)
+  if (page <= 3) { ini = 2; fim = 4 }
+  if (page >= total - 2) { ini = total - 3; fim = total - 1 }
+  if (ini > 2) out.push('…')
+  for (let i = ini; i <= fim; i++) out.push(i)
+  if (fim < total - 1) out.push('…')
+  out.push(total)
+  return out
+}
+
+function Paginacao({ page, total, onIr }) {
+  if (!total || total <= 1) return null
+  const cls = 'min-w-[34px] h-[34px] px-2 rounded-lg text-xs font-medium num grid place-items-center transition-colors disabled:opacity-35 disabled:cursor-default'
+  const off = { background: 'var(--glass-bg)', color: 'var(--text-dim)', border: '1px solid var(--glass-border)' }
+  const on = { background: 'var(--accent)', color: '#fff', border: '1px solid var(--accent)' }
+  return (
+    <div className="flex items-center justify-center gap-1.5 mt-4 flex-wrap">
+      <button onClick={() => onIr(page - 1)} disabled={page <= 1} className={cls} style={off} aria-label="Página anterior"><ChevronLeft size={15} /></button>
+      {janelaPaginas(page, total).map((p, i) => p === '…'
+        ? <span key={'e' + i} className="px-1 text-faint text-xs select-none">…</span>
+        : <button key={p} onClick={() => onIr(p)} aria-current={p === page ? 'page' : undefined} className={cls} style={p === page ? on : off}>{p}</button>)}
+      <button onClick={() => onIr(page + 1)} disabled={page >= total} className={cls} style={off} aria-label="Próxima página"><ChevronRight size={15} /></button>
+    </div>
   )
 }
 
