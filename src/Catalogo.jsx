@@ -618,6 +618,20 @@ function Linha({ k, v, cor, bold }) {
   )
 }
 
+function MiniSpark({ pontos, cor = 'var(--accent)', w = 64, h = 20 }) {
+  const ys = (pontos || []).map((p) => Number(p.preco)).filter(Number.isFinite)
+  if (ys.length < 2) return null
+  const min = Math.min(...ys), max = Math.max(...ys), rng = max - min || 1
+  const sx = (i) => (i / (ys.length - 1)) * w
+  const sy = (v) => h - 2 - ((v - min) / rng) * (h - 4)
+  const d = ys.map((v, i) => `${i ? 'L' : 'M'} ${sx(i).toFixed(1)} ${sy(v).toFixed(1)}`).join(' ')
+  return (
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{ display: 'block' }}>
+      <path d={d} fill="none" stroke={cor} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
 function Sparkline({ pontos, cor = 'var(--accent)', w = 132, h = 36 }) {
   const pts = (pontos || []).filter((p) => p && p.preco != null)
   if (pts.length < 2) return null
@@ -661,16 +675,18 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
   const [promoPreco, setPromoPreco] = useState('')
   const [promoSim, setPromoSim] = useState(null)
   const [simulandoPromo, setSimulandoPromo] = useState(false)
+  const [radarPreco, setRadarPreco] = useState('')
+  const [radarSim, setRadarSim] = useState(null)
 
   // edição manual por canal com simulação de líquido/margem ao vivo (debounced)
-  const editarCanalPreco = (id_loja, canal, val) => {
-    setPrecoCanalEdit((m) => ({ ...m, [id_loja]: val }))
-    clearTimeout(simTimers.current[id_loja])
+  const editarCanalPreco = (rowKey, canal, val) => {
+    setPrecoCanalEdit((m) => ({ ...m, [rowKey]: val }))
+    clearTimeout(simTimers.current[rowKey])
     const v = Number(String(val).replace(',', '.'))
-    if (!v || v <= 0) { setSimCanal((m) => ({ ...m, [id_loja]: undefined })); return }
-    simTimers.current[id_loja] = setTimeout(async () => {
-      try { const d = await api.produtoSimular(produto.id, canal, v); setSimCanal((m) => ({ ...m, [id_loja]: d })) }
-      catch { setSimCanal((m) => ({ ...m, [id_loja]: undefined })) }
+    if (!v || v <= 0) { setSimCanal((m) => ({ ...m, [rowKey]: undefined })); return }
+    simTimers.current[rowKey] = setTimeout(async () => {
+      try { const d = await api.produtoSimular(produto.id, canal, v); setSimCanal((m) => ({ ...m, [rowKey]: d })) }
+      catch { setSimCanal((m) => ({ ...m, [rowKey]: undefined })) }
     }, 350)
   }
   const [sinc, setSinc] = useState(null)
@@ -787,6 +803,26 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
     return () => clearTimeout(t)
   }, [promoPreco, produto.id])
 
+  // inicializa o preço do radar com o meu preço Shopee (ou o menor concorrente)
+  useEffect(() => {
+    if (radarData && radarPreco === '') {
+      const est0 = radarData.estatisticas || {}
+      const p = meuPreco || est0.menor || produto.preco_bling || ''
+      if (p) setRadarPreco(String(p).replace('.', ','))
+    }
+  }, [radarData]) // eslint-disable-line
+
+  // simula líquido/margem do preço do radar ao vivo (debounced)
+  useEffect(() => {
+    const v = Number(String(radarPreco).replace(',', '.'))
+    if (!v || v <= 0) { setRadarSim(null); return }
+    const t = setTimeout(async () => {
+      try { const d = await api.produtoSimular(produto.id, 'shopee', v); setRadarSim(d) }
+      catch { setRadarSim(null) }
+    }, 350)
+    return () => clearTimeout(t)
+  }, [radarPreco, produto.id])
+
   const salvarPreco = async () => {
     const v = Number(String(precoBling).replace(',', '.'))
     if (Number.isNaN(v) || v < 0) { notify('Informe um Preço Bling válido.', 'danger'); return }
@@ -800,26 +836,32 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
   }
 
   const mkNome = (v) => (MK[v.canal] && MK[v.canal].nome) || v.nome || v.canal
-  const aplicarCanal = async (v) => {
-    if (!v.id_loja) return
-    const editado = precoCanalEdit[v.id_loja]
-    const preco = (editado != null && editado !== '') ? Number(String(editado).replace(',', '.')) : v.preco_alvo
+  const aplicarCanal = async (v, precoOverride) => {
+    const itemId = v.item_id || (v.canal === 'shopee' && shopeeItem && shopeeItem.item_id) || null
+    const rowKey = v.id_loja || v.item_id || v.canal
+    if (!v.id_loja && !itemId) return
+    const editado = precoCanalEdit[rowKey]
+    const preco = precoOverride != null
+      ? Number(precoOverride)
+      : ((editado != null && editado !== '') ? Number(String(editado).replace(',', '.')) : v.preco_alvo)
     if (preco == null || Number.isNaN(preco) || preco <= 0) { notify('Informe um preço de lista válido.', 'danger'); return }
     setConfirmarCanal(null)
-    setAplicandoCanal(v.id_loja)
+    setAplicandoCanal(rowKey)
     try {
-      // 1) Bling (crítico — garante que o ajuste não some na próxima sincronização)
-      await api.precoCanal(produto.id, { id_loja: v.id_loja, preco })
-      // 2) Shopee: empurra direto no anúncio (imediato), se temos o item_id no cache
+      let ondeBling = false
+      // 1) Bling (se temos o vínculo) — garante que o ajuste não some na próxima sincronização
+      if (v.id_loja) { await api.precoCanal(produto.id, { id_loja: v.id_loja, preco }); ondeBling = true }
+      // 2) Shopee: empurra direto no anúncio (imediato), via item_id do cache/Shopee
       let avisoShopee = ''
       let empurrouShopee = false
-      if (v.canal === 'shopee' && shopeeItem && shopeeItem.item_id) {
-        try { await api.shopeeItemPreco(shopeeItem.item_id, preco); empurrouShopee = true }
-        catch (e2) { avisoShopee = ` — Bling ok, mas o empurrão direto na Shopee falhou (${e2.message || ''}); o Bling vai propagar.` }
+      if (v.canal === 'shopee' && itemId) {
+        try { await api.shopeeItemPreco(itemId, preco); empurrouShopee = true }
+        catch (e2) { avisoShopee = ` — empurrão direto na Shopee falhou (${e2.message || ''})` }
       }
-      const onde = empurrouShopee ? 'no Bling e na Shopee' : 'no Bling'
+      if (!ondeBling && !empurrouShopee) throw new Error('sem destino pra aplicar este preço')
+      const onde = ondeBling && empurrouShopee ? 'no Bling e na Shopee' : empurrouShopee ? 'na Shopee' : 'no Bling'
       notify(`${mkNome(v)} ajustado pra ${brl(preco)} ${onde}.${avisoShopee}`, avisoShopee ? 'warn' : 'ok')
-      setPrecoCanalEdit((m) => { const n = { ...m }; delete n[v.id_loja]; return n })
+      setPrecoCanalEdit((m) => { const n = { ...m }; delete n[rowKey]; return n })
       try { const d = await api.produtoSincronizacao(produto.id); setSinc(d) } catch { /* mantém a tabela atual */ }
     } catch (e) { notify('Falha ao aplicar no canal: ' + (e.message || ''), 'danger') }
     setAplicandoCanal(null)
@@ -838,6 +880,13 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
   const meuPreco = meuShopee && meuShopee.preco_registrado > 0 ? meuShopee.preco_registrado : null
   const gap = (temRadar && meuPreco != null) ? meuPreco - est.menor : null
   const liquidoAlvo = produto.preco_bling || 0
+  const histTrend = (() => {
+    if (!precoHist || precoHist.length < 2) return null
+    const a = Number(precoHist[0].preco), b = Number(precoHist[precoHist.length - 1].preco)
+    if (!a) return null
+    const pct = ((b - a) / a) * 100
+    return { pct, dir: b > a + 0.001 ? 'up' : b < a - 0.001 ? 'down' : 'flat' }
+  })()
   const sparkPontos = (() => {
     const byDate = {}
     ;(radarData?.series || []).forEach((sr) => (sr.pontos || []).forEach((p) => {
@@ -855,6 +904,14 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
     falta_anunciar: { txt: 'Falta anunciar', cor: 'var(--dim)' },
   }
   const anunciarCanal = (c) => notify(`Para vender na ${mkNome(c)}, crie o anúncio e vincule o produto no Bling. Depois ele aparece aqui pronto pra precificar.`, 'warn')
+
+  const aplicarRadar = async () => {
+    const v = Number(String(radarPreco).replace(',', '.'))
+    if (!v || v <= 0) { notify('Informe um preço válido.', 'danger'); return }
+    const shopeeRow = canaisPainel.find((c) => c.canal === 'shopee' && c.id_loja)
+    if (!shopeeRow) { notify('Sem vínculo Shopee pra aplicar esse preço.', 'warn'); return }
+    await aplicarCanal(shopeeRow, v)
+  }
 
   return (
     <div className="glass rounded-2xl flex flex-col overflow-hidden drawer-in" style={{ maxHeight: 'calc(100vh - 88px)', background: 'var(--bg)', border: '1px solid rgba(214,0,127,.24)' }}>
@@ -906,7 +963,16 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
             {aba === 'visao' && (
               <>
                 <div className="grid grid-cols-3 gap-2">
-                  <Tile label="Preço Bling" val={brl(produto.preco_bling)} cor="#c98bd8" small />
+                  <div className="rounded-lg px-2.5 py-2" style={{ background: 'rgba(0,0,0,.18)', border: '1px solid var(--glass-border)' }}>
+                    <div className="flex items-center justify-between gap-1">
+                      <div className="text-[8.5px] uppercase tracking-wide text-faint">Preço Bling</div>
+                      {histTrend && histTrend.dir !== 'flat' && (
+                        <span className="text-[9px] num font-bold" style={{ color: histTrend.dir === 'up' ? 'var(--ok)' : 'var(--danger)' }}>{histTrend.dir === 'up' ? '▲' : '▼'}{Math.abs(histTrend.pct).toFixed(0)}%</span>
+                      )}
+                    </div>
+                    <div className="num font-bold text-base mt-0.5" style={{ color: '#c98bd8' }}>{brl(produto.preco_bling)}</div>
+                    {precoHist && precoHist.length >= 2 && <div className="mt-1"><MiniSpark pontos={precoHist} cor="#c98bd8" /></div>}
+                  </div>
                   <Tile label="Margem real" val={produto.margem_real != null ? `${Number(produto.margem_real).toFixed(1)}%` : 'sem custo'} cor={produto.margem_real != null ? s.cor : undefined} small />
                   <Tile label="Lucro/un." val={produto.custo > 0 ? brl((produto.preco_bling || 0) - produto.custo) : '—'} cor={produto.custo > 0 ? 'var(--ok)' : undefined} small />
                 </div>
@@ -991,8 +1057,9 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
                               {canaisPainel.map((c, idx) => {
                                 const mk = MK[c.canal] || { nome: c.nome || c.canal, cor: 'var(--dim)', bg: 'var(--glass-hover)' }
                                 const sc = STATUS_CANAL[c.status] || STATUS_CANAL.sem_preco
-                                const editVal = precoCanalEdit[c.id_loja]
-                                const editavel = c.publicado && c.id_loja
+                                const rowKey = c.id_loja || c.item_id || c.canal
+                                const editVal = precoCanalEdit[rowKey]
+                                const editavel = c.publicado && (c.id_loja || c.item_id || (c.canal === 'shopee' && shopeeItem && shopeeItem.item_id))
                                 return (
                                   <tr key={idx} style={idx < canaisPainel.length - 1 ? { borderBottom: '1px solid var(--glass-border)' } : undefined}>
                                     <td className="px-2 py-2">
@@ -1003,12 +1070,12 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
                                     <td className="px-1.5 py-2 text-right num">{c.preco_registrado != null ? brl(c.preco_registrado) : '—'}</td>
                                     <td className="px-1.5 py-2 text-right">
                                       {editavel
-                                        ? <input value={editVal != null ? editVal : (c.preco_alvo != null ? String(c.preco_alvo).replace('.', ',') : '')} onChange={(e) => editarCanalPreco(c.id_loja, c.canal, e.target.value)} className="bg-transparent outline-none num text-right rounded px-1.5 py-1" style={{ width: 70, border: '1px solid ' + (editVal != null ? 'var(--accent)' : 'var(--glass-border)'), color: editVal != null ? 'var(--accent)' : 'var(--text-dim)' }} />
+                                        ? <input value={editVal != null ? editVal : (c.preco_alvo != null ? String(c.preco_alvo).replace('.', ',') : '')} onChange={(e) => editarCanalPreco(rowKey, c.canal, e.target.value)} className="bg-transparent outline-none num text-right rounded px-1.5 py-1" style={{ width: 70, border: '1px solid ' + (editVal != null ? 'var(--accent)' : 'var(--glass-border)'), color: editVal != null ? 'var(--accent)' : 'var(--text-dim)' }} />
                                         : <span className="num" style={{ color: 'var(--accent)' }}>{c.preco_alvo != null ? brl(c.preco_alvo) : '—'}</span>}
                                     </td>
                                     <td className="px-1.5 py-2 text-right">
                                       {(() => {
-                                        const sim = simCanal[c.id_loja]
+                                        const sim = simCanal[rowKey]
                                         if (editavel && editVal != null && editVal !== '' && sim) {
                                           const cor = sim.abaixo_alvo ? 'var(--danger)' : 'var(--ok)'
                                           return <div><span className="num" style={{ color: cor }}>{sim.liquido != null ? brl(sim.liquido) : '—'}</span>{sim.margem != null && <span className="num text-[9px] ml-1" style={{ color: cor }}>{sim.margem}%</span>}</div>
@@ -1018,11 +1085,11 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
                                     </td>
                                     <td className="px-2 py-2 text-right">
                                       {editavel
-                                        ? (aplicandoCanal === c.id_loja
+                                        ? (aplicandoCanal === rowKey
                                             ? <span className="text-faint text-[10px] inline-flex items-center gap-1"><Loader2 size={11} className="animate-spin" />…</span>
-                                            : confirmarCanal === c.id_loja
+                                            : confirmarCanal === rowKey
                                               ? <button onClick={() => aplicarCanal(c)} className="text-[10px] font-bold px-2 py-1 rounded" style={{ background: 'rgba(245,166,35,.18)', color: '#F5A623' }}>Confirmar</button>
-                                              : <button onClick={() => setConfirmarCanal(c.id_loja)} className="text-[10px] font-medium px-2 py-1 rounded" style={{ background: 'rgba(214,0,127,.14)', color: 'var(--accent)' }}>Aplicar</button>)
+                                              : <button onClick={() => setConfirmarCanal(rowKey)} className="text-[10px] font-medium px-2 py-1 rounded" style={{ background: 'rgba(214,0,127,.14)', color: 'var(--accent)' }}>Aplicar</button>)
                                         : <button onClick={() => anunciarCanal(c)} className="text-[10px] font-medium px-2 py-1 rounded inline-flex items-center gap-1" style={{ background: 'var(--glass-hover)', color: 'var(--dim)' }}><Plus size={10} /> Anunciar</button>}
                                     </td>
                                   </tr>
@@ -1119,8 +1186,8 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
             )}
 
             {aba === 'radar' && (
-              <div>
-                <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Concorrência (Radar)</div>
+              <div className="space-y-3">
+                <div className="text-[10px] uppercase tracking-wide text-faint font-bold">Concorrência (Radar)</div>
                 {carregandoRadar
                   ? <div className="text-faint text-xs flex items-center gap-2 py-3"><Loader2 size={14} className="animate-spin" /> lendo o radar…</div>
                   : !temRadar
@@ -1128,17 +1195,61 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
                         <span className="text-faint">Sem alvos de concorrência para este SKU.</span>
                         <button onClick={onRadar} className="text-[11px] font-medium px-2.5 py-1.5 rounded-lg shrink-0" style={{ background: 'rgba(214,0,127,.14)', color: 'var(--accent)' }}>Configurar radar</button>
                       </div>
-                    : <div>
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="text-sm min-w-0">
-                            <div>Menor concorrente <b className="num">{brl(est.menor)}</b></div>
-                            {gap != null && <div className="text-[11px] mt-0.5" style={{ color: gap > 0 ? '#FF6F6F' : 'var(--ok)' }}>{gap > 0 ? `você está ${brl(Math.abs(gap))} acima` : gap < 0 ? `você está ${brl(Math.abs(gap))} abaixo` : 'empatado com o menor'}</div>}
-                            {est.n ? <div className="text-[10px] text-faint mt-0.5">{est.n} anúncio(s) monitorado(s)</div> : null}
-                          </div>
-                          <Sparkline pontos={sparkPontos} cor="#4DA3FF" />
-                        </div>
-                        <button onClick={onRadar} className="text-[11px] mt-2 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)', color: 'var(--dim)' }}><Radar size={12} /> Abrir radar completo</button>
-                      </div>}
+                    : (() => {
+                        const concorrentes = (radarData?.series || []).map((sr) => {
+                          const ult = (sr.pontos || []).slice(-1)[0]
+                          return { nome: sr.nome, marketplace: sr.marketplace, preco: ult ? ult.preco : null }
+                        }).filter((c) => c.preco != null).sort((a, b) => a.preco - b.preco)
+                        const meu = Number(String(radarPreco).replace(',', '.')) || null
+                        const posicao = meu != null ? concorrentes.filter((c) => c.preco < meu).length + 1 : null
+                        const totalPos = concorrentes.length + 1
+                        return (
+                          <>
+                            <div className="grid grid-cols-3 gap-2">
+                              <Tile label="Menor conc." val={est.menor != null ? brl(est.menor) : '—'} small />
+                              <Tile label="Média" val={est.media != null ? brl(est.media) : '—'} small />
+                              <Tile label="Maior" val={est.maior != null ? brl(est.maior) : '—'} small />
+                            </div>
+                            <div className="rounded-lg p-3" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)' }}>
+                              <div className="flex items-center justify-between gap-3 mb-2">
+                                <div className="text-[11px] text-dim">Definir meu preço (Shopee)</div>
+                                <div className="flex items-center gap-1.5 rounded-lg px-2 py-1" style={{ background: 'rgba(0,0,0,.2)', border: '1px solid var(--accent2)' }}>
+                                  <span className="text-faint text-xs">R$</span>
+                                  <input value={radarPreco} onChange={(e) => setRadarPreco(e.target.value)} className="bg-transparent outline-none num font-bold text-sm text-fg text-right" style={{ width: 74 }} />
+                                </div>
+                              </div>
+                              {radarSim && (
+                                <div className="flex items-center justify-between text-[11px]">
+                                  <span className="num" style={{ color: radarSim.abaixo_alvo ? 'var(--danger)' : 'var(--ok)' }}>neta {radarSim.liquido != null ? brl(radarSim.liquido) : '—'}{radarSim.margem != null ? ` · ${radarSim.margem}%` : ''}</span>
+                                  {posicao != null && <span className="text-dim">{posicao}º de {totalPos} mais barato</span>}
+                                </div>
+                              )}
+                              <div className="flex flex-wrap gap-1.5 mt-2.5">
+                                {est.menor != null && <button onClick={() => setRadarPreco(String(est.menor).replace('.', ','))} className="text-[10px] px-2 py-1 rounded-lg" style={{ background: 'rgba(0,0,0,.18)', border: '1px solid var(--glass-border)', color: 'var(--dim)' }}>Igualar o menor</button>}
+                                {est.menor != null && <button onClick={() => setRadarPreco(String(Math.max(0, est.menor - 0.5).toFixed(2)).replace('.', ','))} className="text-[10px] px-2 py-1 rounded-lg" style={{ background: 'rgba(0,0,0,.18)', border: '1px solid var(--glass-border)', color: 'var(--dim)' }}>− R$ 0,50 abaixo</button>}
+                                {meuPreco != null && <button onClick={() => setRadarPreco(String(meuPreco).replace('.', ','))} className="text-[10px] px-2 py-1 rounded-lg" style={{ background: 'rgba(0,0,0,.18)', border: '1px solid var(--glass-border)', color: 'var(--dim)' }}>Meu preço atual</button>}
+                              </div>
+                              <button onClick={aplicarRadar} disabled={aplicandoCanal != null} className="w-full mt-2.5 text-xs font-medium px-3 py-2 rounded-lg text-white disabled:opacity-60 flex items-center justify-center gap-1.5" style={{ background: 'var(--accent)' }}>
+                                {aplicandoCanal != null ? <><Loader2 size={13} className="animate-spin" /> aplicando…</> : <><Check size={13} /> Aplicar na Shopee</>}
+                              </button>
+                            </div>
+                            {concorrentes.length > 0 && (
+                              <div>
+                                <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-1.5">Concorrentes monitorados ({est.n || concorrentes.length})</div>
+                                <div className="space-y-1">
+                                  {concorrentes.slice(0, 6).map((c, i) => (
+                                    <div key={i} className="flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs" style={{ background: 'var(--glass-hover)' }}>
+                                      <span className="text-dim truncate" style={{ maxWidth: 220 }}>{c.nome}</span>
+                                      <span className="num" style={{ color: meu != null && c.preco < meu ? 'var(--danger)' : 'var(--dim)' }}>{brl(c.preco)}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                            <button onClick={onRadar} className="text-[11px] px-2.5 py-1.5 rounded-lg flex items-center gap-1.5" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)', color: 'var(--dim)' }}><Radar size={12} /> Abrir radar completo</button>
+                          </>
+                        )
+                      })()}
               </div>
             )}
 
