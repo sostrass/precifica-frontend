@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
-  Package, MapPin, RefreshCw, Search, Plug, Loader2, Truck, Filter,
+  Package, MapPin, RefreshCw, Search, Plug, Loader2, Truck, Filter, Boxes,
   ChevronDown, ChevronUp, ChevronLeft, ChevronRight, User, ExternalLink,
   CheckCircle2, Zap, Check, CheckCheck, AlertTriangle, TrendingUp, Printer,
   Wallet, DollarSign, Tag, Clock, X, SlidersHorizontal, ClipboardList, FileText,
@@ -14,14 +15,22 @@ const brl0 = (v) => (v == null ? '—' : Number(v).toLocaleString('pt-BR', { sty
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 
 const PAGE_SIZE = 15
-const FILTROS = [
-  { id: 'paid', label: 'A enviar' },
-  { id: 'payment_required', label: 'A pagar' },
-  { id: 'cancelled', label: 'Cancelados' },
-  { id: '', label: 'Todos' },
-]
 const PERIODOS = [{ id: 7, label: '7d' }, { id: 15, label: '15d' }, { id: 30, label: '30d' }]
 const ESCOPOS = [{ id: 'tudo', label: 'Tudo' }, { id: 'pedido', label: '# Pedido' }, { id: 'comprador', label: 'Comprador' }, { id: 'produto', label: 'Produto / SKU' }]
+
+const ENVIO_TABS = [
+  { id: 'todos', label: 'Todos' },
+  { id: 'a_enviar', label: 'A enviar' },
+  { id: 'enviado', label: 'Enviado' },
+  { id: 'entregue', label: 'Entregue' },
+  { id: 'cancelado', label: 'Cancelados' },
+]
+const PGTO_CHIPS = [
+  { id: 'todos', label: 'Todos' },
+  { id: 'paid', label: 'Pago' },
+  { id: 'payment_required', label: 'A pagar' },
+  { id: 'confirmed', label: 'Confirmado' },
+]
 
 const ST_PEDIDO = {
   paid: { t: 'Pago', c: 'var(--ok)' },
@@ -40,6 +49,13 @@ const ST_ENVIO = {
   delivered: { t: 'Entregue', c: 'var(--ok)' },
   not_delivered: { t: 'Não entregue', c: 'var(--danger)' },
   cancelled: { t: 'Cancelado', c: 'var(--danger)' },
+}
+
+function bucketEnvio(p) {
+  if (p.status === 'cancelled' || p.envio_status === 'cancelled') return 'cancelado'
+  if (p.envio_status === 'delivered') return 'entregue'
+  if (p.envio_status === 'shipped') return 'enviado'
+  return 'a_enviar'
 }
 
 function dataBR(iso) {
@@ -75,10 +91,21 @@ function extrairDestino(env) {
   const compl = ra.comment || ra.address_line_secondary || ''
   return { nome, linha, bairro, cidade, estado, cep, compl }
 }
+function extrairEnvioMeta(env) {
+  if (!env || env === 'loading' || env === 'erro') return {}
+  const lt = env.logistic_type || ''
+  const modo = lt === 'fulfillment' ? 'Full · o ML expede'
+    : lt === 'cross_docking' ? 'Mercado Envios · Coleta'
+      : lt === 'self_service' ? 'Flex · você entrega'
+        : (lt === 'xd_drop_off' || lt === 'drop_off') ? 'Mercado Envios · Agência'
+          : (env.mode ? 'Mercado Envios' : '')
+  const prazo = env.lead_time?.estimated_handling_limit?.date
+    || env.lead_time?.estimated_delivery_limit?.date
+    || env.estimated_handling_limit
+    || null
+  return { modo, prazo }
+}
 
-/* ---------------------------------------------------------------------------
-   Impressão (própria do módulo ML — folha e lista de separação)
---------------------------------------------------------------------------- */
 const LS_REM = 'ml_pedidos_remetente'
 function lerRemetente() {
   try { return JSON.parse(localStorage.getItem(LS_REM) || '{}') || {} } catch { return {} }
@@ -188,9 +215,6 @@ function htmlSeparacaoML(pedidos, rem) {
   )
 }
 
-/* ---------------------------------------------------------------------------
-   Paginação (replicada do padrão da Shopee)
---------------------------------------------------------------------------- */
 function janelaPaginas(page, total) {
   if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1)
   const out = [1]
@@ -223,8 +247,9 @@ function Paginacao({ page, total, onIr }) {
 export default function Pedidos() {
   const notify = useToast()
   const [conn, setConn] = useState(null)
-  const [filtro, setFiltro] = useState('paid')
   const [periodo, setPeriodo] = useState(15)
+  const [envioTab, setEnvioTab] = useState('a_enviar')
+  const [pgto, setPgto] = useState('todos')
   const [escopo, setEscopo] = useState('tudo')
   const [busca, setBusca] = useState('')
   const [pedidos, setPedidos] = useState(null)
@@ -244,21 +269,23 @@ export default function Pedidos() {
 
   const desdeISO = useCallback(() => { const d = new Date(); d.setDate(d.getDate() - periodo); return d.toISOString() }, [periodo])
 
-  // Busca a JANELA inteira uma vez por (aba, período). Interação é client-side.
+  // Busca TODOS os pedidos do período de uma vez (status=''); abas, filtros, contadores
+  // e estatísticas são calculados client-side sobre esse mesmo conjunto — por isso os
+  // números sempre batem entre si.
   const carregar = useCallback(async () => {
     setPedidos(null); setSel(new Set()); setAtivo(null); setPage(1)
     try {
-      const d = await api.mlPedidosEnriquecido(filtro, 0, 120, desdeISO())
+      const d = await api.mlPedidosEnriquecido('', 0, 500, desdeISO())
       const arr = d.pedidos || []
       setPedidos(arr)
       setPaging(d.paging || { total: arr.length, carregados: arr.length })
     } catch (e) {
       notify(e.message, 'danger'); setPedidos([])
     }
-  }, [filtro, desdeISO, notify])
+  }, [desdeISO, notify])
 
   useEffect(() => { if (conn?.conta) carregar() }, [conn?.conta, carregar])
-  useEffect(() => { setPage(1) }, [busca, escopo])
+  useEffect(() => { setPage(1) }, [busca, escopo, envioTab, pgto])
 
   const abrir = async (p) => {
     if (ativo === p.id) { setAtivo(null); return }
@@ -284,8 +311,22 @@ export default function Pedidos() {
     setBaixando('')
   }
 
-  // --- filtro / paginação client-side ---
-  const filtrada = useMemo(() => (pedidos || []).filter((p) => {
+  const contagens = useMemo(() => {
+    const c = { todos: 0, a_enviar: 0, enviado: 0, entregue: 0, cancelado: 0 }
+    ;(pedidos || []).forEach((p) => { c.todos += 1; c[bucketEnvio(p)] += 1 })
+    return c
+  }, [pedidos])
+
+  const naAba = useMemo(() => (pedidos || []).filter((p) => envioTab === 'todos' || bucketEnvio(p) === envioTab), [pedidos, envioTab])
+
+  const contPgto = useMemo(() => {
+    const c = { todos: naAba.length, paid: 0, payment_required: 0, confirmed: 0 }
+    naAba.forEach((p) => { if (c[p.status] != null) c[p.status] += 1 })
+    return c
+  }, [naAba])
+
+  const filtrada = useMemo(() => naAba.filter((p) => {
+    if (pgto !== 'todos' && p.status !== pgto) return false
     if (!busca.trim()) return true
     const t = busca.toLowerCase()
     const id = String(p.id).toLowerCase()
@@ -295,13 +336,12 @@ export default function Pedidos() {
     if (escopo === 'comprador') return comp.includes(t)
     if (escopo === 'produto') return prod.includes(t)
     return id.includes(t) || comp.includes(t) || prod.includes(t)
-  }), [pedidos, busca, escopo])
+  }), [naAba, pgto, busca, escopo])
 
   const paginas = Math.max(1, Math.ceil(filtrada.length / PAGE_SIZE))
   const pageSafe = Math.min(page, paginas)
   const paginaItens = useMemo(() => filtrada.slice((pageSafe - 1) * PAGE_SIZE, pageSafe * PAGE_SIZE), [filtrada, pageSafe])
 
-  // --- seleção ---
   const selecionaveis = useMemo(() => filtrada.filter((p) => p.shipping_id), [filtrada])
   const todosSel = selecionaveis.length > 0 && selecionaveis.every((p) => sel.has(p.id))
   const toggleTodos = () => setSel(() => (todosSel ? new Set() : new Set(selecionaveis.map((p) => p.id))))
@@ -311,50 +351,53 @@ export default function Pedidos() {
   const alvoImpressao = useCallback(() => (sel.size ? pedidosSel : paginaItens), [sel.size, pedidosSel, paginaItens])
   const alvoEtiqueta = useMemo(() => (sel.size ? pedidosSel : paginaItens).filter((p) => p.shipping_id), [sel.size, pedidosSel, paginaItens])
 
-  // --- estatísticas da janela (client-side sobre o conjunto todo) ---
   const stats = useMemo(() => {
-    const arr = pedidos || []
-    let receita = 0, tarifas = 0, custo = 0, liquido = 0, unidades = 0
-    const porStatus = {}, porDia = {}
-    arr.forEach((p) => {
+    let receita = 0, tarifas = 0, custo = 0, liquido = 0, unidades = 0, full = 0
+    const porDia = {}
+    filtrada.forEach((p) => {
       const r = p.resumo || {}
       receita += r.receita || 0; tarifas += r.tarifa || 0; custo += r.custo || 0
       liquido += r.liquido || 0; unidades += r.unidades || 0
-      porStatus[p.status] = (porStatus[p.status] || 0) + 1
+      if (p.is_full) full += 1
       const dia = (p.date_created || '').slice(0, 10)
       if (dia) porDia[dia] = (porDia[dia] || 0) + (r.receita || 0)
     })
-    const n = arr.length
-    const dias = Object.entries(porDia).sort((a, b) => a[0].localeCompare(b[0])).slice(-12)
-    return { n, receita, tarifas, custo, liquido, unidades, ticket: n ? receita / n : 0, margem: receita > 0 ? liquido / receita * 100 : null, porStatus, dias }
-  }, [pedidos])
+    const n = filtrada.length
+    const dias = Object.entries(porDia).sort((a, b) => a[0].localeCompare(b[0])).slice(-14)
+    return { n, receita, tarifas, custo, liquido, unidades, full, ticket: n ? receita / n : 0, margem: receita > 0 ? liquido / receita * 100 : null, dias }
+  }, [filtrada])
 
   const ativoPedido = useMemo(() => (pedidos || []).find((p) => p.id === ativo) || null, [pedidos, ativo])
 
-  // --- impressão ---
   const imprimirSeparacao = () => {
     const alvo = alvoImpressao()
     if (!alvo.length) { notify('Nenhum pedido para separar.', 'warn'); return }
     abrirImpressao('Lista de separação', htmlSeparacaoML(alvo, lerRemetente()))
   }
+  const montarFolhas = async (alvo) => {
+    const rem = lerRemetente()
+    const partes = await Promise.all(alvo.map(async (p) => {
+      let env = p.shipping_id ? envios[p.shipping_id] : null
+      if (p.shipping_id && (!env || env === 'loading' || env === 'erro')) {
+        try { env = await api.mlEnvio(p.shipping_id) } catch { env = null }
+      }
+      const dest = env && env !== 'loading' && env !== 'erro' ? extrairDestino(env) : null
+      return htmlFolhaML(p, dest, rem)
+    }))
+    return partes.join('')
+  }
   const imprimirPedidos = async () => {
     const alvo = alvoImpressao()
     if (!alvo.length) { notify('Nenhum pedido para imprimir.', 'warn'); return }
     setImprimindo('folha')
-    try {
-      const rem = lerRemetente()
-      const partes = await Promise.all(alvo.map(async (p) => {
-        let env = p.shipping_id ? envios[p.shipping_id] : null
-        if (p.shipping_id && (!env || env === 'loading' || env === 'erro')) {
-          try { env = await api.mlEnvio(p.shipping_id) } catch { env = null }
-        }
-        const dest = env && env !== 'loading' && env !== 'erro' ? extrairDestino(env) : null
-        return htmlFolhaML(p, dest, rem)
-      }))
-      abrirImpressao('Pedidos', partes.join(''))
-    } catch (e) {
-      notify('Não consegui montar as folhas: ' + (e.message || ''), 'danger')
-    }
+    try { abrirImpressao('Pedidos', await montarFolhas(alvo)) }
+    catch (e) { notify('Não consegui montar as folhas: ' + (e.message || ''), 'danger') }
+    setImprimindo('')
+  }
+  const imprimirUm = async (p) => {
+    setImprimindo('um')
+    try { abrirImpressao('Pedido #' + p.id, await montarFolhas([p])) }
+    catch (e) { notify('Não consegui montar a folha: ' + (e.message || ''), 'danger') }
     setImprimindo('')
   }
   const imprimirEtiquetas = async () => {
@@ -373,6 +416,7 @@ export default function Pedidos() {
 
   const btnTxt = 'text-xs px-2.5 py-1.5 rounded-lg glass text-dim hover:text-fg flex items-center gap-1.5 disabled:opacity-40'
   const semPedidos = !pedidos || !pedidos.length
+  const abaAtual = ENVIO_TABS.find((t) => t.id === envioTab)?.label || 'Todos'
 
   if (conn && !conn.conta) {
     return (
@@ -388,124 +432,144 @@ export default function Pedidos() {
   }
 
   return (
-    <div className="glass rounded-2xl p-4">
-      {/* Cabeçalho + barra de botões */}
-      <div className={!ativoPedido ? 'sticky top-0 z-20 -mx-4 px-4 pt-1 pb-3' : 'pb-3'} style={!ativoPedido ? { background: 'var(--surface)' } : undefined}>
-        <div className="flex items-center gap-2.5 flex-wrap">
-          <Package size={18} className="text-accent" />
-          <span className="font-display font-semibold text-base">Central de pedidos</span>
-          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'rgba(242,194,0,.18)', color: ML }}>Mercado Livre</span>
-          <div className="ml-auto flex items-center gap-1.5 flex-wrap">
-            <button onClick={() => setPersonalizar(true)} className={btnTxt} title="Dados do remetente que saem na folha e na separação"><SlidersHorizontal size={13} /> Personalizar</button>
-            <button onClick={imprimirSeparacao} disabled={!!imprimindo || semPedidos} className={btnTxt} title="Lista de separação: produtos A→Z somando quantidades"><ClipboardList size={13} /> Separação</button>
-            <button onClick={imprimirPedidos} disabled={!!imprimindo || semPedidos} className={btnTxt} title="Folha por pedido (uma página cada), com itens, entrega e financeiro">
-              {imprimindo === 'folha' ? <Loader2 size={13} className="animate-spin" /> : <Printer size={13} />} Pedidos
-            </button>
-            <button onClick={imprimirEtiquetas} disabled={!!imprimindo || !alvoEtiqueta.length}
-              className="text-xs font-semibold px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5 disabled:opacity-40"
-              style={{ background: ML, color: '#3a2c00' }} title="Etiqueta oficial do Mercado Livre (PDF, até 50 por vez)">
-              {imprimindo === 'etiq' ? <Loader2 size={13} className="animate-spin" /> : <Tag size={13} />} Etiquetas{alvoEtiqueta.length ? ` (${alvoEtiqueta.length})` : ''}
-            </button>
-            <a href="https://www.mercadolivre.com.br/vendas" target="_blank" rel="noreferrer" className={btnTxt} title="Abrir Vendas/Full no Mercado Livre"><Truck size={13} /> Envios / Full</a>
-            <button disabled className={btnTxt + ' cursor-default'} title="Em breve: vínculo com a nota do Bling"><FileText size={13} /> NF-e <span className="text-[9px] font-bold px-1 py-0.5 rounded" style={{ background: 'var(--glass-hover)', color: 'var(--faint)' }}>em breve</span></button>
+    <>
+      <div className="glass rounded-2xl p-4">
+        <div className={!ativoPedido ? 'sticky top-0 z-20 -mx-4 px-4 pt-1 pb-3' : 'pb-3'} style={!ativoPedido ? { background: 'var(--surface)' } : undefined}>
+          <div className="flex items-start gap-2.5 flex-wrap">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <Package size={18} className="text-accent" />
+                <span className="font-display font-semibold text-base">Central de pedidos</span>
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'rgba(242,194,0,.18)', color: ML }}>Mercado Livre</span>
+              </div>
+              <div className="text-[11.5px] text-dim mt-0.5">Resultado real por venda — vendido, tarifa, custo e margem — com nome e endereço reais do comprador e etiqueta oficial.</div>
+            </div>
+            <div className="ml-auto flex items-center gap-1.5 flex-wrap">
+              <button onClick={() => setPersonalizar(true)} className={btnTxt} title="Dados do remetente que saem na folha e na separação"><SlidersHorizontal size={13} /> Personalizar</button>
+              <button onClick={imprimirSeparacao} disabled={!!imprimindo || semPedidos} className={btnTxt} title="Lista de separação: produtos A→Z somando quantidades"><ClipboardList size={13} /> Separação</button>
+              <button onClick={imprimirPedidos} disabled={!!imprimindo || semPedidos} className={btnTxt} title="Folha por pedido (uma página cada), com itens, entrega e financeiro">
+                {imprimindo === 'folha' ? <Loader2 size={13} className="animate-spin" /> : <Printer size={13} />} Imprimir
+              </button>
+              <button onClick={imprimirEtiquetas} disabled={!!imprimindo || !alvoEtiqueta.length}
+                className="text-xs font-semibold px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5 disabled:opacity-40"
+                style={{ background: ML, color: '#3a2c00' }} title="Etiqueta oficial do Mercado Livre (PDF, até 50 por vez)">
+                {imprimindo === 'etiq' ? <Loader2 size={13} className="animate-spin" /> : <Tag size={13} />} Etiquetas em lote{alvoEtiqueta.length ? ` (${alvoEtiqueta.length})` : ''}
+              </button>
+              <a href="https://www.mercadolivre.com.br/vendas" target="_blank" rel="noreferrer" className={btnTxt} title="Abrir Vendas/Full no Mercado Livre"><Truck size={13} /> Envios / Full</a>
+              <button disabled className={btnTxt + ' cursor-default'} title="Em breve: emissão e status da nota junto ao Bling"><FileText size={13} /> NF-e <span className="text-[9px] font-bold px-1 py-0.5 rounded" style={{ background: 'var(--glass-hover)', color: 'var(--faint)' }}>em breve</span></button>
+            </div>
           </div>
-        </div>
 
-        {/* Meus pedidos: período + abas por status */}
-        <div className="flex items-center gap-2 flex-wrap mt-3">
-          <span className="text-[11px] uppercase tracking-wide text-faint font-bold">Meus pedidos</span>
-          <div className="inline-flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--glass-border)' }}>
-            {PERIODOS.map((p) => (
-              <button key={p.id} onClick={() => setPeriodo(p.id)} className="text-[11px] font-bold px-3 py-1.5"
-                style={periodo === p.id ? { background: 'var(--accent)', color: '#fff' } : { background: 'transparent', color: 'var(--faint)' }}>{p.label}</button>
-            ))}
+          <div className="flex items-center gap-2 flex-wrap mt-3">
+            <span className="text-[10px] uppercase tracking-wide text-faint font-bold">Meus pedidos</span>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {ENVIO_TABS.map((f) => {
+                const on = envioTab === f.id
+                return (
+                  <button key={f.id} onClick={() => setEnvioTab(f.id)} className="text-xs font-semibold px-3 py-1.5 rounded-full transition-all inline-flex items-center gap-1.5"
+                    style={on ? { background: 'var(--accent)', color: '#fff' } : { border: '1px solid var(--glass-border)', color: 'var(--dim)' }}>
+                    {f.label}
+                    <span className="text-[10px] font-bold px-1.5 rounded-full num" style={{ background: on ? 'rgba(255,255,255,.22)' : 'var(--glass-hover)', color: on ? '#fff' : 'var(--faint)' }}>{contagens[f.id] ?? 0}</span>
+                  </button>
+                )
+              })}
+            </div>
+            <div className="ml-auto inline-flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--glass-border)' }}>
+              {PERIODOS.map((p) => (
+                <button key={p.id} onClick={() => setPeriodo(p.id)} className="text-[11px] font-bold px-3 py-1.5"
+                  style={periodo === p.id ? { background: 'var(--accent)', color: '#fff' } : { background: 'transparent', color: 'var(--faint)' }}>{p.label}</button>
+              ))}
+            </div>
           </div>
-          <div className="flex items-center gap-1.5 flex-wrap ml-1">
-            {FILTROS.map((f) => {
-              const ativoTab = filtro === f.id
+
+          <div className="flex items-center gap-2 flex-wrap mt-2">
+            <span className="text-[10px] uppercase tracking-wide text-faint font-bold">Pagamento</span>
+            {PGTO_CHIPS.map((c) => {
+              const on = pgto === c.id
               return (
-                <button key={f.id} onClick={() => setFiltro(f.id)} className="text-xs font-semibold px-3 py-1.5 rounded-full transition-all inline-flex items-center gap-1.5"
-                  style={ativoTab ? { background: 'var(--accent)', color: '#fff' } : { border: '1px solid var(--glass-border)', color: 'var(--dim)' }}>
-                  {f.label}
-                  {ativoTab && paging.total != null && <span className="text-[10px] font-bold px-1.5 rounded-full num" style={{ background: 'rgba(255,255,255,.22)' }}>{paging.total}</span>}
+                <button key={c.id} onClick={() => setPgto(c.id)} className="text-[11px] font-medium px-2.5 py-1 rounded-lg inline-flex items-center gap-1.5"
+                  style={on ? { background: 'rgba(214,0,127,.14)', color: 'var(--accent)' } : { background: 'rgba(255,255,255,.04)', color: 'var(--dim)' }}>
+                  {c.label}<span className="num text-faint">{c.id === 'todos' ? contPgto.todos : (contPgto[c.id] ?? 0)}</span>
                 </button>
               )
             })}
+            <span className="ml-3 text-[10px] uppercase tracking-wide text-faint font-bold">Nota fiscal</span>
+            <span className="text-[11px] text-faint inline-flex items-center gap-1.5" title="Emissão e status da NF-e chegam com a integração do Bling"><FileText size={12} /> emissão via Bling <span className="text-[9px] font-bold px-1 py-0.5 rounded" style={{ background: 'var(--glass-hover)' }}>em breve</span></span>
           </div>
         </div>
+
+        {pedidos === null ? (
+          <div className="text-dim text-sm flex items-center gap-2 p-4"><Loader2 size={16} className="animate-spin" /> Carregando o período… (buscando todos os pedidos de uma vez)</div>
+        ) : (
+          <>
+            <Estatisticas s={stats} aba={abaAtual} />
+
+            <div className="glass rounded-xl px-3 py-2 flex items-center gap-2 flex-wrap mt-3 mb-2.5">
+              <Search size={14} className="text-faint" />
+              <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar por pedido, comprador, produto…" className="bg-transparent outline-none text-sm flex-1 min-w-[140px] text-fg placeholder:text-faint" />
+              <Filter size={13} className="text-faint" />
+              {ESCOPOS.map((e) => (
+                <button key={e.id} onClick={() => setEscopo(e.id)} className="text-[11px] font-medium px-2.5 py-1 rounded-lg"
+                  style={escopo === e.id ? { background: 'rgba(214,0,127,.14)', color: 'var(--accent)' } : { background: 'rgba(255,255,255,.04)', color: 'var(--dim)' }}>{e.label}</button>
+              ))}
+              <button onClick={carregar} className="text-dim hover:text-fg ml-1" title="Atualizar"><RefreshCw size={15} /></button>
+            </div>
+
+            {selecionaveis.length > 0 && (
+              <div className="rounded-xl px-3 py-2 flex items-center gap-3 flex-wrap mb-3" style={{ border: '1px solid var(--glass-border)' }}>
+                <button onClick={toggleTodos} className="text-[11px] px-2.5 py-1.5 rounded-lg glass text-dim hover:text-fg inline-flex items-center gap-1.5">
+                  {todosSel ? <><X size={12} /> Limpar seleção</> : <><CheckCheck size={12} /> Selecionar todos ({selecionaveis.length})</>}
+                </button>
+                {sel.size > 0
+                  ? <span className="text-[12px] text-dim">{sel.size} selecionado(s) · Separação, Imprimir e Etiquetas agem sobre a seleção.</span>
+                  : <span className="text-[12px] text-faint">Sem seleção, as ações valem para os {paginaItens.length} pedidos desta página.</span>}
+              </div>
+            )}
+
+            {filtrada.length === 0 ? (
+              <div className="glass rounded-2xl p-10 text-center mt-1">
+                <CheckCircle2 size={28} className="mx-auto mb-3" style={{ color: 'var(--ok)' }} />
+                <div className="font-medium">Nenhum pedido nesta aba</div>
+                <div className="text-sm text-dim mt-1">Ajuste o status, o pagamento, o período ou a busca.</div>
+              </div>
+            ) : (
+              <div className={ativoPedido ? 'grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(380px,460px)] gap-4 items-start' : ''}>
+                <div>
+                  {paginas > 1 && <div className="mb-3"><Paginacao page={pageSafe} total={paginas} onIr={setPage} /></div>}
+                  <div className="space-y-2.5">
+                    {paginaItens.map((p) => (
+                      <Card key={p.id} p={p} ativo={ativo === p.id} sel={sel.has(p.id)}
+                        onOpen={() => abrir(p)} onToggleSel={() => toggleSel(p.id)} />
+                    ))}
+                  </div>
+                  {paginas > 1 && <div className="mt-4"><Paginacao page={pageSafe} total={paginas} onIr={setPage} /></div>}
+                  <div className="text-[11px] text-faint text-center mt-3">
+                    Mostrando {(pageSafe - 1) * PAGE_SIZE + 1}–{Math.min(pageSafe * PAGE_SIZE, filtrada.length)} de {filtrada.length} em «{abaAtual}»
+                    {busca.trim() ? ` · filtro "${busca.trim()}"` : ''} · período de {periodo}d com {paging.carregados ?? (pedidos || []).length} pedidos carregados
+                    {(paging.total ?? 0) > (paging.carregados ?? 0) ? ` (de ${paging.total} — mostrando os mais recentes)` : ''}
+                  </div>
+                </div>
+
+                {ativoPedido && (
+                  <div className="xl:sticky xl:top-2">
+                    <Drawer p={ativoPedido} envio={ativoPedido.shipping_id ? envios[ativoPedido.shipping_id] : null}
+                      baixando={baixando === String(ativoPedido.shipping_id)} imprimindo={imprimindo === 'um'}
+                      onEtiqueta={() => baixarEtiqueta(ativoPedido.shipping_id)} onImprimir={() => imprimirUm(ativoPedido)}
+                      onClose={() => setAtivo(null)} />
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="text-[10.5px] text-faint mt-4 leading-relaxed border-t pt-3" style={{ borderColor: 'var(--glass-border)' }}>
+              As abas seguem o status do <b>envio</b> (A enviar, Enviado, Entregue) e o sub-filtro segue o <b>pagamento</b>. Tudo é calculado sobre os pedidos carregados do período, então os totais dos cartões batem com a aba selecionada. A tarifa vem do próprio pedido. Preço Bling, Anúncio ML e imagem aparecem quando o mesmo SKU está nos dois catálogos. Emissão e status de NF-e chegam com a integração do Bling. Etiqueta de pedidos <b>Full</b> é emitida pelo próprio Mercado Livre.
+            </div>
+          </>
+        )}
       </div>
 
-      {pedidos === null ? (
-        <div className="text-dim text-sm flex items-center gap-2 p-4"><Loader2 size={16} className="animate-spin" /> Carregando pedidos…</div>
-      ) : (
-        <>
-          {pedidos.length > 0 && <Estatisticas s={stats} />}
-
-          {/* busca + escopo */}
-          <div className="glass rounded-xl px-3 py-2 flex items-center gap-2 flex-wrap mt-3 mb-2.5">
-            <Search size={14} className="text-faint" />
-            <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar por pedido, comprador, produto…" className="bg-transparent outline-none text-sm flex-1 min-w-[140px] text-fg placeholder:text-faint" />
-            <Filter size={13} className="text-faint" />
-            {ESCOPOS.map((e) => (
-              <button key={e.id} onClick={() => setEscopo(e.id)} className="text-[11px] font-medium px-2.5 py-1 rounded-lg"
-                style={escopo === e.id ? { background: 'rgba(214,0,127,.14)', color: 'var(--accent)' } : { background: 'rgba(255,255,255,.04)', color: 'var(--dim)' }}>{e.label}</button>
-            ))}
-            <button onClick={carregar} className="text-dim hover:text-fg ml-1" title="Atualizar"><RefreshCw size={15} /></button>
-          </div>
-
-          {/* barra de seleção em lote */}
-          {selecionaveis.length > 0 && (
-            <div className="rounded-xl px-3 py-2 flex items-center gap-3 flex-wrap mb-3" style={{ border: '1px solid var(--glass-border)' }}>
-              <button onClick={toggleTodos} className="text-[11px] px-2.5 py-1.5 rounded-lg glass text-dim hover:text-fg inline-flex items-center gap-1.5">
-                {todosSel ? <><X size={12} /> Limpar seleção</> : <><CheckCheck size={12} /> Selecionar todos ({selecionaveis.length})</>}
-              </button>
-              {sel.size > 0
-                ? <span className="text-[12px] text-dim">{sel.size} selecionado(s) · Separação, Pedidos e Etiquetas agem sobre a seleção.</span>
-                : <span className="text-[12px] text-faint">Sem seleção, as ações valem para os {paginaItens.length} pedidos desta página.</span>}
-            </div>
-          )}
-
-          {filtrada.length === 0 ? (
-            <div className="glass rounded-2xl p-10 text-center mt-1">
-              <CheckCircle2 size={28} className="mx-auto mb-3" style={{ color: 'var(--ok)' }} />
-              <div className="font-medium">Nenhum pedido por aqui</div>
-              <div className="text-sm text-dim mt-1">Ajuste o filtro, o período ou a busca.</div>
-            </div>
-          ) : (
-            <div className={ativoPedido ? 'grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(380px,460px)] gap-4 items-start' : ''}>
-              <div>
-                {paginas > 1 && <div className="mb-3"><Paginacao page={pageSafe} total={paginas} onIr={setPage} /></div>}
-                <div className="space-y-2.5">
-                  {paginaItens.map((p) => (
-                    <Card key={p.id} p={p} ativo={ativo === p.id} sel={sel.has(p.id)}
-                      onOpen={() => abrir(p)} onToggleSel={() => toggleSel(p.id)} />
-                  ))}
-                </div>
-                {paginas > 1 && <div className="mt-4"><Paginacao page={pageSafe} total={paginas} onIr={setPage} /></div>}
-                <div className="text-[11px] text-faint text-center mt-3">
-                  Mostrando {(pageSafe - 1) * PAGE_SIZE + 1}–{Math.min(pageSafe * PAGE_SIZE, filtrada.length)} de {filtrada.length}
-                  {busca.trim() ? ` (filtro de "${busca.trim()}")` : ''} · janela de {periodo}d com {paging.carregados ?? (pedidos || []).length} pedidos carregados
-                </div>
-              </div>
-
-              {ativoPedido && (
-                <div className="xl:sticky xl:top-2">
-                  <Drawer p={ativoPedido} envio={ativoPedido.shipping_id ? envios[ativoPedido.shipping_id] : null}
-                    baixando={baixando === String(ativoPedido.shipping_id)} onEtiqueta={() => baixarEtiqueta(ativoPedido.shipping_id)}
-                    onClose={() => setAtivo(null)} />
-                </div>
-              )}
-            </div>
-          )}
-
-          <div className="text-[10.5px] text-faint mt-4 leading-relaxed border-t pt-3" style={{ borderColor: 'var(--glass-border)' }}>
-            As abas seguem o status do pedido no Mercado Livre. <b>Enviado</b> e <b>Entregue</b> dependem do status do envio (aparecem como selo no card quando o ML traz na busca, e sempre no detalhe ao abrir o pedido) — a listagem por esses estados chega com os webhooks. A tarifa vem do próprio pedido. Preço Bling, Anúncio ML e imagem só aparecem quando os catálogos estão sincronizados com o mesmo SKU. Etiqueta de pedidos <b>Full</b> é emitida pelo próprio Mercado Livre.
-          </div>
-        </>
-      )}
-
-      {personalizar && <PersonalizarModal onClose={() => setPersonalizar(false)} />}
-    </div>
+      {personalizar && createPortal(<PersonalizarModal onClose={() => setPersonalizar(false)} />, document.body)}
+    </>
   )
 }
 
@@ -520,15 +584,15 @@ function Kpi({ label, valor, sub, cor, icon, destaque }) {
   )
 }
 
-function Estatisticas({ s }) {
+function Estatisticas({ s, aba }) {
   const maxDia = Math.max(1, ...s.dias.map((d) => d[1]))
   const diaLabel = (iso) => { const d = new Date(iso + 'T12:00:00'); return isNaN(d) ? '' : d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) }
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
-        <Kpi label="Pedidos" icon={<Package size={11} />} valor={s.n.toLocaleString('pt-BR')} sub={`${s.unidades} un.`} />
-        <Kpi label="Receita" icon={<Wallet size={11} />} valor={brl0(s.receita)} />
-        <Kpi label="Ticket médio" icon={<DollarSign size={11} />} valor={brl(s.ticket)} />
+        <Kpi label={`Pedidos · ${aba}`} icon={<Package size={11} />} valor={s.n.toLocaleString('pt-BR')} sub={`${s.unidades} un.`} />
+        <Kpi label="Receita" icon={<Wallet size={11} />} valor={brl0(s.receita)} sub="na aba" />
+        <Kpi label="Ticket médio" icon={<DollarSign size={11} />} valor={brl(s.ticket)} sub="por pedido" />
         <Kpi label="Tarifas ML" icon={<Tag size={11} />} valor={'−' + brl0(s.tarifas)} cor="var(--warn)" sub={s.receita > 0 ? `${Math.round(s.tarifas / s.receita * 100)}% da receita` : null} />
         <Kpi label="Custo produtos" icon={<AlertTriangle size={11} />} valor={'−' + brl0(s.custo)} cor="var(--warn)" sub="via Bling" />
         <Kpi label="Líquido" icon={<TrendingUp size={11} />} valor={brl0(s.liquido)} cor="var(--ok)" sub={s.margem != null ? `margem ${s.margem.toFixed(0)}%` : null} destaque />
@@ -548,18 +612,12 @@ function Estatisticas({ s }) {
           )}
         </div>
         <div className="glass rounded-xl p-3 flex-1 min-w-0">
-          <div className="text-[9px] uppercase tracking-wide text-faint font-bold mb-2">Por status</div>
-          <div className="space-y-1.5">
-            {Object.entries(s.porStatus).map(([k, v]) => {
-              const m = ST_PEDIDO[k] || { t: k, c: 'var(--dim)' }
-              return (
-                <div key={k} className="flex items-center gap-2 text-[11px]">
-                  <span style={{ width: 7, height: 7, borderRadius: 99, background: m.c, display: 'inline-block' }} />
-                  <span className="flex-1 text-dim truncate">{m.t}</span>
-                  <span className="num font-bold">{v}</span>
-                </div>
-              )
-            })}
+          <div className="text-[9px] uppercase tracking-wide text-faint font-bold mb-2">Resumo da aba «{aba}»</div>
+          <div className="space-y-1.5 text-[11px]">
+            <div className="flex items-center gap-2"><Package size={11} className="text-faint" /><span className="flex-1 text-dim">Pedidos</span><span className="num font-bold">{s.n}</span></div>
+            <div className="flex items-center gap-2"><Boxes size={11} className="text-faint" /><span className="flex-1 text-dim">Unidades</span><span className="num font-bold">{s.unidades}</span></div>
+            <div className="flex items-center gap-2"><Truck size={11} style={{ color: ML }} /><span className="flex-1 text-dim">Full (ML expede)</span><span className="num font-bold">{s.full}</span></div>
+            <div className="flex items-center gap-2"><TrendingUp size={11} className="text-faint" /><span className="flex-1 text-dim">Margem média</span><span className="num font-bold" style={{ color: 'var(--ok)' }}>{s.margem != null ? `${s.margem.toFixed(0)}%` : '—'}</span></div>
           </div>
         </div>
       </div>
@@ -614,6 +672,7 @@ function Card({ p, ativo, onOpen, sel, onToggleSel }) {
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-medium truncate max-w-full">{principal.titulo || 'Pedido'}{extras > 0 ? <span className="text-faint font-normal"> +{extras} item(s)</span> : ''}</span>
             {principal.quantidade > 0 && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'rgba(214,0,127,.14)', color: 'var(--accent)' }}>{principal.quantidade} un.</span>}
+            {p.is_full && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded inline-flex items-center gap-1" style={{ background: 'rgba(242,194,0,.18)', color: ML }}><Truck size={9} /> Full</span>}
             {novo && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded inline-flex items-center gap-1" style={{ background: 'rgba(47,217,141,.14)', color: 'var(--ok)' }}><Zap size={9} /> novo</span>}
           </div>
           <div className="text-[11px] text-faint num mt-0.5">#{p.id} · {dataBR(p.date_created)}{principal.sku ? ` · ${principal.sku}` : ''}</div>
@@ -679,7 +738,7 @@ function Timeline({ orderStatus, shipStatus }) {
   )
 }
 
-function Drawer({ p, envio, baixando, onEtiqueta, onClose }) {
+function Drawer({ p, envio, baixando, imprimindo, onEtiqueta, onImprimir, onClose }) {
   const r = p.resumo || {}
   const st = ST_PEDIDO[p.status] || { t: p.status, c: 'var(--dim)' }
   const itens = p.itens || []
@@ -689,6 +748,7 @@ function Drawer({ p, envio, baixando, onEtiqueta, onClose }) {
   const cor = moneyCor(r.liquido, r.margem)
   const sid = p.shipping_id
   const dest = envio && envio !== 'loading' && envio !== 'erro' ? extrairDestino(envio) : null
+  const meta = extrairEnvioMeta(envio)
   const shipStatus = envio && envio !== 'loading' && envio !== 'erro' ? envio.status : (p.envio_status || null)
   const stEnv = shipStatus ? (ST_ENVIO[shipStatus] || { t: shipStatus, c: 'var(--dim)' }) : null
 
@@ -698,7 +758,7 @@ function Drawer({ p, envio, baixando, onEtiqueta, onClose }) {
         <span className="grid place-items-center shrink-0" style={{ width: 34, height: 34, borderRadius: 99, background: 'var(--accent2)', color: '#fff', fontWeight: 800, fontSize: 13 }}>{inicial}</span>
         <div className="flex-1 min-w-0">
           <div className="font-semibold truncate">{p.buyer?.nickname || 'Comprador'}</div>
-          <div className="text-[10px] text-faint num">#{p.id} · <span style={{ color: st.c }}>{stEnv ? stEnv.t : st.t}</span></div>
+          <div className="text-[10px] text-faint num">#{p.id} · <span style={{ color: st.c }}>{stEnv ? stEnv.t : st.t}</span>{p.is_full ? <span style={{ color: ML }}> · Full</span> : ''}</div>
         </div>
         <button onClick={onClose} className="text-faint hover:text-fg"><X size={18} /></button>
       </div>
@@ -708,23 +768,40 @@ function Drawer({ p, envio, baixando, onEtiqueta, onClose }) {
           <button onClick={onEtiqueta} disabled={!sid || baixando} className="text-[11.5px] font-medium px-2 py-2 rounded-lg text-white inline-flex items-center justify-center gap-1.5 disabled:opacity-50" style={{ background: 'var(--accent)' }}>
             {baixando ? <Loader2 size={13} className="animate-spin" /> : <Tag size={13} />} Baixar etiqueta
           </button>
+          <button onClick={onImprimir} disabled={imprimindo} className="text-[11.5px] font-medium px-2 py-2 rounded-lg inline-flex items-center justify-center gap-1.5 disabled:opacity-50" style={{ border: '1px solid var(--glass-border)', color: 'var(--dim)' }}>
+            {imprimindo ? <Loader2 size={13} className="animate-spin" /> : <Printer size={13} />} Imprimir pedido
+          </button>
+          <button disabled className="text-[11.5px] font-medium px-2 py-2 rounded-lg inline-flex items-center justify-center gap-1.5 opacity-50 cursor-default" style={{ border: '1px solid var(--glass-border)', color: 'var(--faint)' }} title="Em breve: nota fiscal via Bling">
+            <FileText size={13} /> NF-e (Bling)
+          </button>
           <a href={`https://www.mercadolivre.com.br/vendas/${p.id}/detalhe`} target="_blank" rel="noreferrer" className="text-[11.5px] font-medium px-2 py-2 rounded-lg inline-flex items-center justify-center gap-1.5" style={{ border: '1px solid var(--glass-border)', color: 'var(--dim)' }}>
             <ExternalLink size={13} /> Abrir no ML
           </a>
         </div>
 
-        <div className="text-[11.5px]">
+        <div className="text-[11.5px] space-y-0.5">
           <div className="flex justify-between py-0.5"><span className="text-dim flex items-center gap-1.5"><Clock size={12} /> Criado</span><span className="num font-medium">{dataHora(p.date_created)}</span></div>
+          {p.pago_em && <div className="flex justify-between py-0.5"><span className="text-dim flex items-center gap-1.5"><CheckCircle2 size={12} /> Pago</span><span className="num font-medium">{dataHora(p.pago_em)}</span></div>}
+          {meta.prazo && <div className="flex justify-between py-0.5"><span className="text-dim flex items-center gap-1.5"><Truck size={12} /> Despachar até</span><span className="num font-medium" style={{ color: 'var(--warn)' }}>{dataHora(meta.prazo)}</span></div>}
+          {meta.modo && <div className="flex justify-between py-0.5"><span className="text-dim flex items-center gap-1.5"><Boxes size={12} /> Envio</span><span className="font-medium">{meta.modo}</span></div>}
         </div>
 
         <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--glass-border)' }}>
           <div className="text-[9.5px] uppercase tracking-wide text-faint font-bold mb-2 flex items-center gap-1.5"><Package size={12} /> Produtos ({itens.length})</div>
-          {itens.map((it, i) => (
-            <div key={i} className="flex items-center gap-2 py-0.5">
-              <span className="text-[11.5px] text-dim truncate flex-1">{it.quantidade}× {it.titulo}{it.sku ? <span className="text-faint"> · {it.sku}</span> : ''}</span>
-              <span className="text-[11px] num text-faint shrink-0">{brl(it.unit_price)}</span>
-            </div>
-          ))}
+          <div className="space-y-1.5">
+            {itens.map((it, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <span className="rounded-md overflow-hidden shrink-0 grid place-items-center" style={{ width: 34, height: 34, background: 'var(--glass-hover)', color: 'var(--faint)', border: '1px solid var(--glass-border)' }}>
+                  {it.imagem ? <img src={it.imagem} alt="" className="h-full w-full object-cover" /> : <Package size={15} />}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[11.5px] text-dim truncate">{it.quantidade}× {it.titulo}</div>
+                  {it.sku && <div className="text-[10px] text-faint num truncate">SKU {it.sku}{it.unit_price != null ? ` · ${brl(it.unit_price)} un` : ''}</div>}
+                </div>
+                <span className="text-[11px] num text-faint shrink-0">{brl((it.unit_price || 0) * (it.quantidade || 1))}</span>
+              </div>
+            ))}
+          </div>
         </div>
 
         <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--glass-border)' }}>
@@ -743,7 +820,7 @@ function Drawer({ p, envio, baixando, onEtiqueta, onClose }) {
         </div>
 
         <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--glass-border)' }}>
-          <div className="text-[9.5px] uppercase tracking-wide text-faint font-bold mb-2 flex items-center gap-1.5"><MapPin size={12} /> Entrega</div>
+          <div className="text-[9.5px] uppercase tracking-wide text-faint font-bold mb-2 flex items-center gap-1.5"><MapPin size={12} /> Entrega <span className="text-[8px] px-1 py-0.5 rounded" style={{ background: 'rgba(242,194,0,.18)', color: ML }}>endereço real · ML</span></div>
           {!sid ? <div className="text-[11px] text-faint">Este pedido não tem envio associado.</div>
             : envio === 'loading' ? <div className="text-[11px] text-faint flex items-center gap-2"><Loader2 size={12} className="animate-spin" /> lendo endereço…</div>
               : envio === 'erro' || !dest ? <div className="text-[11px] text-faint">Não consegui ler o endereço deste envio.</div>
@@ -780,8 +857,8 @@ function PersonalizarModal({ onClose }) {
     </label>
   )
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center p-4" style={{ background: 'rgba(0,0,0,.55)' }} onClick={onClose}>
-      <div className="glass rounded-2xl w-full max-w-md" style={{ background: 'var(--surface)' }} onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-[70] grid place-items-center p-4" style={{ background: 'rgba(0,0,0,.6)' }} onClick={onClose}>
+      <div className="rounded-2xl w-full max-w-md" style={{ background: 'var(--surface)', border: '1px solid var(--glass-border)', boxShadow: '0 20px 60px rgba(0,0,0,.5)' }} onClick={(e) => e.stopPropagation()}>
         <div className="px-4 py-3 flex items-center gap-2" style={{ borderBottom: '1px solid var(--glass-border)' }}>
           <SlidersHorizontal size={16} className="text-accent" />
           <span className="font-semibold">Remetente da impressão</span>
