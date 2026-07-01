@@ -116,6 +116,10 @@ export const api = {
   mlAddFoto: (item_id, url) => req('/api/mercadolivre/anuncio-foto', { method: 'POST', body: { item_id, url } }),
   mlFicha: (item_id, ean, peso) => req('/api/mercadolivre/anuncio-ficha', { method: 'POST', body: { item_id, ean, peso } }),
   mlRadar: (item_id) => req(`/api/mercadolivre/radar/${item_id}`),
+  mlAvaliacoes: (item_id) => req(`/api/mercadolivre/avaliacoes/${item_id}`),
+  mlPromocoesItem: (item_id) => req(`/api/mercadolivre/promocoes/${item_id}`),
+  mlPromoAplicar: (b) => req('/api/mercadolivre/promocoes/aplicar', { method: 'POST', body: b }),
+  mlPromoRemover: (item_id) => req('/api/mercadolivre/promocoes/remover', { method: 'POST', body: { item_id } }),
   // Pedidos & Etiqueta (Mercado Livre)
   mlPedidos: (status = 'paid', offset = 0) => req(`/api/mercadolivre/pedidos?status=${status}&offset=${offset}`),
   mlPedido: (id) => req(`/api/mercadolivre/pedido/${id}`),

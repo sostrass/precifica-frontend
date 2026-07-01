@@ -745,6 +745,12 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
   const [mlQualBusy, setMlQualBusy] = useState('')
   const [mlRadarFull, setMlRadarFull] = useState(null)
   const [carregandoMlRadar, setCarregandoMlRadar] = useState(false)
+  const [mlRevs, setMlRevs] = useState(null)
+  const [carregandoMlRevs, setCarregandoMlRevs] = useState(false)
+  const [mlPromo, setMlPromo] = useState(null)
+  const [carregandoMlPromo, setCarregandoMlPromo] = useState(false)
+  const [promoPrecoMl, setPromoPrecoMl] = useState('')
+  const [mlPromoBusy, setMlPromoBusy] = useState(false)
   const [mNome, setMNome] = useState('')
   const [mPreco, setMPreco] = useState('')
   const [salvandoManual, setSalvandoManual] = useState(false)
@@ -923,6 +929,30 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
     return () => { vivo = false }
   }, [aba, mlSnap, mlRadarFull])
 
+  // avaliações do Mercado Livre — carrega ao abrir a aba Avaliações
+  useEffect(() => {
+    if (aba !== 'aval' || !mlSnap?.item?.item_id || mlRevs !== null) return
+    let vivo = true
+    setCarregandoMlRevs(true)
+    api.mlAvaliacoes(mlSnap.item.item_id)
+      .then((d) => { if (vivo) setMlRevs(d) })
+      .catch(() => { if (vivo) setMlRevs({ erro: true }) })
+      .finally(() => { if (vivo) setCarregandoMlRevs(false) })
+    return () => { vivo = false }
+  }, [aba, mlSnap, mlRevs])
+
+  // promoções/desconto do Mercado Livre — carrega ao abrir a aba Promoção
+  useEffect(() => {
+    if (aba !== 'promo' || !mlSnap?.item?.item_id || mlPromo !== null) return
+    let vivo = true
+    setCarregandoMlPromo(true)
+    api.mlPromocoesItem(mlSnap.item.item_id)
+      .then((d) => { if (vivo) setMlPromo(d) })
+      .catch(() => { if (vivo) setMlPromo({ erro: true }) })
+      .finally(() => { if (vivo) setCarregandoMlPromo(false) })
+    return () => { vivo = false }
+  }, [aba, mlSnap, mlPromo])
+
   // anatomia do líquido (cascata) na aba Preço & Margem — simula o canal selecionado no preço de lista atual
   useEffect(() => {
     if (aba !== 'preco') return
@@ -1092,6 +1122,32 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
       notify(`Mercado Livre → ${brl(preco)}.`, 'ok')
       try { const d = await api.produtoMercadolivre(produto.id); setMlSnap(d) } catch { /* mantém */ }
     } catch (e) { notify('Falha ao aplicar no Mercado Livre: ' + (e.message || ''), 'danger') }
+  }
+
+  const mlPrecoLista = () => Number((canaisPainel.find((c) => c.canal === 'mercadolivre')?.preco_registrado) || mlSnap?.item?.preco || 0)
+  const aplicarDescontoMl = async () => {
+    const id = mlSnap?.item?.item_id
+    const preco = Number(String(promoPrecoMl).replace(',', '.'))
+    const lista = mlPrecoLista()
+    if (!id || !preco || preco <= 0) { notify('Informe o preço promocional.', 'danger'); return }
+    if (lista && preco >= lista) { notify('O preço promocional precisa ser menor que o preço atual do anúncio.', 'warn'); return }
+    setMlPromoBusy(true)
+    try {
+      await api.mlPromoAplicar({ item_id: id, deal_price: preco })
+      notify('Desconto aplicado no Mercado Livre.', 'ok')
+      setPromoPrecoMl(''); setMlPromo(null)
+    } catch (e) { notify('Mercado Livre recusou o desconto: ' + (e.message || ''), 'danger') }
+    setMlPromoBusy(false)
+  }
+  const removerDescontoMl = async () => {
+    const id = mlSnap?.item?.item_id
+    if (!id) return
+    setMlPromoBusy(true)
+    try {
+      await api.mlPromoRemover(id)
+      notify('Desconto removido no Mercado Livre.', 'ok'); setMlPromo(null)
+    } catch (e) { notify('Não consegui remover: ' + (e.message || ''), 'danger') }
+    setMlPromoBusy(false)
   }
 
   return (
@@ -1411,6 +1467,48 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
             {aba === 'promo' && (
               <div className="space-y-3">
                 <div className="text-[10px] uppercase tracking-wide text-faint font-bold">Promoção / Desconto</div>
+                {mlSnap?.item?.item_id && (
+                  <div className="rounded-lg p-3" style={{ background: 'rgba(242,194,0,.06)', border: '1px solid var(--glass-border)' }}>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-[10px] uppercase tracking-wide text-faint font-bold">Desconto no Mercado Livre</span>
+                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: MK.mercadolivre.bg, color: MK.mercadolivre.cor }}>nativo</span>
+                    </div>
+                    {carregandoMlPromo
+                      ? <div className="text-faint text-xs flex items-center gap-2 py-1"><Loader2 size={14} className="animate-spin" /> lendo promoções…</div>
+                      : (() => {
+                          const arr = Array.isArray(mlPromo) ? mlPromo : (mlPromo?.results || mlPromo?.promotions || [])
+                          const ativo = (arr || []).find((p) => { const st = String(p?.status || '').toLowerCase(); return (p?.deal_price || p?.new_price) && (st.includes('start') || st === 'active') })
+                          const precoAtivo = ativo ? (ativo.deal_price || ativo.new_price) : null
+                          const lista = mlPrecoLista()
+                          const promoNum = Number(String(promoPrecoMl).replace(',', '.'))
+                          return (
+                            <>
+                              {ativo ? (
+                                <div className="rounded-lg px-3 py-2 mb-2 flex items-center justify-between" style={{ background: 'rgba(245,166,35,.10)', border: '1px solid rgba(245,166,35,.4)' }}>
+                                  <div className="text-[11px]"><span className="text-faint">Desconto ativo:</span> <b className="num" style={{ color: '#F5A623' }}>{brl(precoAtivo)}</b>{lista > 0 && precoAtivo < lista ? <span className="text-faint"> · -{Math.round((1 - precoAtivo / lista) * 100)}%</span> : ''}</div>
+                                  <button onClick={removerDescontoMl} disabled={mlPromoBusy} className="text-[10px] font-medium px-2 py-1 rounded" style={{ background: 'rgba(255,122,122,.14)', color: 'var(--danger)' }}>Remover</button>
+                                </div>
+                              ) : (
+                                <div className="text-[11px] text-faint mb-2">Nenhum desconto ativo neste anúncio.</div>
+                              )}
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <div className="flex items-center gap-1.5 rounded-lg px-2 py-1.5" style={{ background: 'rgba(0,0,0,.2)', border: '1px solid var(--accent2)' }}>
+                                  <span className="text-faint text-xs">R$</span>
+                                  <input value={promoPrecoMl} onChange={(e) => setPromoPrecoMl(e.target.value)} placeholder="promo" className="bg-transparent outline-none num text-sm text-fg text-right" style={{ width: 60 }} />
+                                </div>
+                                {promoPrecoMl && lista > 0 && promoNum > 0 && promoNum < lista && (
+                                  <span className="text-[10px]" style={{ color: '#F5A623' }}>-{Math.round((1 - promoNum / lista) * 100)}% vs {brl(lista)}</span>
+                                )}
+                                <button onClick={aplicarDescontoMl} disabled={mlPromoBusy} className="text-[11px] font-medium px-3 py-1.5 rounded-lg text-white inline-flex items-center gap-1.5 disabled:opacity-50 ml-auto" style={{ background: 'var(--accent)' }}>
+                                  {mlPromoBusy ? <Loader2 size={13} className="animate-spin" /> : <BadgePercent size={13} />} Aplicar desconto
+                                </button>
+                              </div>
+                              <div className="text-[9px] text-faint mt-2">Cria um desconto de preço (PRICE_DISCOUNT) direto no anúncio. As campanhas por convite do ML (Ofertas do Dia, Relâmpago) você aceita no painel do Mercado Livre — aqui é o desconto que você controla.</div>
+                            </>
+                          )
+                        })()}
+                  </div>
+                )}
                 {carregandoShopee
                   ? <div className="text-faint text-xs flex items-center gap-2 py-3"><Loader2 size={14} className="animate-spin" /> lendo a Shopee…</div>
                   : !shopeeItem
@@ -1645,6 +1743,59 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
 
             {aba === 'aval' && (
               <div>
+                {mlSnap?.item?.item_id && (
+                  <div className="mb-3">
+                    <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2 flex items-center gap-1.5">Avaliações <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: MK.mercadolivre.bg, color: MK.mercadolivre.cor }}>Mercado Livre</span></div>
+                    {carregandoMlRevs
+                      ? <div className="text-faint text-xs flex items-center gap-2 py-2"><Loader2 size={14} className="animate-spin" /> buscando avaliações…</div>
+                      : !mlRevs || mlRevs.erro || !(mlRevs.avaliacoes || []).length
+                        ? <div className="text-faint text-xs rounded-lg px-3 py-2.5" style={{ background: 'var(--glass-hover)' }}>Sem avaliações com comentário neste anúncio ainda{mlRevs?.total ? ` (${mlRevs.total} nota(s) no total)` : ''}.</div>
+                        : (() => {
+                            const revs = mlRevs.avaliacoes
+                            const n = revs.length
+                            const avg = revs.reduce((a, c) => a + (c.nota || 0), 0) / n
+                            const dist = [5, 4, 3, 2, 1].map((s) => revs.filter((c) => Math.round(c.nota || 0) === s).length)
+                            const maxd = Math.max(1, ...dist)
+                            const dt = (c) => { if (!c.data) return ''; const d = new Date(c.data); return isNaN(d) ? '' : `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}` }
+                            return (
+                              <div>
+                                <div className="flex items-stretch gap-3 mb-2.5">
+                                  <div className="flex flex-col items-center justify-center rounded-lg px-3 py-2" style={{ background: 'var(--glass-hover)', minWidth: 86 }}>
+                                    <span className="text-2xl font-bold num" style={{ color: '#F5A623' }}>{avg.toFixed(1)}</span>
+                                    <span className="num text-[11px]" style={{ color: '#F5A623' }}>{'★'.repeat(Math.round(avg))}<span className="text-faint">{'★'.repeat(Math.max(0, 5 - Math.round(avg)))}</span></span>
+                                    <span className="text-[10px] text-faint mt-0.5">{mlRevs.total || n} no total</span>
+                                  </div>
+                                  <div className="flex-1 flex flex-col justify-center gap-1">
+                                    {[5, 4, 3, 2, 1].map((s, i) => (
+                                      <div key={s} className="flex items-center gap-1.5 text-[10px]">
+                                        <span className="text-faint num" style={{ width: 18 }}>{s}★</span>
+                                        <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,.05)' }}>
+                                          <div style={{ width: (dist[i] / maxd * 100) + '%', height: '100%', background: '#F5A623', borderRadius: 99 }} />
+                                        </div>
+                                        <span className="text-faint num" style={{ width: 18, textAlign: 'right' }}>{dist[i]}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                                <div className="space-y-1.5">
+                                  {revs.slice(0, 6).map((c, i) => (
+                                    <div key={i} className="rounded-lg px-2.5 py-2 text-xs" style={{ background: 'var(--glass-hover)' }}>
+                                      <div className="flex items-center gap-2 mb-0.5">
+                                        <span className="num text-[11px]"><span style={{ color: '#F5A623' }}>{'★'.repeat(Math.round(c.nota || 0))}</span><span className="text-faint">{'★'.repeat(Math.max(0, 5 - Math.round(c.nota || 0)))}</span></span>
+                                        {c.likes > 0 && <span className="text-[10px] text-faint">{c.likes} úteis</span>}
+                                        {dt(c) && <span className="text-[10px] text-faint ml-auto num">{dt(c)}</span>}
+                                      </div>
+                                      {c.titulo && <div className="text-fg font-medium">{c.titulo}</div>}
+                                      {c.texto && <div className="text-dim">{c.texto.length > 160 ? c.texto.slice(0, 160) + '…' : c.texto}</div>}
+                                    </div>
+                                  ))}
+                                </div>
+                                <div className="text-[10px] text-faint mt-2">Com base nas {n} avaliações mais recentes (API do Mercado Livre). O ML não permite responder avaliações pela API — aqui é leitura.</div>
+                              </div>
+                            )
+                          })()}
+                  </div>
+                )}
                 <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Avaliações (Shopee)</div>
                 {!(shopeeItem && shopeeItem.item_id)
                   ? <div className="text-faint text-xs rounded-lg px-3 py-3" style={{ background: 'var(--glass-hover)' }}>Sem anúncio Shopee vinculado para buscar avaliações. Rode "Sincronizar Shopee".</div>
