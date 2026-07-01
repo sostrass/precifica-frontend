@@ -112,6 +112,10 @@ export const api = {
   mlSyncStatus: () => req('/api/mercadolivre/sync'),
   mlItemPreco: (item_id, preco) => req('/api/mercadolivre/preco', { method: 'POST', body: { item_id, preco } }),
   produtoMercadolivre: (id) => req(`/api/produtos/${id}/mercadolivre`),
+  mlDescricao: (item_id, texto) => req('/api/mercadolivre/descricao', { method: 'POST', body: { item_id, texto } }),
+  mlAddFoto: (item_id, url) => req('/api/mercadolivre/anuncio-foto', { method: 'POST', body: { item_id, url } }),
+  mlFicha: (item_id, ean, peso) => req('/api/mercadolivre/anuncio-ficha', { method: 'POST', body: { item_id, ean, peso } }),
+  iaDescricao: (b) => req('/api/ia/descricao', { method: 'POST', body: b }),
   // Central de Atendimento (perguntas multicanal + IA)
   atendimentoStatus: () => req('/api/atendimento/status'),
   atendimentoStats: () => req('/api/atendimento/stats'),

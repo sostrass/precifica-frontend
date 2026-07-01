@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useRef } from 'react'
-import { Search, RefreshCw, Plug, X, Check, Zap, Radar, Wand2, Database, Loader2, ImageOff, BadgePercent, PanelRight, Plus, Star, CheckCircle2, Boxes, BarChart3, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, LayoutGrid, Percent, Layers, Flame, History, ShieldCheck, TrendingUp, Target, ArrowDown, ArrowUp } from 'lucide-react'
+import { Search, RefreshCw, Plug, X, Check, Zap, Radar, Wand2, Database, Loader2, ImageOff, BadgePercent, PanelRight, Plus, Star, CheckCircle2, Boxes, BarChart3, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, LayoutGrid, Percent, Layers, Flame, History, ShieldCheck, TrendingUp, Target, ArrowDown, ArrowUp, MessageSquare, AlertTriangle, Camera, Barcode, AlignLeft, Sparkles, ExternalLink } from 'lucide-react'
 import { api, DEFAULT_CUSTOS } from './api.js'
 import { useToast } from './toast.jsx'
 import RadarDrawer from './RadarDrawer.jsx'
@@ -738,6 +738,11 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
   const [anatomia, setAnatomia] = useState(null)
   const [anatCanal, setAnatCanal] = useState('shopee')
   const [mlSnap, setMlSnap] = useState(null)
+  const [mlFotoUrl, setMlFotoUrl] = useState('')
+  const [mlEan, setMlEan] = useState('')
+  const [mlPeso, setMlPeso] = useState('')
+  const [mlDesc, setMlDesc] = useState('')
+  const [mlQualBusy, setMlQualBusy] = useState('')
   const [mNome, setMNome] = useState('')
   const [mPreco, setMPreco] = useState('')
   const [salvandoManual, setSalvandoManual] = useState(false)
@@ -795,6 +800,39 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
       .catch(() => { if (vivo) setMlSnap(null) })
     return () => { vivo = false }
   }, [produto.id])
+
+  // ações rápidas de qualidade no anúncio do Mercado Livre (gravam direto pela API)
+  const mlItemId = () => mlSnap?.item?.item_id
+  const salvarMlFoto = async () => {
+    const url = mlFotoUrl.trim(); const id = mlItemId()
+    if (!url || !id) { notify('Cole a URL da imagem.', 'danger'); return }
+    setMlQualBusy('foto')
+    try { const r = await api.mlAddFoto(id, url); notify(`Foto adicionada ao anúncio${r.n_fotos ? ` (${r.n_fotos} no total)` : ''}.`, 'ok'); setMlFotoUrl('') }
+    catch (e) { notify('Mercado Livre recusou a foto: ' + (e.message || ''), 'danger') }
+    setMlQualBusy('')
+  }
+  const salvarMlFicha = async () => {
+    const id = mlItemId()
+    if (!id || (!mlEan.trim() && !mlPeso.trim())) { notify('Informe o EAN ou o peso.', 'danger'); return }
+    setMlQualBusy('ficha')
+    try { await api.mlFicha(id, mlEan.trim(), mlPeso.trim()); notify('Ficha atualizada no anúncio.', 'ok') }
+    catch (e) { notify('Mercado Livre recusou a ficha: ' + (e.message || ''), 'danger') }
+    setMlQualBusy('')
+  }
+  const sugerirMlDesc = async () => {
+    setMlQualBusy('ia')
+    try { const r = await api.iaDescricao({ nome_produto: produto.nome || produto.descricao || produto.sku }); setMlDesc(r.descricao_gerada || '') }
+    catch (e) { notify('Não consegui gerar: ' + (e.message || ''), 'danger') }
+    setMlQualBusy('')
+  }
+  const salvarMlDesc = async () => {
+    const txt = mlDesc.trim(); const id = mlItemId()
+    if (!txt || !id) { notify('Escreva ou gere a descrição.', 'danger'); return }
+    setMlQualBusy('desc')
+    try { await api.mlDescricao(id, txt); notify('Descrição salva no Mercado Livre.', 'ok') }
+    catch (e) { notify('Mercado Livre recusou a descrição: ' + (e.message || ''), 'danger') }
+    setMlQualBusy('')
+  }
 
   const [reviews, setReviews] = useState(null)
   const [carregandoReviews, setCarregandoReviews] = useState(false)
@@ -1119,57 +1157,76 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
                     <Tile label="Status" val={s.txt} cor={s.cor} small />
                   </div>
                 </div>
-                {canaisPainel.some((c) => c.publicado && c.liquido != null) && (
+                {canaisPainel.some((c) => c.publicado) && (
                   <div>
-                    <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Líquido por canal (vs Preço Bling)</div>
-                    <div className="flex flex-col gap-2">
-                      {canaisPainel.filter((c) => c.publicado && c.liquido != null).map((c, i) => {
-                        const mk = MK[c.canal] || { nome: c.nome || c.canal, cor: 'var(--dim)', bg: 'var(--glass-hover)' }
-                        const alvo = produto.preco_bling || 0
-                        const pct = alvo > 0 ? Math.max(0, Math.min(120, (c.liquido / alvo) * 100)) : 0
-                        const cor = c.liquido >= alvo - 0.005 ? 'var(--ok)' : c.liquido >= alvo * 0.95 ? 'var(--warn)' : 'var(--danger)'
-                        return (
-                          <div key={i} className="flex items-center gap-2">
-                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded text-center" style={{ background: mk.bg, color: mk.cor, width: 58, flex: 'none' }}>{mk.nome}</span>
-                            <div className="flex-1 rounded-full overflow-hidden" style={{ height: 7, background: 'rgba(255,255,255,.07)' }}>
-                              <div style={{ height: '100%', width: `${Math.min(100, pct)}%`, background: cor, borderRadius: 99 }} />
-                            </div>
-                            <span className="num text-[10px]" style={{ width: 92, textAlign: 'right', color: cor }}>{brl(c.liquido)} · {Math.round(pct)}%</span>
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="text-[10px] uppercase tracking-wide text-faint font-bold">Matriz de canais</div>
+                      <div className="text-[9px] text-faint">n/d = o canal não expõe esse dado</div>
+                    </div>
+                    <div className="rounded-lg overflow-hidden" style={{ border: '1px solid var(--glass-border)' }}>
+                      <table className="w-full text-xs">
+                        <thead><tr className="text-faint text-[9px] uppercase" style={{ background: 'var(--glass-hover)' }}>
+                          <th className="text-left px-2 py-1.5">Canal</th><th className="text-right px-1.5 py-1.5">Preço</th><th className="text-right px-1.5 py-1.5">Líquido</th><th className="text-right px-1.5 py-1.5">Estoque</th><th className="text-right px-1.5 py-1.5">Visitas</th><th className="text-right px-2 py-1.5">Saúde</th>
+                        </tr></thead>
+                        <tbody>
+                          {canaisPainel.filter((c) => c.publicado).map((c, i, arr) => {
+                            const mk = MK[c.canal] || { nome: c.nome || c.canal, cor: 'var(--dim)', bg: 'var(--glass-hover)' }
+                            const alvo = produto.preco_bling || 0
+                            const pct = (c.liquido != null && alvo > 0) ? (c.liquido / alvo) * 100 : null
+                            const corLiq = c.liquido == null ? 'var(--faint)' : c.liquido >= alvo - 0.005 ? 'var(--ok)' : c.liquido >= alvo * 0.95 ? 'var(--warn)' : 'var(--danger)'
+                            const isMl = c.canal === 'mercadolivre'
+                            const estoque = isMl && mlSnap?.item?.estoque != null ? mlSnap.item.estoque : (produto.estoque ?? null)
+                            const visitas = isMl && mlSnap?.visitas?.total != null ? mlSnap.visitas.total : null
+                            const conv = (isMl && visitas > 0 && vendas > 0) ? (vendas / visitas * 100) : null
+                            const saude = isMl && mlSnap?.item?.saude != null ? Math.round(mlSnap.item.saude * 100) : null
+                            const corSaude = saude == null ? 'var(--faint)' : saude >= 80 ? 'var(--ok)' : saude >= 60 ? 'var(--warn)' : 'var(--danger)'
+                            return (
+                              <tr key={i} style={i < arr.length - 1 ? { borderBottom: '1px solid var(--glass-border)' } : undefined}>
+                                <td className="px-2 py-2"><span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: mk.bg, color: mk.cor }}>{mk.nome}</span></td>
+                                <td className="px-1.5 py-2 text-right num">{c.preco_registrado != null ? brl(c.preco_registrado) : '—'}</td>
+                                <td className="px-1.5 py-2 text-right num" style={{ color: corLiq }}>{c.liquido != null ? brl(c.liquido) : '—'}{pct != null && <span className="text-[9px] text-faint ml-0.5">{Math.round(pct)}%</span>}</td>
+                                <td className="px-1.5 py-2 text-right num">{estoque != null ? estoque : '—'}</td>
+                                <td className="px-1.5 py-2 text-right num">{visitas != null ? <>{Number(visitas).toLocaleString('pt-BR')}{conv != null && <span className="text-[9px] text-faint ml-0.5">{conv.toFixed(1)}%</span>}</> : <span className="text-faint">n/d</span>}</td>
+                                <td className="px-2 py-2 text-right num" style={{ color: corSaude }}>{saude != null ? saude : <span className="text-faint">n/d</span>}</td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="text-[10px] text-faint mt-1.5">Preço e líquido de cada canal frente ao Preço Bling. Visitas e saúde vêm do Mercado Livre (a Shopee não expõe pela API).</div>
+                  </div>
+                )}
+                {(() => {
+                  const sinais = []
+                  if (mlSnap?.perguntas_sem_resposta > 0)
+                    sinais.push({ Icon: MessageSquare, cor: 'var(--warn)', texto: `${mlSnap.perguntas_sem_resposta} pergunta${mlSnap.perguntas_sem_resposta > 1 ? 's' : ''} sem resposta no Mercado Livre`, rotulo: 'Ver anúncio', acao: () => mlSnap.item?.permalink && window.open(mlSnap.item.permalink, '_blank', 'noreferrer') })
+                  if (mlSnap?.radar?.diff_pct != null && mlSnap.radar.diff_pct > 3)
+                    sinais.push({ Icon: Target, cor: 'var(--danger)', texto: `Concorrente ${Math.round(mlSnap.radar.diff_pct)}% abaixo no ML · menor ${brl(mlSnap.radar.menor)}`, rotulo: 'Radar', acao: () => setAba('radar') })
+                  const saudeMl = mlSnap?.item?.saude != null ? mlSnap.item.saude * 100 : null
+                  if (saudeMl != null && saudeMl < 75)
+                    sinais.push({ Icon: ShieldCheck, cor: 'var(--warn)', texto: `Saúde do anúncio ML em ${Math.round(saudeMl)} — dá pra melhorar`, rotulo: 'Corrigir', acao: () => setAba('qual') })
+                  const ruim = canaisPainel.find((c) => c.publicado && (c.status === 'prejuizo' || c.status === 'abaixo'))
+                  if (ruim)
+                    sinais.push({ Icon: AlertTriangle, cor: ruim.status === 'prejuizo' ? 'var(--danger)' : 'var(--warn)', texto: `${mkNome(ruim)} ${ruim.status === 'prejuizo' ? 'no prejuízo' : 'abaixo do alvo'}${ruim.liquido != null ? ` · líquido ${brl(ruim.liquido)}` : ''}`, rotulo: 'Ajustar', acao: () => setAba('preco') })
+                  if ((produto.estoque || 0) <= 0)
+                    sinais.push({ Icon: Boxes, cor: 'var(--danger)', texto: 'Sem estoque — anúncios podem pausar', rotulo: '', acao: null })
+                  if (!sinais.length) return null
+                  return (
+                    <div>
+                      <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Precisa de você</div>
+                      <div className="space-y-1.5">
+                        {sinais.map((s, i) => (
+                          <div key={i} className="flex items-center gap-2 rounded-lg px-2.5 py-2" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)' }}>
+                            <s.Icon size={14} style={{ color: s.cor, flexShrink: 0 }} />
+                            <span className="flex-1 text-[11px] text-dim">{s.texto}</span>
+                            {s.rotulo && s.acao && <button onClick={s.acao} className="text-[10px] font-medium px-2 py-1 rounded shrink-0" style={{ background: 'rgba(214,0,127,.14)', color: 'var(--accent)' }}>{s.rotulo}</button>}
                           </div>
-                        )
-                      })}
-                    </div>
-                    <div className="text-[10px] text-faint mt-1.5">Quanto cada canal neta hoje frente ao Preço Bling (100% = bate o alvo).</div>
-                  </div>
-                )}
-                {mlSnap && mlSnap.conectado && mlSnap.item && (mlSnap.visitas || mlSnap.radar) && (
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="rounded-lg p-2.5" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)' }}>
-                      <div className="flex items-center justify-between">
-                        <span className="text-[10px] uppercase tracking-wide text-faint font-bold">Funil</span>
-                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: MK.mercadolivre.bg, color: MK.mercadolivre.cor }}>M. Livre</span>
+                        ))}
                       </div>
-                      {mlSnap.visitas && mlSnap.visitas.total != null
-                        ? <>
-                            <div className="num font-bold text-lg mt-1">{Number(mlSnap.visitas.total).toLocaleString('pt-BR')}<span className="text-[10px] text-faint font-normal"> visitas · {mlSnap.visitas.dias}d</span></div>
-                            <div className="text-[10px] text-faint mt-0.5">{vendas > 0 && mlSnap.visitas.total > 0 ? `${((vendas / mlSnap.visitas.total) * 100).toFixed(1)}% de conversão (vendas ÷ visitas)` : 'visitas reais do anúncio'}</div>
-                          </>
-                        : <div className="text-[11px] text-faint mt-2">sem dados de visita ainda</div>}
                     </div>
-                    <div className="rounded-lg p-2.5" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)' }}>
-                      <div className="flex items-center justify-between">
-                        <span className="text-[10px] uppercase tracking-wide text-faint font-bold">Radar</span>
-                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: MK.mercadolivre.bg, color: MK.mercadolivre.cor }}>M. Livre</span>
-                      </div>
-                      {mlSnap.radar && mlSnap.radar.menor
-                        ? <>
-                            <div className="num font-bold text-lg mt-1">{brl(mlSnap.radar.atual || 0)}{mlSnap.radar.diff_pct != null && <span className="text-[10px] ml-1" style={{ color: mlSnap.radar.diff_pct > 0 ? 'var(--danger)' : 'var(--ok)' }}>{mlSnap.radar.diff_pct > 0 ? '+' : ''}{Math.round(mlSnap.radar.diff_pct)}% vs menor</span>}</div>
-                            <div className="text-[10px] text-faint mt-0.5">menor {brl(mlSnap.radar.menor)}{mlSnap.radar.sugerido ? ` · sugerido ${brl(mlSnap.radar.sugerido)}` : ''}</div>
-                          </>
-                        : <div className="text-[11px] text-faint mt-2">sem referência de preço ainda</div>}
-                    </div>
-                  </div>
-                )}
+                  )
+                })()}
                 <div className="flex items-center gap-2 pt-1">
                   <button onClick={() => setAba('preco')} className="text-xs px-3 py-2 rounded-lg flex items-center gap-1.5 text-white" style={{ background: 'var(--accent)' }}><Percent size={13} /> Ajustar preço</button>
                   <button onClick={onEditarCompleto} className="text-xs px-3 py-2 rounded-lg flex items-center gap-1.5" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)', color: 'var(--dim)' }}><Wand2 size={13} /> IA / Edição completa</button>
@@ -1566,6 +1623,38 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
             {aba === 'qual' && (
               <div>
                 <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Qualidade do anúncio</div>
+                {mlSnap?.conectado && mlSnap.item?.item_id && (
+                  <div className="rounded-lg p-3 mb-3" style={{ background: 'rgba(242,194,0,.06)', border: '1px solid var(--glass-border)' }}>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-[10px] uppercase tracking-wide text-faint font-bold">Ações rápidas no anúncio</span>
+                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: MK.mercadolivre.bg, color: MK.mercadolivre.cor }}>Mercado Livre</span>
+                    </div>
+                    <div className="mb-2">
+                      <div className="text-[9px] uppercase tracking-wide text-faint font-bold mb-1 flex items-center gap-1.5"><Camera size={11} /> Adicionar foto</div>
+                      <div className="flex gap-1.5">
+                        <input value={mlFotoUrl} onChange={(e) => setMlFotoUrl(e.target.value)} placeholder="Cole a URL da imagem" className="flex-1 bg-black/20 rounded px-2 py-1.5 text-[11px] outline-none text-fg placeholder:text-faint" style={{ border: '1px solid var(--glass-border)' }} />
+                        <button onClick={salvarMlFoto} disabled={mlQualBusy === 'foto'} className="text-[10px] font-medium px-2.5 py-1 rounded shrink-0 inline-flex items-center gap-1" style={{ background: 'rgba(214,0,127,.14)', color: 'var(--accent)' }}>{mlQualBusy === 'foto' ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />} Adicionar</button>
+                      </div>
+                    </div>
+                    <div className="mb-2">
+                      <div className="text-[9px] uppercase tracking-wide text-faint font-bold mb-1 flex items-center gap-1.5"><Barcode size={11} /> Ficha técnica</div>
+                      <div className="flex gap-1.5">
+                        <input value={mlEan} onChange={(e) => setMlEan(e.target.value)} placeholder="Código de barras (EAN)" className="flex-1 bg-black/20 rounded px-2 py-1.5 text-[11px] outline-none text-fg placeholder:text-faint" style={{ border: '1px solid var(--glass-border)' }} />
+                        <input value={mlPeso} onChange={(e) => setMlPeso(e.target.value)} placeholder="Peso (g)" className="w-20 bg-black/20 rounded px-2 py-1.5 text-[11px] outline-none text-fg placeholder:text-faint" style={{ border: '1px solid var(--glass-border)' }} />
+                        <button onClick={salvarMlFicha} disabled={mlQualBusy === 'ficha'} className="text-[10px] font-medium px-2.5 py-1 rounded shrink-0 inline-flex items-center gap-1" style={{ background: 'rgba(214,0,127,.14)', color: 'var(--accent)' }}>{mlQualBusy === 'ficha' ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />} Salvar</button>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[9px] uppercase tracking-wide text-faint font-bold mb-1 flex items-center gap-1.5"><AlignLeft size={11} /> Descrição</div>
+                      <textarea value={mlDesc} onChange={(e) => setMlDesc(e.target.value)} rows={3} placeholder="Escreva ou gere com IA a descrição do anúncio…" className="w-full bg-black/20 rounded px-2 py-1.5 text-[11px] outline-none text-fg placeholder:text-faint resize-none leading-relaxed" style={{ border: '1px solid var(--glass-border)' }} />
+                      <div className="flex items-center gap-1.5 mt-1.5">
+                        <button onClick={salvarMlDesc} disabled={mlQualBusy === 'desc' || !mlDesc.trim()} className="text-[10px] font-medium px-2.5 py-1 rounded inline-flex items-center gap-1 text-white disabled:opacity-50" style={{ background: 'var(--accent)' }}>{mlQualBusy === 'desc' ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />} Salvar no ML</button>
+                        <button onClick={sugerirMlDesc} disabled={mlQualBusy === 'ia'} className="text-[10px] font-medium px-2.5 py-1 rounded inline-flex items-center gap-1" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)', color: 'var(--dim)' }}>{mlQualBusy === 'ia' ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />} Sugerir com IA</button>
+                      </div>
+                    </div>
+                    <div className="text-[9px] text-faint mt-2">Grava direto no anúncio (API do ML). O ML exige atributos obrigatórios por categoria e trava alguns campos quando o anúncio já vendeu — nesses casos ele recusa e o erro aparece aqui.</div>
+                  </div>
+                )}
                 {carregandoQual
                   ? <div className="text-faint text-xs flex items-center gap-2 py-3"><Loader2 size={14} className="animate-spin" /> diagnosticando o anúncio…</div>
                   : !qual || qual.erro
