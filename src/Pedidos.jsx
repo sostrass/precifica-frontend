@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Package, MapPin, Download, RefreshCw, Search, Plug, Loader2, Truck,
-  ChevronDown, ChevronUp, User, ExternalLink, CheckCircle2, Zap, Check,
-  AlertTriangle, TrendingUp, Printer, Wallet, DollarSign, Tag, Clock, X,
+  Package, MapPin, RefreshCw, Search, Plug, Loader2, Truck, Filter,
+  ChevronDown, ChevronUp, ChevronLeft, ChevronRight, User, ExternalLink,
+  CheckCircle2, Zap, Check, CheckCheck, AlertTriangle, TrendingUp, Printer,
+  Wallet, DollarSign, Tag, Clock, X, SlidersHorizontal, ClipboardList, FileText,
 } from 'lucide-react'
 import { api } from './api.js'
 import { useToast } from './toast.jsx'
@@ -10,10 +11,12 @@ import { useToast } from './toast.jsx'
 const ML = '#F2C200'
 const brl = (v) => (v == null ? '—' : Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }))
 const brl0 = (v) => (v == null ? '—' : Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 }))
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 
+const PAGE_SIZE = 15
 const FILTROS = [
   { id: 'paid', label: 'A enviar' },
-  { id: 'confirmed', label: 'Confirmados' },
+  { id: 'payment_required', label: 'A pagar' },
   { id: 'cancelled', label: 'Cancelados' },
   { id: '', label: 'Todos' },
 ]
@@ -73,6 +76,150 @@ function extrairDestino(env) {
   return { nome, linha, bairro, cidade, estado, cep, compl }
 }
 
+/* ---------------------------------------------------------------------------
+   Impressão (própria do módulo ML — folha e lista de separação)
+--------------------------------------------------------------------------- */
+const LS_REM = 'ml_pedidos_remetente'
+function lerRemetente() {
+  try { return JSON.parse(localStorage.getItem(LS_REM) || '{}') || {} } catch { return {} }
+}
+function salvarRemetente(r) {
+  try { localStorage.setItem(LS_REM, JSON.stringify(r || {})) } catch (_) { /* ignore */ }
+}
+
+const PRINT_CSS = `
+* { box-sizing: border-box; }
+body { font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #111; margin: 0; padding: 18px; font-size: 12px; }
+.folha { max-width: 760px; margin: 0 auto 22px; page-break-after: always; }
+.folha:last-child { page-break-after: auto; }
+.fh { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; border-bottom: 2px solid #111; padding-bottom: 8px; margin-bottom: 12px; }
+.tt { font-size: 17px; font-weight: 800; }
+.mut { color: #666; font-size: 11px; }
+.rem { text-align: right; font-size: 11px; line-height: 1.35; }
+table { width: 100%; border-collapse: collapse; }
+.it { margin-bottom: 14px; }
+.it th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: #555; border-bottom: 1px solid #bbb; padding: 5px 6px; }
+.it td { padding: 6px; border-bottom: 1px solid #eee; vertical-align: top; }
+.c { text-align: center; width: 48px; }
+.r { text-align: right; white-space: nowrap; }
+.m { font-family: ui-monospace, Menlo, Consolas, monospace; color: #444; font-size: 11px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.box { border: 1px solid #ddd; border-radius: 8px; padding: 10px 12px; }
+.bt { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: #666; font-weight: 700; margin-bottom: 6px; }
+.b { font-size: 13px; }
+.fin td { padding: 3px 0; }
+.fin .tot td { border-top: 1px solid #bbb; font-weight: 800; padding-top: 6px; }
+.sep .chk { width: 44px; }
+.chk { text-align: center; }
+td.chk:after { content: ''; display: inline-block; width: 16px; height: 16px; border: 1.5px solid #999; border-radius: 4px; }
+.qbox { display: inline-grid; place-items: center; min-width: 26px; height: 24px; padding: 0 6px; background: #111; color: #fff; border-radius: 6px; font-weight: 800; }
+@media print { body { padding: 0; } .box { break-inside: avoid; } }
+`
+
+function abrirImpressao(titulo, corpo) {
+  const win = window.open('', '_blank')
+  if (!win) { alert('Habilite os pop-ups deste site para imprimir.'); return }
+  win.document.open()
+  win.document.write(
+    '<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>' + esc(titulo) + '</title><style>' + PRINT_CSS + '</style></head><body>' +
+    corpo +
+    '<scr' + 'ipt>window.onload=function(){setTimeout(function(){window.print()},250)}</scr' + 'ipt>' +
+    '</body></html>'
+  )
+  win.document.close()
+}
+
+function htmlFolhaML(p, dest, rem) {
+  const r = p.resumo || {}
+  const itens = (p.itens || []).map((it) =>
+    `<tr><td class="c">${it.quantidade}</td><td>${esc(it.titulo)}</td><td class="m">${esc(it.sku || '—')}</td><td class="r">${brl(it.unit_price)}</td></tr>`
+  ).join('')
+  const entrega = dest
+    ? `<div class="b"><b>${esc(dest.nome || '—')}</b></div>` +
+      (dest.linha ? `<div>${esc(dest.linha)}${dest.compl ? ' — ' + esc(dest.compl) : ''}</div>` : '') +
+      (dest.bairro ? `<div>${esc(dest.bairro)}</div>` : '') +
+      `<div>${esc([dest.cidade, dest.estado].filter(Boolean).join(' · '))}${dest.cep ? ' · CEP ' + esc(dest.cep) : ''}</div>`
+    : `<div class="mut">O endereço completo do comprador sai na etiqueta oficial do Mercado Livre.</div>`
+  return (
+    `<section class="folha">` +
+      `<header class="fh">` +
+        `<div><div class="tt">Pedido #${esc(p.id)}</div><div class="mut">${esc(dataHora(p.date_created))}</div></div>` +
+        `<div class="rem"><div><b>${esc(rem.nome || 'Remetente')}</b></div>` +
+          (rem.cnpj ? `<div class="mut">${esc(rem.cnpj)}</div>` : '') +
+          (rem.endereco ? `<div class="mut">${esc(rem.endereco)}</div>` : '') +
+          (rem.telefone ? `<div class="mut">${esc(rem.telefone)}</div>` : '') +
+        `</div>` +
+      `</header>` +
+      `<table class="it"><thead><tr><th class="c">Qtd</th><th>Produto</th><th class="m">SKU</th><th class="r">Unit.</th></tr></thead><tbody>${itens}</tbody></table>` +
+      `<div class="grid2">` +
+        `<div class="box"><div class="bt">Entrega</div>${entrega}</div>` +
+        `<div class="box"><div class="bt">Financeiro</div><table class="fin">` +
+          `<tr><td>Vendido</td><td class="r">${brl(r.receita)}</td></tr>` +
+          `<tr><td>Tarifa ML</td><td class="r">−${brl(r.tarifa)}</td></tr>` +
+          `<tr><td>Custo</td><td class="r">${r.custo ? '−' + brl(r.custo) : '—'}</td></tr>` +
+          `<tr class="tot"><td>Líquido</td><td class="r">${brl(r.liquido)}${r.margem != null ? ' (' + r.margem.toFixed(0) + '%)' : ''}</td></tr>` +
+        `</table></div>` +
+      `</div>` +
+    `</section>`
+  )
+}
+
+function htmlSeparacaoML(pedidos, rem) {
+  const mapa = new Map()
+  ;(pedidos || []).forEach((p) => (p.itens || []).forEach((it) => {
+    const chave = (it.titulo || 'Item') + '||' + (it.sku || '')
+    const cur = mapa.get(chave) || { titulo: it.titulo || 'Item', sku: it.sku || '', qtd: 0 }
+    cur.qtd += it.quantidade || 0
+    mapa.set(chave, cur)
+  }))
+  const linhas = [...mapa.values()].sort((a, b) => a.titulo.localeCompare(b.titulo, 'pt-BR'))
+  const totalUn = linhas.reduce((s, l) => s + l.qtd, 0)
+  const corpo = linhas.map((l) =>
+    `<tr><td class="c"><span class="qbox">${l.qtd}</span></td><td>${esc(l.titulo)}</td><td class="m">${esc(l.sku || '—')}</td><td class="chk"></td></tr>`
+  ).join('')
+  return (
+    `<section class="folha">` +
+      `<header class="fh">` +
+        `<div><div class="tt">Lista de separação</div><div class="mut">${(pedidos || []).length} pedido(s) · ${totalUn} unidade(s)</div></div>` +
+        `<div class="rem"><div><b>${esc(rem.nome || 'Sóstrass')}</b></div><div class="mut">${esc(new Date().toLocaleString('pt-BR'))}</div></div>` +
+      `</header>` +
+      `<table class="it sep"><thead><tr><th class="c">Qtd</th><th>Produto</th><th class="m">SKU</th><th class="chk">✓</th></tr></thead><tbody>${corpo}</tbody></table>` +
+    `</section>`
+  )
+}
+
+/* ---------------------------------------------------------------------------
+   Paginação (replicada do padrão da Shopee)
+--------------------------------------------------------------------------- */
+function janelaPaginas(page, total) {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1)
+  const out = [1]
+  let ini = Math.max(2, page - 1), fim = Math.min(total - 1, page + 1)
+  if (page <= 3) { ini = 2; fim = 4 }
+  if (page >= total - 2) { ini = total - 3; fim = total - 1 }
+  if (ini > 2) out.push('…')
+  for (let i = ini; i <= fim; i++) out.push(i)
+  if (fim < total - 1) out.push('…')
+  out.push(total)
+  return out
+}
+function Paginacao({ page, total, onIr }) {
+  if (!total || total <= 1) return null
+  const cls = 'min-w-[34px] h-[34px] px-2 rounded-lg text-xs font-medium num grid place-items-center transition-colors disabled:opacity-35 disabled:cursor-default'
+  const off = { background: 'var(--glass-bg)', color: 'var(--dim)', border: '1px solid var(--glass-border)' }
+  const on = { background: 'var(--accent)', color: '#fff', border: '1px solid var(--accent)' }
+  return (
+    <div className="flex items-center justify-center gap-1.5 flex-wrap">
+      <button onClick={() => onIr(page - 1)} disabled={page <= 1} className={cls} style={off} aria-label="Página anterior"><ChevronLeft size={15} /></button>
+      {janelaPaginas(page, total).map((p, i) => p === '…'
+        ? <span key={'e' + i} className="px-1 text-faint text-xs select-none">…</span>
+        : <button key={p} onClick={() => onIr(p)} aria-current={p === page ? 'page' : undefined} className={cls} style={p === page ? on : off}>{p}</button>)}
+      <button onClick={() => onIr(page + 1)} disabled={page >= total} className={cls} style={off} aria-label="Próxima página"><ChevronRight size={15} /></button>
+    </div>
+  )
+}
+
+/* =========================================================================== */
 export default function Pedidos() {
   const notify = useToast()
   const [conn, setConn] = useState(null)
@@ -81,13 +228,14 @@ export default function Pedidos() {
   const [escopo, setEscopo] = useState('tudo')
   const [busca, setBusca] = useState('')
   const [pedidos, setPedidos] = useState(null)
-  const [paging, setPaging] = useState({ total: 0 })
-  const [offset, setOffset] = useState(0)
-  const [carregandoMais, setCarregandoMais] = useState(false)
+  const [paging, setPaging] = useState({ total: 0, carregados: 0 })
+  const [page, setPage] = useState(1)
   const [ativo, setAtivo] = useState(null)
   const [sel, setSel] = useState(() => new Set())
   const [envios, setEnvios] = useState({})
   const [baixando, setBaixando] = useState('')
+  const [imprimindo, setImprimindo] = useState('')
+  const [personalizar, setPersonalizar] = useState(false)
 
   const checar = useCallback(() => {
     api.mlConta().then((d) => setConn(d?.conta ? d : { conta: false })).catch(() => setConn({ conta: false }))
@@ -96,20 +244,21 @@ export default function Pedidos() {
 
   const desdeISO = useCallback(() => { const d = new Date(); d.setDate(d.getDate() - periodo); return d.toISOString() }, [periodo])
 
-  const carregar = useCallback(async (off = 0, append = false) => {
-    if (!append) { setPedidos(null); setSel(new Set()); setAtivo(null) }
+  // Busca a JANELA inteira uma vez por (aba, período). Interação é client-side.
+  const carregar = useCallback(async () => {
+    setPedidos(null); setSel(new Set()); setAtivo(null); setPage(1)
     try {
-      const d = await api.mlPedidosEnriquecido(filtro, off, 30, desdeISO())
+      const d = await api.mlPedidosEnriquecido(filtro, 0, 120, desdeISO())
       const arr = d.pedidos || []
-      setPaging(d.paging || { total: arr.length })
-      setOffset(off)
-      setPedidos((prev) => (append ? [...(prev || []), ...arr] : arr))
+      setPedidos(arr)
+      setPaging(d.paging || { total: arr.length, carregados: arr.length })
     } catch (e) {
-      notify(e.message, 'danger'); if (!append) setPedidos([])
+      notify(e.message, 'danger'); setPedidos([])
     }
   }, [filtro, desdeISO, notify])
 
-  useEffect(() => { if (conn?.conta) carregar(0, false) }, [conn?.conta, carregar])
+  useEffect(() => { if (conn?.conta) carregar() }, [conn?.conta, carregar])
+  useEffect(() => { setPage(1) }, [busca, escopo])
 
   const abrir = async (p) => {
     if (ativo === p.id) { setAtivo(null); return }
@@ -122,21 +271,20 @@ export default function Pedidos() {
     }
   }
 
-  const baixarEtiqueta = async (sid, chave = '') => {
+  const baixarEtiqueta = async (sid) => {
     if (!sid) return
-    setBaixando(chave || sid)
+    setBaixando(String(sid))
     try {
       const url = await api.mlEtiqueta(sid, 'pdf')
       window.open(url, '_blank')
       setTimeout(() => URL.revokeObjectURL(url), 60000)
     } catch (e) {
-      notify('Etiqueta indisponível: ' + (e.message || '') + ' (envios Full são etiquetados pelo próprio ML)', 'danger')
+      notify('Etiqueta indisponível: ' + (e.message || '') + ' — envios Full são etiquetados pelo próprio ML.', 'danger')
     }
     setBaixando('')
   }
 
-  const carregarMais = async () => { setCarregandoMais(true); await carregar(offset + 30, true); setCarregandoMais(false) }
-
+  // --- filtro / paginação client-side ---
   const filtrada = useMemo(() => (pedidos || []).filter((p) => {
     if (!busca.trim()) return true
     const t = busca.toLowerCase()
@@ -149,25 +297,21 @@ export default function Pedidos() {
     return id.includes(t) || comp.includes(t) || prod.includes(t)
   }), [pedidos, busca, escopo])
 
+  const paginas = Math.max(1, Math.ceil(filtrada.length / PAGE_SIZE))
+  const pageSafe = Math.min(page, paginas)
+  const paginaItens = useMemo(() => filtrada.slice((pageSafe - 1) * PAGE_SIZE, pageSafe * PAGE_SIZE), [filtrada, pageSafe])
+
+  // --- seleção ---
   const selecionaveis = useMemo(() => filtrada.filter((p) => p.shipping_id), [filtrada])
   const todosSel = selecionaveis.length > 0 && selecionaveis.every((p) => sel.has(p.id))
   const toggleTodos = () => setSel(() => (todosSel ? new Set() : new Set(selecionaveis.map((p) => p.id))))
   const toggleSel = (id) => setSel((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
-  const idsLote = useMemo(() => (pedidos || []).filter((p) => sel.has(p.id) && p.shipping_id).map((p) => p.shipping_id), [pedidos, sel])
 
-  const imprimirLote = async () => {
-    if (!idsLote.length) return
-    setBaixando('lote')
-    try {
-      const url = await api.mlEtiqueta(idsLote.join(','), 'pdf')
-      window.open(url, '_blank')
-      setTimeout(() => URL.revokeObjectURL(url), 60000)
-    } catch (e) {
-      notify('Não consegui gerar as etiquetas em lote: ' + (e.message || '') + ' — pedidos Full são etiquetados pelo próprio ML.', 'danger')
-    }
-    setBaixando('')
-  }
+  const pedidosSel = useMemo(() => (pedidos || []).filter((p) => sel.has(p.id)), [pedidos, sel])
+  const alvoImpressao = useCallback(() => (sel.size ? pedidosSel : paginaItens), [sel.size, pedidosSel, paginaItens])
+  const alvoEtiqueta = useMemo(() => (sel.size ? pedidosSel : paginaItens).filter((p) => p.shipping_id), [sel.size, pedidosSel, paginaItens])
 
+  // --- estatísticas da janela (client-side sobre o conjunto todo) ---
   const stats = useMemo(() => {
     const arr = pedidos || []
     let receita = 0, tarifas = 0, custo = 0, liquido = 0, unidades = 0
@@ -182,44 +326,112 @@ export default function Pedidos() {
     })
     const n = arr.length
     const dias = Object.entries(porDia).sort((a, b) => a[0].localeCompare(b[0])).slice(-12)
-    return {
-      n, receita, tarifas, custo, liquido, unidades,
-      ticket: n ? receita / n : 0,
-      margem: receita > 0 ? liquido / receita * 100 : null,
-      porStatus, dias,
-    }
+    return { n, receita, tarifas, custo, liquido, unidades, ticket: n ? receita / n : 0, margem: receita > 0 ? liquido / receita * 100 : null, porStatus, dias }
   }, [pedidos])
 
   const ativoPedido = useMemo(() => (pedidos || []).find((p) => p.id === ativo) || null, [pedidos, ativo])
 
+  // --- impressão ---
+  const imprimirSeparacao = () => {
+    const alvo = alvoImpressao()
+    if (!alvo.length) { notify('Nenhum pedido para separar.', 'warn'); return }
+    abrirImpressao('Lista de separação', htmlSeparacaoML(alvo, lerRemetente()))
+  }
+  const imprimirPedidos = async () => {
+    const alvo = alvoImpressao()
+    if (!alvo.length) { notify('Nenhum pedido para imprimir.', 'warn'); return }
+    setImprimindo('folha')
+    try {
+      const rem = lerRemetente()
+      const partes = await Promise.all(alvo.map(async (p) => {
+        let env = p.shipping_id ? envios[p.shipping_id] : null
+        if (p.shipping_id && (!env || env === 'loading' || env === 'erro')) {
+          try { env = await api.mlEnvio(p.shipping_id) } catch { env = null }
+        }
+        const dest = env && env !== 'loading' && env !== 'erro' ? extrairDestino(env) : null
+        return htmlFolhaML(p, dest, rem)
+      }))
+      abrirImpressao('Pedidos', partes.join(''))
+    } catch (e) {
+      notify('Não consegui montar as folhas: ' + (e.message || ''), 'danger')
+    }
+    setImprimindo('')
+  }
+  const imprimirEtiquetas = async () => {
+    const ids = alvoEtiqueta.map((p) => p.shipping_id)
+    if (!ids.length) { notify('Nenhum pedido com envio para etiquetar.', 'warn'); return }
+    setImprimindo('etiq')
+    try {
+      const url = await api.mlEtiqueta(ids.join(','), 'pdf')
+      window.open(url, '_blank')
+      setTimeout(() => URL.revokeObjectURL(url), 60000)
+    } catch (e) {
+      notify('Etiquetas indisponíveis: ' + (e.message || '') + ' — pedidos Full são etiquetados pelo próprio ML.', 'danger')
+    }
+    setImprimindo('')
+  }
+
+  const btnTxt = 'text-xs px-2.5 py-1.5 rounded-lg glass text-dim hover:text-fg flex items-center gap-1.5 disabled:opacity-40'
+  const semPedidos = !pedidos || !pedidos.length
+
   if (conn && !conn.conta) {
     return (
-      <Shell>
-        <div className="glass rounded-2xl p-8 text-center max-w-lg mx-auto mt-6">
+      <div className="glass rounded-2xl p-8 text-center">
+        <div className="max-w-lg mx-auto">
           <div className="h-12 w-12 rounded-2xl grid place-items-center mx-auto mb-4" style={{ background: 'rgba(242,194,0,.16)', color: ML }}><Plug size={22} /></div>
           <div className="font-display font-semibold text-lg">Conecte o Mercado Livre</div>
-          <p className="text-sm text-dim mt-2">Os pedidos, com resultado por venda (tarifa, custo e margem), nome e endereço reais do comprador e a etiqueta oficial, aparecem aqui assim que você conectar a conta.</p>
+          <p className="text-sm text-dim mt-2">Os pedidos, com o resultado por venda (tarifa, custo e margem), o nome e endereço reais do comprador e a etiqueta oficial, aparecem aqui assim que você conectar a conta.</p>
           <button onClick={checar} className="glass rounded-xl px-4 py-2 text-sm text-dim hover:text-fg inline-flex items-center gap-2 mt-4"><RefreshCw size={15} /> Já conectei</button>
         </div>
-      </Shell>
+      </div>
     )
   }
 
   return (
-    <Shell>
-      {/* filtros de status + período */}
-      <div className="flex items-center gap-2 flex-wrap mb-2.5">
-        {FILTROS.map((f) => (
-          <button key={f.id} onClick={() => setFiltro(f.id)} className="text-xs font-semibold px-3 py-1.5 rounded-full transition-all"
-            style={filtro === f.id ? { background: 'var(--accent)', color: '#fff' } : { border: '1px solid var(--glass-border)', color: 'var(--dim)' }}>
-            {f.label}
-          </button>
-        ))}
-        <div className="ml-auto inline-flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--glass-border)' }}>
-          {PERIODOS.map((p) => (
-            <button key={p.id} onClick={() => setPeriodo(p.id)} className="text-[11px] font-bold px-3 py-1.5"
-              style={periodo === p.id ? { background: 'var(--accent)', color: '#fff' } : { background: 'transparent', color: 'var(--faint)' }}>{p.label}</button>
-          ))}
+    <div className="glass rounded-2xl p-4">
+      {/* Cabeçalho + barra de botões */}
+      <div className={!ativoPedido ? 'sticky top-0 z-20 -mx-4 px-4 pt-1 pb-3' : 'pb-3'} style={!ativoPedido ? { background: 'var(--surface)' } : undefined}>
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <Package size={18} className="text-accent" />
+          <span className="font-display font-semibold text-base">Central de pedidos</span>
+          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'rgba(242,194,0,.18)', color: ML }}>Mercado Livre</span>
+          <div className="ml-auto flex items-center gap-1.5 flex-wrap">
+            <button onClick={() => setPersonalizar(true)} className={btnTxt} title="Dados do remetente que saem na folha e na separação"><SlidersHorizontal size={13} /> Personalizar</button>
+            <button onClick={imprimirSeparacao} disabled={!!imprimindo || semPedidos} className={btnTxt} title="Lista de separação: produtos A→Z somando quantidades"><ClipboardList size={13} /> Separação</button>
+            <button onClick={imprimirPedidos} disabled={!!imprimindo || semPedidos} className={btnTxt} title="Folha por pedido (uma página cada), com itens, entrega e financeiro">
+              {imprimindo === 'folha' ? <Loader2 size={13} className="animate-spin" /> : <Printer size={13} />} Pedidos
+            </button>
+            <button onClick={imprimirEtiquetas} disabled={!!imprimindo || !alvoEtiqueta.length}
+              className="text-xs font-semibold px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5 disabled:opacity-40"
+              style={{ background: ML, color: '#3a2c00' }} title="Etiqueta oficial do Mercado Livre (PDF, até 50 por vez)">
+              {imprimindo === 'etiq' ? <Loader2 size={13} className="animate-spin" /> : <Tag size={13} />} Etiquetas{alvoEtiqueta.length ? ` (${alvoEtiqueta.length})` : ''}
+            </button>
+            <a href="https://www.mercadolivre.com.br/vendas" target="_blank" rel="noreferrer" className={btnTxt} title="Abrir Vendas/Full no Mercado Livre"><Truck size={13} /> Envios / Full</a>
+            <button disabled className={btnTxt + ' cursor-default'} title="Em breve: vínculo com a nota do Bling"><FileText size={13} /> NF-e <span className="text-[9px] font-bold px-1 py-0.5 rounded" style={{ background: 'var(--glass-hover)', color: 'var(--faint)' }}>em breve</span></button>
+          </div>
+        </div>
+
+        {/* Meus pedidos: período + abas por status */}
+        <div className="flex items-center gap-2 flex-wrap mt-3">
+          <span className="text-[11px] uppercase tracking-wide text-faint font-bold">Meus pedidos</span>
+          <div className="inline-flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--glass-border)' }}>
+            {PERIODOS.map((p) => (
+              <button key={p.id} onClick={() => setPeriodo(p.id)} className="text-[11px] font-bold px-3 py-1.5"
+                style={periodo === p.id ? { background: 'var(--accent)', color: '#fff' } : { background: 'transparent', color: 'var(--faint)' }}>{p.label}</button>
+            ))}
+          </div>
+          <div className="flex items-center gap-1.5 flex-wrap ml-1">
+            {FILTROS.map((f) => {
+              const ativoTab = filtro === f.id
+              return (
+                <button key={f.id} onClick={() => setFiltro(f.id)} className="text-xs font-semibold px-3 py-1.5 rounded-full transition-all inline-flex items-center gap-1.5"
+                  style={ativoTab ? { background: 'var(--accent)', color: '#fff' } : { border: '1px solid var(--glass-border)', color: 'var(--dim)' }}>
+                  {f.label}
+                  {ativoTab && paging.total != null && <span className="text-[10px] font-bold px-1.5 rounded-full num" style={{ background: 'rgba(255,255,255,.22)' }}>{paging.total}</span>}
+                </button>
+              )
+            })}
+          </div>
         </div>
       </div>
 
@@ -233,25 +445,23 @@ export default function Pedidos() {
           <div className="glass rounded-xl px-3 py-2 flex items-center gap-2 flex-wrap mt-3 mb-2.5">
             <Search size={14} className="text-faint" />
             <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar por pedido, comprador, produto…" className="bg-transparent outline-none text-sm flex-1 min-w-[140px] text-fg placeholder:text-faint" />
+            <Filter size={13} className="text-faint" />
             {ESCOPOS.map((e) => (
               <button key={e.id} onClick={() => setEscopo(e.id)} className="text-[11px] font-medium px-2.5 py-1 rounded-lg"
                 style={escopo === e.id ? { background: 'rgba(214,0,127,.14)', color: 'var(--accent)' } : { background: 'rgba(255,255,255,.04)', color: 'var(--dim)' }}>{e.label}</button>
             ))}
-            <button onClick={() => carregar(0, false)} className="text-dim hover:text-fg ml-1" title="Atualizar"><RefreshCw size={15} /></button>
+            <button onClick={carregar} className="text-dim hover:text-fg ml-1" title="Atualizar"><RefreshCw size={15} /></button>
           </div>
 
-          {/* barra de seleção / impressão em lote */}
-          {sel.size > 0 && (
-            <div className="rounded-xl px-3 py-2.5 flex items-center gap-3 flex-wrap mb-3" style={{ border: '1px solid var(--accent)', background: 'linear-gradient(90deg,rgba(214,0,127,.14),transparent)' }}>
-              <span className="grid place-items-center" style={{ width: 18, height: 18, borderRadius: 5, background: 'var(--accent)', color: '#fff' }}><Check size={12} /></span>
-              <span className="text-sm font-semibold">{sel.size} {sel.size === 1 ? 'pedido selecionado' : 'pedidos selecionados'}</span>
-              <span className="text-[11px] text-dim hidden sm:inline">· etiquetas num único PDF (até 50 por vez)</span>
-              <div className="ml-auto flex items-center gap-2">
-                <button onClick={imprimirLote} disabled={baixando === 'lote' || !idsLote.length} className="text-[12px] font-medium px-3 py-1.5 rounded-lg text-white inline-flex items-center gap-1.5 disabled:opacity-50" style={{ background: 'var(--accent)' }}>
-                  {baixando === 'lote' ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />} Imprimir {idsLote.length} {idsLote.length === 1 ? 'etiqueta' : 'etiquetas'}
-                </button>
-                <button onClick={toggleTodos} className="text-[11px] px-2.5 py-1.5 rounded-lg glass text-dim hover:text-fg">{todosSel ? 'Limpar' : `Selecionar todos (${selecionaveis.length})`}</button>
-              </div>
+          {/* barra de seleção em lote */}
+          {selecionaveis.length > 0 && (
+            <div className="rounded-xl px-3 py-2 flex items-center gap-3 flex-wrap mb-3" style={{ border: '1px solid var(--glass-border)' }}>
+              <button onClick={toggleTodos} className="text-[11px] px-2.5 py-1.5 rounded-lg glass text-dim hover:text-fg inline-flex items-center gap-1.5">
+                {todosSel ? <><X size={12} /> Limpar seleção</> : <><CheckCheck size={12} /> Selecionar todos ({selecionaveis.length})</>}
+              </button>
+              {sel.size > 0
+                ? <span className="text-[12px] text-dim">{sel.size} selecionado(s) · Separação, Pedidos e Etiquetas agem sobre a seleção.</span>
+                : <span className="text-[12px] text-faint">Sem seleção, as ações valem para os {paginaItens.length} pedidos desta página.</span>}
             </div>
           )}
 
@@ -262,52 +472,44 @@ export default function Pedidos() {
               <div className="text-sm text-dim mt-1">Ajuste o filtro, o período ou a busca.</div>
             </div>
           ) : (
-            <div className="lg:grid lg:gap-4 lg:items-start" style={{ gridTemplateColumns: '1fr 372px' }}>
-              <div className="space-y-2.5">
-                {filtrada.map((p) => (
-                  <Card key={p.id} p={p} ativo={ativo === p.id} sel={sel.has(p.id)}
-                    onOpen={() => abrir(p)} onToggleSel={() => toggleSel(p.id)} />
-                ))}
-                {pedidos.length < (paging.total || 0) && (
-                  <button onClick={carregarMais} disabled={carregandoMais} className="glass rounded-xl w-full py-2.5 text-sm text-dim hover:text-fg inline-flex items-center justify-center gap-2">
-                    {carregandoMais ? <Loader2 size={15} className="animate-spin" /> : null} Carregar mais ({pedidos.length} de {paging.total})
-                  </button>
-                )}
+            <div className={ativoPedido ? 'grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(380px,460px)] gap-4 items-start' : ''}>
+              <div>
+                {paginas > 1 && <div className="mb-3"><Paginacao page={pageSafe} total={paginas} onIr={setPage} /></div>}
+                <div className="space-y-2.5">
+                  {paginaItens.map((p) => (
+                    <Card key={p.id} p={p} ativo={ativo === p.id} sel={sel.has(p.id)}
+                      onOpen={() => abrir(p)} onToggleSel={() => toggleSel(p.id)} />
+                  ))}
+                </div>
+                {paginas > 1 && <div className="mt-4"><Paginacao page={pageSafe} total={paginas} onIr={setPage} /></div>}
+                <div className="text-[11px] text-faint text-center mt-3">
+                  Mostrando {(pageSafe - 1) * PAGE_SIZE + 1}–{Math.min(pageSafe * PAGE_SIZE, filtrada.length)} de {filtrada.length}
+                  {busca.trim() ? ` (filtro de "${busca.trim()}")` : ''} · janela de {periodo}d com {paging.carregados ?? (pedidos || []).length} pedidos carregados
+                </div>
               </div>
 
-              <div className={`mt-2.5 lg:mt-0 ${ativoPedido ? '' : 'hidden lg:block'}`}>
-                {ativoPedido
-                  ? <Drawer p={ativoPedido} envio={ativoPedido.shipping_id ? envios[ativoPedido.shipping_id] : null}
-                      baixando={baixando === ativoPedido.shipping_id} onEtiqueta={() => baixarEtiqueta(ativoPedido.shipping_id)}
-                      onClose={() => setAtivo(null)} />
-                  : <div className="glass rounded-2xl p-6 text-center text-sm text-faint sticky" style={{ top: 16 }}>Selecione um pedido para ver o repasse, o endereço real e a logística.</div>}
-              </div>
+              {ativoPedido && (
+                <div className="xl:sticky xl:top-2">
+                  <Drawer p={ativoPedido} envio={ativoPedido.shipping_id ? envios[ativoPedido.shipping_id] : null}
+                    baixando={baixando === String(ativoPedido.shipping_id)} onEtiqueta={() => baixarEtiqueta(ativoPedido.shipping_id)}
+                    onClose={() => setAtivo(null)} />
+                </div>
+              )}
             </div>
           )}
+
+          <div className="text-[10.5px] text-faint mt-4 leading-relaxed border-t pt-3" style={{ borderColor: 'var(--glass-border)' }}>
+            As abas seguem o status do pedido no Mercado Livre. <b>Enviado</b> e <b>Entregue</b> dependem do status do envio (aparecem como selo no card quando o ML traz na busca, e sempre no detalhe ao abrir o pedido) — a listagem por esses estados chega com os webhooks. A tarifa vem do próprio pedido. Preço Bling, Anúncio ML e imagem só aparecem quando os catálogos estão sincronizados com o mesmo SKU. Etiqueta de pedidos <b>Full</b> é emitida pelo próprio Mercado Livre.
+          </div>
         </>
       )}
-    </Shell>
-  )
-}
 
-function Shell({ children }) {
-  return (
-    <div className="max-w-5xl mx-auto">
-      <div className="flex items-start justify-between gap-3 flex-wrap mb-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <Package size={20} className="text-accent" />
-            <span className="font-display font-semibold text-lg">Pedidos</span>
-            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'rgba(242,194,0,.18)', color: ML }}>Mercado Livre</span>
-          </div>
-          <div className="text-sm text-dim mt-1">Cada pedido com o resultado real — vendido, tarifa, custo e margem — além do nome e endereço reais do comprador e a etiqueta oficial.</div>
-        </div>
-      </div>
-      {children}
+      {personalizar && <PersonalizarModal onClose={() => setPersonalizar(false)} />}
     </div>
   )
 }
 
+/* =========================================================================== */
 function Kpi({ label, valor, sub, cor, icon, destaque }) {
   return (
     <div className="rounded-xl px-3 py-2.5" style={{ background: destaque ? 'rgba(47,217,141,.07)' : 'var(--surface)', border: `1px solid ${destaque ? 'rgba(47,217,141,.3)' : 'var(--glass-border)'}` }}>
@@ -377,6 +579,7 @@ function Cell({ label, valor, sub, cor, forte, dim, destaque }) {
 function Card({ p, ativo, onOpen, sel, onToggleSel }) {
   const [imgErro, setImgErro] = useState(false)
   const st = ST_PEDIDO[p.status] || { t: p.status, c: 'var(--dim)' }
+  const stEnv = p.envio_status ? (ST_ENVIO[p.envio_status] || { t: p.envio_status, c: 'var(--dim)' }) : null
   const itens = p.itens || []
   const principal = itens[0] || {}
   const extras = itens.length - 1
@@ -417,6 +620,7 @@ function Card({ p, ativo, onOpen, sel, onToggleSel }) {
           <div className="flex items-center gap-1.5 mt-1 flex-wrap">
             <span className="text-[10px] px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'rgba(0,0,0,.2)', color: 'var(--dim)' }}><User size={10} /> {p.buyer?.nickname || 'comprador'}</span>
             <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: 'var(--glass-hover)', color: st.c }}>{st.t}</span>
+            {stEnv && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'var(--glass-hover)', color: stEnv.c }}><Truck size={10} /> {stEnv.t}</span>}
           </div>
         </button>
         <button onClick={onOpen} className="text-right shrink-0">
@@ -485,11 +689,11 @@ function Drawer({ p, envio, baixando, onEtiqueta, onClose }) {
   const cor = moneyCor(r.liquido, r.margem)
   const sid = p.shipping_id
   const dest = envio && envio !== 'loading' && envio !== 'erro' ? extrairDestino(envio) : null
-  const shipStatus = envio && envio !== 'loading' && envio !== 'erro' ? envio.status : null
+  const shipStatus = envio && envio !== 'loading' && envio !== 'erro' ? envio.status : (p.envio_status || null)
   const stEnv = shipStatus ? (ST_ENVIO[shipStatus] || { t: shipStatus, c: 'var(--dim)' }) : null
 
   return (
-    <div className="glass rounded-2xl overflow-hidden sticky" style={{ top: 16, borderColor: 'var(--accent)' }}>
+    <div className="glass rounded-2xl overflow-hidden" style={{ borderColor: 'var(--accent)' }}>
       <div className="px-4 py-3 flex items-center gap-2.5" style={{ borderBottom: '1px solid var(--glass-border)' }}>
         <span className="grid place-items-center shrink-0" style={{ width: 34, height: 34, borderRadius: 99, background: 'var(--accent2)', color: '#fff', fontWeight: 800, fontSize: 13 }}>{inicial}</span>
         <div className="flex-1 min-w-0">
@@ -559,6 +763,41 @@ function Drawer({ p, envio, baixando, onEtiqueta, onClose }) {
             <Timeline orderStatus={p.status} shipStatus={shipStatus} />
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+function PersonalizarModal({ onClose }) {
+  const [rem, setRem] = useState(() => lerRemetente())
+  const set = (campo) => (e) => setRem((r) => ({ ...r, [campo]: e.target.value }))
+  const salvar = () => { salvarRemetente(rem); onClose() }
+  const campo = (label, chave, ph) => (
+    <label className="block">
+      <span className="text-[11px] text-faint font-medium">{label}</span>
+      <input value={rem[chave] || ''} onChange={set(chave)} placeholder={ph}
+        className="w-full mt-1 bg-transparent rounded-lg px-3 py-2 text-sm text-fg outline-none" style={{ border: '1px solid var(--glass-border)' }} />
+    </label>
+  )
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center p-4" style={{ background: 'rgba(0,0,0,.55)' }} onClick={onClose}>
+      <div className="glass rounded-2xl w-full max-w-md" style={{ background: 'var(--surface)' }} onClick={(e) => e.stopPropagation()}>
+        <div className="px-4 py-3 flex items-center gap-2" style={{ borderBottom: '1px solid var(--glass-border)' }}>
+          <SlidersHorizontal size={16} className="text-accent" />
+          <span className="font-semibold">Remetente da impressão</span>
+          <button onClick={onClose} className="ml-auto text-faint hover:text-fg"><X size={18} /></button>
+        </div>
+        <div className="p-4 space-y-3">
+          <p className="text-[11.5px] text-dim">Estes dados aparecem no topo da folha por pedido e na lista de separação. Ficam salvos só neste navegador.</p>
+          {campo('Nome / Loja', 'nome', 'Sóstrass Armarinhos')}
+          {campo('CNPJ', 'cnpj', '00.000.000/0001-00')}
+          {campo('Endereço', 'endereco', 'Rua, nº, bairro — Limeira/SP')}
+          {campo('Telefone', 'telefone', '(19) 90000-0000')}
+        </div>
+        <div className="px-4 py-3 flex justify-end gap-2" style={{ borderTop: '1px solid var(--glass-border)' }}>
+          <button onClick={onClose} className="text-sm px-3 py-1.5 rounded-lg glass text-dim hover:text-fg">Cancelar</button>
+          <button onClick={salvar} className="text-sm px-4 py-1.5 rounded-lg text-white inline-flex items-center gap-1.5" style={{ background: 'var(--accent)' }}><Check size={14} /> Salvar</button>
+        </div>
       </div>
     </div>
   )
