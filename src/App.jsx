@@ -1,5 +1,5 @@
 import { useEffect, useState, lazy, Suspense } from 'react'
-import { LayoutDashboard, Boxes, Calculator, SatelliteDish, FileText, Sparkles, Aperture, Bot, Settings, Sun, Moon, LogOut, Plug, ShoppingBag, CalendarDays, Crown } from 'lucide-react'
+import { LayoutDashboard, Boxes, Calculator, SatelliteDish, FileText, Sparkles, Aperture, Bot, Settings, Sun, Moon, LogOut, Plug, ShoppingBag, CalendarDays, Crown, Inbox } from 'lucide-react'
 import { api, getToken, setToken } from './api.js'
 import { useToast } from './toast.jsx'
 import NotificacoesGlobais from './Notificacoes.jsx'
@@ -16,11 +16,13 @@ const Estudio = lazy(() => import('./Estudio.jsx'))
 const Agentes = lazy(() => import('./Agentes.jsx'))
 const Configuracoes = lazy(() => import('./Configuracoes.jsx'))
 const Shopee = lazy(() => import('./Shopee.jsx'))
+const Atendimento = lazy(() => import('./Atendimento.jsx'))
 
 const TITULOS = {
   dashboard: 'Inteligência Comercial',
   catalogo: 'Catálogo',
   shopee: 'Shopee',
+  atendimento: 'Atendimento',
   precificacao: 'Precificação por canal',
   radar: 'Radar de mercado',
   nfe: 'Notas fiscais',
@@ -35,6 +37,7 @@ const DESCRICOES = {
   dashboard: 'Visão geral de vendas, margem e capital parado',
   catalogo: 'Seu catálogo do Bling, sincronizado e atualizado por webhook',
   shopee: 'Boost, promoções, avaliações e saúde da loja',
+  atendimento: 'Perguntas dos compradores, multicanal, com IA',
   precificacao: 'Preço ideal por canal a partir do custo e das taxas',
   radar: 'Acompanhamento de concorrentes e preços do mercado',
   nfe: 'Emissão e gestão de notas fiscais',
@@ -112,6 +115,7 @@ export default function App() {
           <NavItem icon={<FileText size={18} />} label="Notas fiscais" active={view === 'nfe'} onClick={() => setView('nfe')} />
           <NavSecao>Canais</NavSecao>
           <NavItem icon={<ShoppingBag size={18} />} label="Shopee" active={view === 'shopee'} onClick={() => setView('shopee')} />
+          <NavItem icon={<Inbox size={18} />} label="Atendimento" active={view === 'atendimento'} onClick={() => setView('atendimento')} />
           <NavItem icon={<SatelliteDish size={18} />} label="Radar" active={view === 'radar'} onClick={() => setView('radar')} />
           <NavSecao>Inteligência</NavSecao>
           <NavItem icon={<Sparkles size={18} />} label="Central IA" active={view === 'ia'} onClick={() => setView('ia')} />
@@ -174,6 +178,7 @@ export default function App() {
             {view === 'estudio' && <Estudio />}
             {view === 'agentes' && <Agentes />}
             {view === 'shopee' && <Shopee />}
+            {view === 'atendimento' && <Atendimento />}
             {view === 'configuracoes' && <Configuracoes />}
           </Suspense>
         </main>

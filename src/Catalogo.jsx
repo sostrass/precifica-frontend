@@ -736,6 +736,8 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
   const [qual, setQual] = useState(null)
   const [carregandoQual, setCarregandoQual] = useState(false)
   const [anatomia, setAnatomia] = useState(null)
+  const [anatCanal, setAnatCanal] = useState('shopee')
+  const [mlSnap, setMlSnap] = useState(null)
   const [mNome, setMNome] = useState('')
   const [mPreco, setMPreco] = useState('')
   const [salvandoManual, setSalvandoManual] = useState(false)
@@ -784,6 +786,15 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
       .finally(() => { if (vivo) setCarregandoShopee(false) })
     return () => { vivo = false }
   }, [produto.sku])
+
+  // snapshot direto do Mercado Livre (Funil, Radar e tarifa real) — best-effort, some se não conectado
+  useEffect(() => {
+    let vivo = true
+    api.produtoMercadolivre(produto.id)
+      .then((d) => { if (vivo) setMlSnap(d) })
+      .catch(() => { if (vivo) setMlSnap(null) })
+    return () => { vivo = false }
+  }, [produto.id])
 
   const [reviews, setReviews] = useState(null)
   const [carregandoReviews, setCarregandoReviews] = useState(false)
@@ -860,17 +871,24 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
     return () => { vivo = false }
   }, [aba, qual, produto.id])
 
-  // anatomia do líquido (cascata) na aba Preço & Margem — simula a Shopee no preço de lista atual
+  // anatomia do líquido (cascata) na aba Preço & Margem — simula o canal selecionado no preço de lista atual
   useEffect(() => {
-    if (aba !== 'preco' || !shopeeItem) return
-    const lista = Number(shopeeItem.preco_original || shopeeItem.preco || 0)
+    if (aba !== 'preco') return
+    let lista = 0
+    if (anatCanal === 'shopee') {
+      if (!shopeeItem) { setAnatomia(null); return }
+      lista = Number(shopeeItem.preco_original || shopeeItem.preco || 0)
+    } else {
+      const mlRow = (sinc?.canais_painel || []).find((c) => c.canal === 'mercadolivre')
+      lista = Number(mlRow?.preco_registrado || mlSnap?.item?.preco || 0)
+    }
     if (!lista || lista <= 0) { setAnatomia(null); return }
     let vivo = true
-    api.produtoSimular(produto.id, 'shopee', lista)
+    api.produtoSimular(produto.id, anatCanal, lista)
       .then((d) => { if (vivo) setAnatomia({ ...d, lista }) })
       .catch(() => { if (vivo) setAnatomia(null) })
     return () => { vivo = false }
-  }, [aba, shopeeItem, produto.id])
+  }, [aba, anatCanal, shopeeItem, sinc, mlSnap, produto.id])
 
   // inicializa o preço de simulação da promoção com o preço atual da Shopee (ou Preço Bling)
   useEffect(() => {
@@ -944,16 +962,23 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
         try { await api.precoCanal(produto.id, { id_loja: v.id_loja, preco }); ondeBling = true }
         catch (eB) { avisoBling = ` — gravação no Bling falhou (${eB.message || ''})` }
       }
-      // 2) Shopee: empurra direto no anúncio (imediato), via item_id
+      // 2) Shopee / Mercado Livre: empurra direto no anúncio (imediato), via item_id
       let empurrouShopee = false, avisoShopee = ''
       if (v.canal === 'shopee' && itemId) {
         try { await api.shopeeItemPreco(itemId, preco); empurrouShopee = true }
         catch (e2) { avisoShopee = ` — empurrão direto na Shopee falhou (${e2.message || ''})` }
       }
-      if (!ondeBling && !empurrouShopee) throw new Error('não consegui aplicar em nenhum destino')
-      const onde = ondeBling && empurrouShopee ? 'no Bling e na Shopee'
-        : ondeBling ? 'no Bling' : 'só na Shopee (Bling pendente)'
-      notify(`${mkNome(v)} → ${brl(preco)} ${onde}.${avisoBling}${avisoShopee}`, (avisoBling || avisoShopee) ? 'warn' : 'ok')
+      let empurrouMl = false, avisoMl = ''
+      if (v.canal === 'mercadolivre' && itemId) {
+        try { await api.mlItemPreco(itemId, preco); empurrouMl = true }
+        catch (e3) { avisoMl = ` — empurrão direto no Mercado Livre falhou (${e3.message || ''})` }
+      }
+      const empurrou = empurrouShopee || empurrouMl
+      if (!ondeBling && !empurrou) throw new Error('não consegui aplicar em nenhum destino')
+      const canalNome = empurrouMl ? 'no Mercado Livre' : 'na Shopee'
+      const onde = ondeBling && empurrou ? `no Bling e ${canalNome}`
+        : ondeBling ? 'no Bling' : `só ${canalNome} (Bling pendente)`
+      notify(`${mkNome(v)} → ${brl(preco)} ${onde}.${avisoBling}${avisoShopee}${avisoMl}`, (avisoBling || avisoShopee || avisoMl) ? 'warn' : 'ok')
       setPrecoCanalEdit((m) => { const n = { ...m }; delete n[rowKey]; return n })
       try { const d = await api.produtoSincronizacao(produto.id); setSinc(d) } catch { /* mantém a tabela atual */ }
     } catch (e) { notify('Falha ao aplicar no canal: ' + (e.message || ''), 'danger') }
@@ -1117,6 +1142,34 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
                     <div className="text-[10px] text-faint mt-1.5">Quanto cada canal neta hoje frente ao Preço Bling (100% = bate o alvo).</div>
                   </div>
                 )}
+                {mlSnap && mlSnap.conectado && mlSnap.item && (mlSnap.visitas || mlSnap.radar) && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="rounded-lg p-2.5" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)' }}>
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] uppercase tracking-wide text-faint font-bold">Funil</span>
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: MK.mercadolivre.bg, color: MK.mercadolivre.cor }}>M. Livre</span>
+                      </div>
+                      {mlSnap.visitas && mlSnap.visitas.total != null
+                        ? <>
+                            <div className="num font-bold text-lg mt-1">{Number(mlSnap.visitas.total).toLocaleString('pt-BR')}<span className="text-[10px] text-faint font-normal"> visitas · {mlSnap.visitas.dias}d</span></div>
+                            <div className="text-[10px] text-faint mt-0.5">{vendas > 0 && mlSnap.visitas.total > 0 ? `${((vendas / mlSnap.visitas.total) * 100).toFixed(1)}% de conversão (vendas ÷ visitas)` : 'visitas reais do anúncio'}</div>
+                          </>
+                        : <div className="text-[11px] text-faint mt-2">sem dados de visita ainda</div>}
+                    </div>
+                    <div className="rounded-lg p-2.5" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)' }}>
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] uppercase tracking-wide text-faint font-bold">Radar</span>
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: MK.mercadolivre.bg, color: MK.mercadolivre.cor }}>M. Livre</span>
+                      </div>
+                      {mlSnap.radar && mlSnap.radar.menor
+                        ? <>
+                            <div className="num font-bold text-lg mt-1">{brl(mlSnap.radar.atual || 0)}{mlSnap.radar.diff_pct != null && <span className="text-[10px] ml-1" style={{ color: mlSnap.radar.diff_pct > 0 ? 'var(--danger)' : 'var(--ok)' }}>{mlSnap.radar.diff_pct > 0 ? '+' : ''}{Math.round(mlSnap.radar.diff_pct)}% vs menor</span>}</div>
+                            <div className="text-[10px] text-faint mt-0.5">menor {brl(mlSnap.radar.menor)}{mlSnap.radar.sugerido ? ` · sugerido ${brl(mlSnap.radar.sugerido)}` : ''}</div>
+                          </>
+                        : <div className="text-[11px] text-faint mt-2">sem referência de preço ainda</div>}
+                    </div>
+                  </div>
+                )}
                 <div className="flex items-center gap-2 pt-1">
                   <button onClick={() => setAba('preco')} className="text-xs px-3 py-2 rounded-lg flex items-center gap-1.5 text-white" style={{ background: 'var(--accent)' }}><Percent size={13} /> Ajustar preço</button>
                   <button onClick={onEditarCompleto} className="text-xs px-3 py-2 rounded-lg flex items-center gap-1.5" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)', color: 'var(--dim)' }}><Wand2 size={13} /> IA / Edição completa</button>
@@ -1136,10 +1189,28 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
                   <div className="text-[10px] text-faint mt-1.5">Mude aqui e todos os canais são recalculados (back-cálculo). Custo, NCM, GTIN, peso, título e descrição você ajusta na <button onClick={onEditarCompleto} className="text-accent hover:underline">Edição completa</button>.</div>
                 </div>
                 <div>
+                  {mlSnap && mlSnap.item && mlSnap.item.item_id && (
+                    <div className="flex items-center gap-1.5 mb-2">
+                      <span className="text-[10px] text-faint">Anatomia por canal:</span>
+                      <div className="inline-flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--glass-border)' }}>
+                        {['shopee', 'mercadolivre'].map((cn) => (
+                          <button key={cn} onClick={() => setAnatCanal(cn)} className="text-[10px] font-bold px-2.5 py-1"
+                            style={anatCanal === cn ? { background: (MK[cn] || {}).cor || 'var(--accent)', color: cn === 'mercadolivre' ? '#000' : '#fff' } : { color: 'var(--dim)' }}>
+                            {(MK[cn] || {}).nome || cn}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {anatCanal === 'mercadolivre' && mlSnap?.item?.item_id && (!anatomia || !anatomia.quebra || !anatomia.quebra.length) && (
+                    <div className="text-[10px] text-faint rounded-lg px-3 py-2 mb-3" style={{ background: 'var(--glass-hover)' }}>
+                      Sem cascata do Mercado Livre ainda — cadastre as taxas do canal na Precificação (ou o anúncio está sem preço lido).
+                    </div>
+                  )}
                   {anatomia && anatomia.quebra && anatomia.quebra.length > 0 && (
                     <div className="rounded-lg p-3 mb-3" style={{ background: 'var(--glass-hover)', border: '1px solid var(--glass-border)' }}>
                       <div className="flex items-center justify-between mb-2">
-                        <div className="text-[10px] uppercase tracking-wide text-faint font-bold">Anatomia do líquido · Shopee</div>
+                        <div className="text-[10px] uppercase tracking-wide text-faint font-bold">Anatomia do líquido · {anatCanal === 'mercadolivre' ? 'Mercado Livre' : 'Shopee'}</div>
                         <div className="text-[11px]"><span className="num text-dim">{brl(anatomia.lista)}</span><span className="text-faint mx-1">→</span><span className="num font-bold" style={{ color: 'var(--ok)' }}>{brl(anatomia.liquido)}</span></div>
                       </div>
                       <div className="space-y-1">
@@ -1166,6 +1237,9 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
                       {anatomia.margem != null
                         ? <div className="text-[10px] text-faint mt-2">Margem real neste preço: <b style={{ color: anatomia.margem < 0 ? 'var(--danger)' : 'var(--ok)' }}>{anatomia.margem}%</b>{anatomia.lucro != null ? ` · lucro ${brl(anatomia.lucro)}/un.` : ''}</div>
                         : <div className="text-[10px] text-faint mt-2">Cadastre o custo do produto pra ver a margem real desta venda.</div>}
+                      {anatCanal === 'mercadolivre' && mlSnap?.tarifa_real?.comissao_pct != null && (
+                        <div className="text-[10px] text-faint mt-1">Comissão real do Mercado Livre nesta categoria: <b style={{ color: 'var(--dim)' }}>{mlSnap.tarifa_real.comissao_pct.toFixed(1)}%</b>{mlSnap.tarifa_real.custo_fixo ? ` + custo fixo ${brl(mlSnap.tarifa_real.custo_fixo)}` : ''}. Fonte: API de tarifas do ML.</div>
+                      )}
                     </div>
                   )}
                   <div className="text-[10px] uppercase tracking-wide text-faint font-bold mb-2">Valor por marketplace — edite a lista e aplique</div>
@@ -1223,7 +1297,7 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
                             </tbody>
                           </table>
                         </div>}
-                  <div className="text-[10px] text-faint mt-1.5">"Lista" vem pré-preenchida com o preço que neta o Preço Bling — você pode digitar outro valor e <b className="text-fg">Aplicar</b>. Grava no vínculo do Bling e, na Shopee, empurra direto no anúncio. O "Líquido" recalcula após aplicar.</div>
+                  <div className="text-[10px] text-faint mt-1.5">"Lista" vem pré-preenchida com o preço que neta o Preço Bling — você pode digitar outro valor e <b className="text-fg">Aplicar</b>. Grava no vínculo do Bling e, na Shopee e no Mercado Livre, empurra direto no anúncio. O "Líquido" recalcula após aplicar.</div>
                 </div>
               </>
             )}
