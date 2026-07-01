@@ -1,5 +1,5 @@
 import { useEffect, useState, lazy, Suspense } from 'react'
-import { LayoutDashboard, Boxes, Calculator, SatelliteDish, FileText, Sparkles, Aperture, Bot, Settings, Sun, Moon, LogOut, Plug, ShoppingBag, CalendarDays, Crown, Inbox } from 'lucide-react'
+import { LayoutDashboard, Boxes, Calculator, SatelliteDish, FileText, Sparkles, Aperture, Bot, Settings, Sun, Moon, LogOut, Plug, ShoppingBag, CalendarDays, Crown, Inbox, Package } from 'lucide-react'
 import { api, getToken, setToken } from './api.js'
 import { useToast } from './toast.jsx'
 import NotificacoesGlobais from './Notificacoes.jsx'
@@ -17,12 +17,14 @@ const Agentes = lazy(() => import('./Agentes.jsx'))
 const Configuracoes = lazy(() => import('./Configuracoes.jsx'))
 const Shopee = lazy(() => import('./Shopee.jsx'))
 const Atendimento = lazy(() => import('./Atendimento.jsx'))
+const Pedidos = lazy(() => import('./Pedidos.jsx'))
 
 const TITULOS = {
   dashboard: 'Inteligência Comercial',
   catalogo: 'Catálogo',
   shopee: 'Shopee',
   atendimento: 'Atendimento',
+  pedidos: 'Pedidos',
   precificacao: 'Precificação por canal',
   radar: 'Radar de mercado',
   nfe: 'Notas fiscais',
@@ -38,6 +40,7 @@ const DESCRICOES = {
   catalogo: 'Seu catálogo do Bling, sincronizado e atualizado por webhook',
   shopee: 'Boost, promoções, avaliações e saúde da loja',
   atendimento: 'Perguntas dos compradores, multicanal, com IA',
+  pedidos: 'Pedidos, endereço real e etiqueta oficial',
   precificacao: 'Preço ideal por canal a partir do custo e das taxas',
   radar: 'Acompanhamento de concorrentes e preços do mercado',
   nfe: 'Emissão e gestão de notas fiscais',
@@ -116,6 +119,7 @@ export default function App() {
           <NavSecao>Canais</NavSecao>
           <NavItem icon={<ShoppingBag size={18} />} label="Shopee" active={view === 'shopee'} onClick={() => setView('shopee')} />
           <NavItem icon={<Inbox size={18} />} label="Atendimento" active={view === 'atendimento'} onClick={() => setView('atendimento')} />
+          <NavItem icon={<Package size={18} />} label="Pedidos" active={view === 'pedidos'} onClick={() => setView('pedidos')} />
           <NavItem icon={<SatelliteDish size={18} />} label="Radar" active={view === 'radar'} onClick={() => setView('radar')} />
           <NavSecao>Inteligência</NavSecao>
           <NavItem icon={<Sparkles size={18} />} label="Central IA" active={view === 'ia'} onClick={() => setView('ia')} />
@@ -179,6 +183,7 @@ export default function App() {
             {view === 'agentes' && <Agentes />}
             {view === 'shopee' && <Shopee />}
             {view === 'atendimento' && <Atendimento />}
+            {view === 'pedidos' && <Pedidos />}
             {view === 'configuracoes' && <Configuracoes />}
           </Suspense>
         </main>

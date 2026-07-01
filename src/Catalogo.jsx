@@ -743,6 +743,8 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
   const [mlPeso, setMlPeso] = useState('')
   const [mlDesc, setMlDesc] = useState('')
   const [mlQualBusy, setMlQualBusy] = useState('')
+  const [mlRadarFull, setMlRadarFull] = useState(null)
+  const [carregandoMlRadar, setCarregandoMlRadar] = useState(false)
   const [mNome, setMNome] = useState('')
   const [mPreco, setMPreco] = useState('')
   const [salvandoManual, setSalvandoManual] = useState(false)
@@ -909,6 +911,18 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
     return () => { vivo = false }
   }, [aba, qual, produto.id])
 
+  // radar nativo do Mercado Livre — carrega ao abrir a aba Radar
+  useEffect(() => {
+    if (aba !== 'radar' || !mlSnap?.item?.item_id || mlRadarFull !== null) return
+    let vivo = true
+    setCarregandoMlRadar(true)
+    api.mlRadar(mlSnap.item.item_id)
+      .then((d) => { if (vivo) setMlRadarFull(d) })
+      .catch(() => { if (vivo) setMlRadarFull({ erro: true }) })
+      .finally(() => { if (vivo) setCarregandoMlRadar(false) })
+    return () => { vivo = false }
+  }, [aba, mlSnap, mlRadarFull])
+
   // anatomia do líquido (cascata) na aba Preço & Margem — simula o canal selecionado no preço de lista atual
   useEffect(() => {
     if (aba !== 'preco') return
@@ -1067,6 +1081,17 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
     const shopeeRow = canaisPainel.find((c) => c.canal === 'shopee' && c.id_loja)
     if (!shopeeRow) { notify('Sem vínculo Shopee pra aplicar esse preço.', 'warn'); return }
     await aplicarCanal(shopeeRow, v)
+  }
+
+  const aplicarPrecoMl = async (preco) => {
+    if (!preco || preco <= 0) return
+    const row = canaisPainel.find((c) => c.canal === 'mercadolivre')
+    if (row) { await aplicarCanal(row, preco); return }
+    try {
+      await api.mlItemPreco(mlSnap?.item?.item_id, preco)
+      notify(`Mercado Livre → ${brl(preco)}.`, 'ok')
+      try { const d = await api.produtoMercadolivre(produto.id); setMlSnap(d) } catch { /* mantém */ }
+    } catch (e) { notify('Falha ao aplicar no Mercado Livre: ' + (e.message || ''), 'danger') }
   }
 
   return (
@@ -1454,6 +1479,67 @@ function CockpitProduto({ produto, onClose, onEditarCompleto, onRadar, onSaved, 
             {aba === 'radar' && (
               <div className="space-y-3">
                 <div className="text-[10px] uppercase tracking-wide text-faint font-bold">Concorrência (Radar)</div>
+                {mlSnap?.item?.item_id && (
+                  <div className="rounded-lg p-3" style={{ background: 'rgba(242,194,0,.06)', border: '1px solid var(--glass-border)' }}>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-[10px] uppercase tracking-wide text-faint font-bold">Radar do Mercado Livre</span>
+                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: MK.mercadolivre.bg, color: MK.mercadolivre.cor }}>nativo</span>
+                    </div>
+                    {carregandoMlRadar
+                      ? <div className="text-faint text-xs flex items-center gap-2 py-2"><Loader2 size={14} className="animate-spin" /> lendo o radar do ML…</div>
+                      : !mlRadarFull || mlRadarFull.erro || (mlRadarFull.menor == null && mlRadarFull.sugerido == null)
+                        ? <div className="text-[11px] text-faint">O Mercado Livre ainda não tem referência de preço pra esse anúncio (precisa de concorrência na mesma ficha/categoria).</div>
+                        : (() => {
+                            const r = mlRadarFull
+                            return (
+                              <>
+                                <div className="grid grid-cols-3 gap-2 mb-2">
+                                  <div className="rounded-lg px-2 py-1.5 text-center" style={{ background: 'rgba(0,0,0,.18)' }}>
+                                    <div className="text-[9px] text-faint uppercase">Seu preço</div>
+                                    <div className="num font-bold text-sm">{r.atual != null ? brl(r.atual) : '—'}</div>
+                                  </div>
+                                  <div className="rounded-lg px-2 py-1.5 text-center" style={{ background: 'rgba(0,0,0,.18)' }}>
+                                    <div className="text-[9px] text-faint uppercase">Menor</div>
+                                    <div className="num font-bold text-sm" style={{ color: 'var(--ok)' }}>{r.menor != null ? brl(r.menor) : '—'}</div>
+                                  </div>
+                                  <div className="rounded-lg px-2 py-1.5 text-center" style={{ background: 'rgba(0,0,0,.18)' }}>
+                                    <div className="text-[9px] text-faint uppercase">Sugerido</div>
+                                    <div className="num font-bold text-sm" style={{ color: 'var(--accent)' }}>{r.sugerido != null ? brl(r.sugerido) : '—'}</div>
+                                  </div>
+                                </div>
+                                {r.diff_pct != null && (
+                                  <div className="text-[11px] mb-2" style={{ color: r.diff_pct > 0 ? 'var(--danger)' : 'var(--ok)' }}>
+                                    {r.diff_pct > 0 ? `Você está ${Math.round(r.diff_pct)}% acima do menor do mercado.` : r.diff_pct < 0 ? `Você está ${Math.abs(Math.round(r.diff_pct))}% abaixo do menor — bem posicionado.` : 'Você está no menor preço do mercado.'}
+                                  </div>
+                                )}
+                                <div className="flex items-center gap-2 mb-2 flex-wrap">
+                                  {r.menor != null && <button onClick={() => aplicarPrecoMl(r.menor)} className="text-[10px] font-medium px-2.5 py-1 rounded" style={{ background: 'rgba(47,217,141,.16)', color: 'var(--ok)' }}>Igualar ao menor</button>}
+                                  {r.sugerido != null && r.aplicavel && <button onClick={() => aplicarPrecoMl(r.sugerido)} className="text-[10px] font-medium px-2.5 py-1 rounded" style={{ background: 'rgba(214,0,127,.14)', color: 'var(--accent)' }}>Usar sugerido</button>}
+                                </div>
+                                {r.concorrentes && r.concorrentes.length > 0 && (
+                                  <div className="rounded-lg overflow-hidden" style={{ border: '1px solid var(--glass-border)' }}>
+                                    <table className="w-full text-xs">
+                                      <thead><tr className="text-faint text-[9px] uppercase" style={{ background: 'var(--glass-hover)' }}>
+                                        <th className="text-left px-2 py-1">Concorrente</th><th className="text-right px-1.5 py-1">Preço</th><th className="text-right px-2 py-1">Vendas</th>
+                                      </tr></thead>
+                                      <tbody>
+                                        {r.concorrentes.slice(0, 6).map((c, i, arr) => (
+                                          <tr key={i} style={i < arr.length - 1 ? { borderBottom: '1px solid var(--glass-border)' } : undefined}>
+                                            <td className="px-2 py-1.5 text-dim truncate" style={{ maxWidth: 150 }}>{c.titulo || c.item_id}</td>
+                                            <td className="px-1.5 py-1.5 text-right num">{c.preco != null ? brl(c.preco) : '—'}</td>
+                                            <td className="px-2 py-1.5 text-right num text-faint">{c.vendas != null ? c.vendas : '—'}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                )}
+                                <div className="text-[9px] text-faint mt-1.5">Radar nativo do Mercado Livre (mesma ficha/categoria). "Igualar" e "Usar sugerido" gravam no Bling e empurram no anúncio.</div>
+                              </>
+                            )
+                          })()}
+                  </div>
+                )}
                 {carregandoRadar
                   ? <div className="text-faint text-xs flex items-center gap-2 py-3"><Loader2 size={14} className="animate-spin" /> lendo o radar…</div>
                   : !temRadar

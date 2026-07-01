@@ -115,7 +115,18 @@ export const api = {
   mlDescricao: (item_id, texto) => req('/api/mercadolivre/descricao', { method: 'POST', body: { item_id, texto } }),
   mlAddFoto: (item_id, url) => req('/api/mercadolivre/anuncio-foto', { method: 'POST', body: { item_id, url } }),
   mlFicha: (item_id, ean, peso) => req('/api/mercadolivre/anuncio-ficha', { method: 'POST', body: { item_id, ean, peso } }),
-  iaDescricao: (b) => req('/api/ia/descricao', { method: 'POST', body: b }),
+  mlRadar: (item_id) => req(`/api/mercadolivre/radar/${item_id}`),
+  // Pedidos & Etiqueta (Mercado Livre)
+  mlPedidos: (status = 'paid', offset = 0) => req(`/api/mercadolivre/pedidos?status=${status}&offset=${offset}`),
+  mlPedido: (id) => req(`/api/mercadolivre/pedido/${id}`),
+  mlEnvio: (shipmentId) => req(`/api/mercadolivre/envio/${shipmentId}`),
+  mlEtiqueta: async (shipmentIds, formato = 'pdf') => {
+    const headers = {}
+    if (getToken()) headers.Authorization = `Bearer ${getToken()}`
+    const res = await fetch(`${BASE}/api/mercadolivre/etiqueta?shipment_ids=${shipmentIds}&formato=${formato}`, { headers })
+    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.detail || `Erro ${res.status}`) }
+    return URL.createObjectURL(await res.blob())
+  },
   // Central de Atendimento (perguntas multicanal + IA)
   atendimentoStatus: () => req('/api/atendimento/status'),
   atendimentoStats: () => req('/api/atendimento/stats'),
