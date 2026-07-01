@@ -122,7 +122,7 @@ export const api = {
   mlPromoRemover: (item_id) => req('/api/mercadolivre/promocoes/remover', { method: 'POST', body: { item_id } }),
   // Pedidos & Etiqueta (Mercado Livre)
   mlPedidos: (status = 'paid', offset = 0) => req(`/api/mercadolivre/pedidos?status=${status}&offset=${offset}`),
-  mlPedidosEnriquecido: (status = 'paid', offset = 0, limit = 30) => req(`/api/mercadolivre/pedidos-enriquecido?status=${status}&offset=${offset}&limit=${limit}`),
+  mlPedidosEnriquecido: (status = 'paid', offset = 0, limit = 30, desde = '') => req(`/api/mercadolivre/pedidos-enriquecido?status=${status}&offset=${offset}&limit=${limit}${desde ? `&desde=${encodeURIComponent(desde)}` : ''}`),
   mlPedido: (id) => req(`/api/mercadolivre/pedido/${id}`),
   mlEnvio: (shipmentId) => req(`/api/mercadolivre/envio/${shipmentId}`),
   mlEtiqueta: async (shipmentIds, formato = 'pdf') => {
