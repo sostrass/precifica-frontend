@@ -4,7 +4,7 @@ import {
   Package, MapPin, RefreshCw, Search, Plug, Loader2, Truck, Filter, Boxes,
   ChevronDown, ChevronUp, ChevronLeft, ChevronRight, User, ExternalLink,
   CheckCircle2, Zap, Check, CheckCheck, AlertTriangle, TrendingUp, Printer,
-  Wallet, DollarSign, Tag, Clock, X, SlidersHorizontal, ClipboardList, FileText, Percent,
+  Wallet, DollarSign, Tag, Clock, X, SlidersHorizontal, ClipboardList, FileText, Percent, PieChart, ArrowUpRight, ArrowDownRight,
   Send, RotateCcw, PackageCheck, CalendarClock, MapPinned, Undo2,
 } from 'lucide-react'
 import { api } from './api.js'
@@ -288,6 +288,9 @@ export default function Pedidos() {
   const [naoLidas, setNaoLidas] = useState(null)
   const [nfeMap, setNfeMap] = useState({})
   const [calAberto, setCalAberto] = useState(false)
+  const [coleta, setColeta] = useState(null)
+  const [compacto, setCompacto] = useState(() => { try { return localStorage.getItem('ped_compacto') === '1' } catch { return false } })
+  const [donut, setDonut] = useState(() => { try { return localStorage.getItem('ped_donut') !== '0' } catch { return true } })
   const rodadasRef = useRef(0)
 
   const checar = useCallback(() => {
@@ -329,6 +332,9 @@ export default function Pedidos() {
       setNaoLidas({ total: d.total || 0, ids })
     }).catch(() => setNaoLidas(null))
   }, [conn?.conta])
+  useEffect(() => { if (conn?.conta) api.mlColeta().then((d) => setColeta(d && d.ok ? d : null)).catch(() => setColeta(null)) }, [conn?.conta])
+  useEffect(() => { try { localStorage.setItem('ped_compacto', compacto ? '1' : '0') } catch (e) { /* noop */ } }, [compacto])
+  useEffect(() => { try { localStorage.setItem('ped_donut', donut ? '1' : '0') } catch (e) { /* noop */ } }, [donut])
   useEffect(() => { rodadasRef.current = 0 }, [periodo, custom])
   useEffect(() => {
     if (!pedidos || !pedidos.length) { setNfeMap({}); return }
@@ -438,20 +444,32 @@ export default function Pedidos() {
   const alvoEtiqueta = useMemo(() => (sel.size ? pedidosSel : paginaItens).filter((p) => p.shipping_id), [sel.size, pedidosSel, paginaItens])
 
   const kpi = useMemo(() => {
-    let receita = 0, tarifas = 0, frete = 0, custo = 0, liquido = 0, unidades = 0, full = 0
+    let receita = 0, tarifas = 0, frete = 0, taxas = 0, liquido = 0, unidades = 0, full = 0
     const porDia = {}
     filtrada.forEach((p) => {
       const r = p.resumo || {}
       if (r.estornado || p.status === 'cancelled') return
       receita += r.receita || 0; tarifas += r.tarifa || 0; frete += r.frete_vendedor || 0
-      custo += r.custo || 0; liquido += r.liquido || 0; unidades += r.unidades || 0
+      taxas += r.taxas || 0; liquido += r.liquido || 0; unidades += r.unidades || 0
       if (p.is_full) full += 1
       const dia = (p.date_created || '').slice(0, 10)
-      if (dia) porDia[dia] = (porDia[dia] || 0) + (r.receita || 0)
+      if (dia) { const d = (porDia[dia] || (porDia[dia] = { rec: 0, ped: 0, liq: 0 })); d.rec += r.receita || 0; d.ped += 1; d.liq += r.liquido || 0 }
     })
     const n = filtrada.length
-    const dias = Object.entries(porDia).sort((a, b) => a[0].localeCompare(b[0])).slice(-14)
-    return { n, receita, tarifas, frete, custosML: tarifas + frete, custo, liquido, unidades, full, ticket: n ? receita / n : 0, margem: receita > 0 ? liquido / receita * 100 : null, dias }
+    const ordenados = Object.keys(porDia).sort((a, b) => a.localeCompare(b))
+    const dias = ordenados.slice(-14).map((k) => [k, porDia[k].rec])
+    const tend = (fn) => {
+      if (ordenados.length < 2) return null
+      const meio = Math.floor(ordenados.length / 2)
+      const ant = ordenados.slice(0, meio), rec = ordenados.slice(meio)
+      const a = fn(ant), b = fn(rec)
+      if (!a || a <= 0) return null
+      return Math.round((b - a) / a * 100)
+    }
+    const mediaCampo = (campo) => (arr) => arr.length ? arr.reduce((s, k) => s + porDia[k][campo], 0) / arr.length : 0
+    const tktMedio = (arr) => { const R = arr.reduce((s, k) => s + porDia[k].rec, 0), P = arr.reduce((s, k) => s + porDia[k].ped, 0); return P ? R / P : 0 }
+    const tendencia = { receita: tend(mediaCampo('rec')), pedidos: tend(mediaCampo('ped')), liquido: tend(mediaCampo('liq')), ticket: tend(tktMedio) }
+    return { n, receita, tarifas, frete, custosML: tarifas + frete, impostos: taxas, liquido, unidades, full, ticket: n ? receita / n : 0, margem: receita > 0 ? liquido / receita * 100 : null, dias, tendencia }
   }, [filtrada])
 
   const ativoPedido = useMemo(() => (pedidos || []).find((p) => p.id === ativo) || null, [pedidos, ativo])
@@ -546,15 +564,16 @@ export default function Pedidos() {
           {/* Baldes reais do envio + período */}
           <div className="flex items-center gap-2 flex-wrap mt-3">
             <span className="text-[10px] uppercase tracking-wide text-faint font-bold">Meus pedidos</span>
-            <div className="flex items-center gap-1.5 flex-wrap">
+            <div className="flex items-center gap-1 flex-wrap p-1.5 rounded-2xl" style={{ background: 'rgba(0,0,0,.28)', border: '1px solid var(--glass-border)' }}>
               {ENVIO_TABS.map((f) => {
                 const on = envioTab === f.id
                 const Icon = f.icon
+                const alerta = f.id === 'fiscal'
                 return (
-                  <button key={f.id} onClick={() => setEnvioTab(f.id)} className="text-xs font-semibold px-3 py-1.5 rounded-full transition-all inline-flex items-center gap-1.5"
-                    style={on ? { background: 'var(--accent)', color: '#fff' } : { border: '1px solid var(--glass-border)', color: 'var(--dim)' }}>
-                    <Icon size={12} /> {f.label}
-                    <span className="text-[10px] font-bold px-1.5 rounded-full num" style={{ background: on ? 'rgba(255,255,255,.22)' : 'var(--glass-hover)', color: on ? '#fff' : 'var(--faint)' }}>{contagens[f.id] ?? 0}</span>
+                  <button key={f.id} onClick={() => setEnvioTab(f.id)} className={`text-xs font-semibold px-3 py-2 rounded-xl transition-all inline-flex items-center gap-2 ${on ? '' : 'hover:bg-white/5'}`}
+                    style={on ? { background: 'linear-gradient(135deg, rgba(214,0,127,.92), rgba(214,0,127,.6))', color: '#fff', boxShadow: '0 6px 18px rgba(214,0,127,.35), inset 0 0 0 1px rgba(255,255,255,.12)' } : { color: 'var(--dim)' }}>
+                    <Icon size={12} style={!on && alerta ? { color: 'var(--danger)' } : undefined} /> {f.label}
+                    <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full num" style={{ background: on ? 'rgba(255,255,255,.22)' : 'var(--glass-hover)', color: on ? '#fff' : 'var(--faint)' }}>{contagens[f.id] ?? 0}</span>
                   </button>
                 )
               })}
@@ -588,29 +607,42 @@ export default function Pedidos() {
           {/* Pagamento + alertas (fiscal / devolução) */}
           <div className="flex items-center gap-2 flex-wrap mt-2">
             <span className="text-[10px] uppercase tracking-wide text-faint font-bold">Pagamento</span>
-            {PGTO_CHIPS.map((c) => {
-              const on = pgto === c.id
-              return (
-                <button key={c.id} onClick={() => setPgto(c.id)} className="text-[11px] font-medium px-2.5 py-1 rounded-lg inline-flex items-center gap-1.5"
-                  style={on ? { background: 'rgba(214,0,127,.14)', color: 'var(--accent)' } : { background: 'rgba(255,255,255,.04)', color: 'var(--dim)' }}>
-                  {c.label}<span className="num text-faint">{c.id === 'todos' ? contPgto.todos : (contPgto[c.id] ?? 0)}</span>
-                </button>
-              )
-            })}
-            <button onClick={() => setFlagFiscal((v) => !v)} className="text-[11px] font-semibold px-2.5 py-1 rounded-lg inline-flex items-center gap-1.5 ml-1"
+            <div className="inline-flex rounded-xl overflow-hidden" style={{ border: '1px solid var(--glass-border)' }}>
+              {PGTO_CHIPS.map((c, i) => {
+                const on = pgto === c.id
+                return (
+                  <button key={c.id} onClick={() => setPgto(c.id)} className="text-[11px] font-semibold px-2.5 py-1.5 inline-flex items-center gap-1.5"
+                    style={{ ...(on ? { background: 'rgba(214,0,127,.16)', color: 'var(--accent)' } : { background: 'transparent', color: 'var(--faint)' }), borderLeft: i ? '1px solid var(--glass-border)' : 'none' }}>
+                    {c.label}<span className="num" style={{ opacity: 0.8 }}>{c.id === 'todos' ? contPgto.todos : (contPgto[c.id] ?? 0)}</span>
+                  </button>
+                )
+              })}
+            </div>
+            <span className="w-px h-5 mx-0.5" style={{ background: 'var(--glass-border)' }} />
+            <button onClick={() => setFlagFiscal((v) => !v)} className="text-[11px] font-semibold px-3 py-1.5 rounded-xl inline-flex items-center gap-1.5 transition-all"
               style={flagFiscal ? { background: 'rgba(255,122,122,.16)', color: 'var(--danger)', border: '1px solid var(--danger)' } : { border: '1px solid var(--glass-border)', color: nFiscal ? 'var(--danger)' : 'var(--faint)' }} title="Pedidos sem dados fiscais (bloqueiam NF-e/despacho)">
               <AlertTriangle size={12} /> Sem dados fiscais <span className="num">{nFiscal}</span>
             </button>
-            <button onClick={() => setFlagDevol((v) => !v)} className="text-[11px] font-semibold px-2.5 py-1 rounded-lg inline-flex items-center gap-1.5"
+            <button onClick={() => setFlagDevol((v) => !v)} className="text-[11px] font-semibold px-3 py-1.5 rounded-xl inline-flex items-center gap-1.5 transition-all"
               style={flagDevol ? { background: 'rgba(224,162,60,.16)', color: 'var(--warn)', border: '1px solid var(--warn)' } : { border: '1px solid var(--glass-border)', color: nDevol ? 'var(--warn)' : 'var(--faint)' }} title="Devoluções / pós-venda">
               <Undo2 size={12} /> Devoluções <span className="num">{nDevol}</span>
             </button>
             {nNaoLidas > 0 && (
-              <button onClick={() => setFlagNaoLidas((v) => !v)} className="text-[11px] font-semibold px-2.5 py-1 rounded-lg inline-flex items-center gap-1.5"
+              <button onClick={() => setFlagNaoLidas((v) => !v)} className="text-[11px] font-semibold px-3 py-1.5 rounded-xl inline-flex items-center gap-1.5 transition-all"
                 style={flagNaoLidas ? { background: 'var(--accent)', color: '#fff' } : { background: 'rgba(214,0,127,.14)', color: 'var(--accent)' }} title="Mostrar só pedidos com conversa não lida">
                 <Send size={12} /> {nNaoLidas} não lida(s)
               </button>
             )}
+            <div className="ml-auto inline-flex items-center gap-1.5">
+              <div className="inline-flex rounded-xl overflow-hidden" style={{ border: '1px solid var(--glass-border)' }} title="Densidade da lista">
+                <button onClick={() => setCompacto(false)} className="text-[11px] font-bold px-2.5 py-1.5" style={!compacto ? { background: 'var(--accent)', color: '#fff' } : { color: 'var(--faint)' }}>Confortável</button>
+                <button onClick={() => setCompacto(true)} className="text-[11px] font-bold px-2.5 py-1.5" style={{ borderLeft: '1px solid var(--glass-border)', ...(compacto ? { background: 'var(--accent)', color: '#fff' } : { color: 'var(--faint)' }) }}>Compacto</button>
+              </div>
+              <button onClick={() => setDonut((v) => !v)} className="text-[11px] font-bold px-2.5 py-1.5 rounded-xl inline-flex items-center gap-1.5" title="Anel de margem no card"
+                style={donut ? { background: 'rgba(47,217,141,.14)', color: 'var(--ok)', border: '1px solid rgba(47,217,141,.4)' } : { border: '1px solid var(--glass-border)', color: 'var(--faint)' }}>
+                <PieChart size={12} /> Donut
+              </button>
+            </div>
           </div>
         </div>
 
@@ -618,6 +650,15 @@ export default function Pedidos() {
           <div className="text-dim text-sm flex items-center gap-2 p-4"><Loader2 size={16} className="animate-spin" /> Carregando o período…</div>
         ) : (
           <>
+            {coleta && coleta.principal && (coleta.principal.de || coleta.principal.corte) && (
+              <div className="rounded-xl px-3 py-2 flex items-center gap-3 flex-wrap mt-3 mb-1" style={{ background: 'rgba(214,0,127,.06)', border: '1px solid rgba(214,0,127,.25)' }}>
+                <span className="text-[11px] font-bold inline-flex items-center gap-1.5" style={{ color: 'var(--accent)' }}><Truck size={13} /> Coleta de hoje</span>
+                {(coleta.principal.de || coleta.principal.ate) && <span className="text-[13px] num font-semibold" style={{ color: 'var(--fg)' }}>{coleta.principal.de || '—'}{coleta.principal.ate ? ` – ${coleta.principal.ate}` : ''}</span>}
+                {coleta.principal.corte && <span className="text-[11px] text-dim">corte às <b className="num" style={{ color: 'var(--warn)' }}>{coleta.principal.corte}</b></span>}
+                {coleta.principal.carrier && <span className="text-[11px] text-faint inline-flex items-center gap-1"><Truck size={11} /> {coleta.principal.carrier}</span>}
+                {coleta.codigo_autorizacao && <span className="text-[11px] text-dim ml-auto">Código de autorização: <b className="num" style={{ color: 'var(--accent)' }}>{coleta.codigo_autorizacao}</b></span>}
+              </div>
+            )}
             {nSync > 0 && (
               <div className="rounded-xl px-3 py-2 flex items-center gap-3 flex-wrap mt-3 mb-1" style={{ background: syncErro ? 'rgba(255,122,122,.08)' : 'rgba(242,194,0,.08)', border: `1px solid ${syncErro ? 'var(--danger)' : 'rgba(242,194,0,.3)'}` }}>
                 {sincronizando ? <Loader2 size={14} className="animate-spin" style={{ color: ML }} /> : syncErro ? <AlertTriangle size={14} style={{ color: 'var(--danger)' }} /> : <RotateCcw size={14} style={{ color: ML }} />}
@@ -678,7 +719,7 @@ export default function Pedidos() {
                   {paginas > 1 && <div className="mb-3"><Paginacao page={pageSafe} total={paginas} onIr={setPage} /></div>}
                   <div className="space-y-2.5">
                     {paginaItens.map((p) => (
-                      <Card key={p.id} p={p} nfe={nfeMap[String(p.id)]} ativo={ativo === p.id} sel={sel.has(p.id)}
+                      <Card key={p.id} p={p} nfe={nfeMap[String(p.id)]} corteHoje={coleta && coleta.principal ? coleta.principal.corte : null} compacto={compacto} donut={donut} ativo={ativo === p.id} sel={sel.has(p.id)}
                         onOpen={() => abrir(p)} onToggleSel={() => toggleSel(p.id)} />
                     ))}
                   </div>
@@ -715,49 +756,74 @@ export default function Pedidos() {
 }
 
 /* =========================================================================== */
-function Kpi({ label, valor, sub, cor, icon, destaque }) {
+
+function Kpi({ label, valor, sub, cor, icon, destaque, trend, trendUpGood = true }) {
+  const temTrend = trend != null && !isNaN(trend) && trend !== 0
+  const positivo = trend > 0
+  const bom = positivo === trendUpGood
   return (
     <div className="rounded-xl px-3 py-2.5" style={{ background: destaque ? 'rgba(47,217,141,.07)' : 'var(--surface)', border: `1px solid ${destaque ? 'rgba(47,217,141,.3)' : 'var(--glass-border)'}` }}>
       <div className="text-[9px] uppercase tracking-wide text-faint font-bold flex items-center gap-1.5">{icon}{label}</div>
-      <div className="num font-bold text-lg leading-tight mt-0.5" style={cor ? { color: cor } : undefined}>{valor}</div>
-      {sub && <div className="text-[10px]" style={cor ? { color: cor } : { color: 'var(--faint)' }}>{sub}</div>}
+      <div className="num font-bold leading-tight mt-1" style={{ fontSize: 17, ...(cor ? { color: cor } : {}) }}>{valor}</div>
+      <div className="flex items-center gap-1.5 mt-0.5">
+        {temTrend && (
+          <span className="text-[9.5px] font-extrabold inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full num" style={{ background: bom ? 'rgba(47,217,141,.14)' : 'rgba(255,122,122,.14)', color: bom ? 'var(--ok)' : 'var(--danger)' }}>
+            {positivo ? <ArrowUpRight size={9} /> : <ArrowDownRight size={9} />}{Math.abs(trend)}%
+          </span>
+        )}
+        {sub && <span className="text-[10px]" style={cor && !temTrend ? { color: cor } : { color: 'var(--faint)' }}>{sub}</span>}
+      </div>
     </div>
   )
 }
+
 function Estatisticas({ s, aba }) {
   const maxDia = Math.max(1, ...s.dias.map((d) => d[1]))
+  const idxPico = s.dias.reduce((mi, d, i, arr) => (d[1] > arr[mi][1] ? i : mi), 0)
   const diaLabel = (iso) => { const d = new Date(iso + 'T12:00:00'); return isNaN(d) ? '' : d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) }
+  const t = s.tendencia || {}
+  const margemCor = s.margem == null ? 'var(--faint)' : (s.margem < 10 ? 'var(--warn)' : 'var(--ok)')
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
-        <Kpi label={`Pedidos · ${aba}`} icon={<Package size={11} />} valor={s.n.toLocaleString('pt-BR')} sub={`${s.unidades} un.`} />
-        <Kpi label="Receita" icon={<Wallet size={11} />} valor={brl0(s.receita)} sub="na aba" />
-        <Kpi label="Ticket médio" icon={<DollarSign size={11} />} valor={brl(s.ticket)} sub="por pedido" />
-        <Kpi label="Custos ML" icon={<Tag size={11} />} valor={'−' + brl0(s.custosML)} cor="var(--warn)" sub={s.frete > 0 ? `comissão ${brl0(s.tarifas)} + frete ${brl0(s.frete)}` : (s.receita > 0 ? `${Math.round(s.tarifas / s.receita * 100)}% da receita` : null)} />
-        <Kpi label="Taxas mkt (config)" icon={<Percent size={11} />} valor={'−' + brl0(s.impostos != null ? s.impostos : s.custo)} cor="var(--warn)" sub="faixa + imposto + cartão" />
-        <Kpi label="Líquido" icon={<TrendingUp size={11} />} valor={brl0(s.liquido)} cor="var(--ok)" sub={s.margem != null ? `margem ${s.margem.toFixed(0)}%` : null} destaque />
+        <Kpi label={`Pedidos · ${aba}`} icon={<Package size={11} />} valor={s.n.toLocaleString('pt-BR')} sub={`${s.unidades} un.`} trend={t.pedidos} />
+        <Kpi label="Receita" icon={<Wallet size={11} />} valor={brl0(s.receita)} sub="no período" trend={t.receita} />
+        <Kpi label="Ticket médio" icon={<DollarSign size={11} />} valor={brl(s.ticket)} sub="por pedido" trend={t.ticket} />
+        <Kpi label="Custos ML" icon={<Tag size={11} />} valor={'−' + brl0(s.custosML)} cor="var(--warn)" sub={s.frete > 0 ? `com. ${brl0(s.tarifas)} + frete ${brl0(s.frete)}` : (s.receita > 0 ? `${Math.round(s.tarifas / s.receita * 100)}% da receita` : null)} />
+        <Kpi label="Taxas mkt (config)" icon={<Percent size={11} />} valor={'−' + brl0(s.impostos || 0)} cor="var(--warn)" sub="faixa + imposto + cartão" />
+        <Kpi label="Líquido" icon={<TrendingUp size={11} />} valor={brl0(s.liquido)} cor="var(--ok)" sub={s.margem != null ? `margem ${s.margem.toFixed(0)}%` : null} trend={t.liquido} destaque />
       </div>
       <div className="flex gap-3 flex-col md:flex-row">
         <div className="glass rounded-xl p-3 flex-[2] min-w-0">
-          <div className="text-[9px] uppercase tracking-wide text-faint font-bold mb-2 flex items-center gap-1.5"><TrendingUp size={12} /> Receita por dia</div>
+          <div className="text-[9px] uppercase tracking-wide text-faint font-bold mb-3 flex items-center gap-1.5"><TrendingUp size={12} /> Receita por dia</div>
           {s.dias.length === 0 ? <div className="text-[11px] text-faint">Sem dados no período.</div> : (
-            <div className="flex items-end gap-1.5" style={{ height: 70 }}>
-              {s.dias.map((d, i) => (
-                <div key={i} className="flex-1 flex flex-col items-center gap-1 min-w-0">
-                  <div className="w-full rounded-t" style={{ height: Math.max(4, d[1] / maxDia * 56), background: 'linear-gradient(180deg,var(--accent),var(--accent2))' }} title={brl(d[1])} />
-                  <span className="text-[8px] text-faint num truncate w-full text-center">{diaLabel(d[0])}</span>
-                </div>
-              ))}
+            <div className="flex items-end gap-1.5" style={{ height: 92 }}>
+              {s.dias.map((d, i) => {
+                const pico = i === idxPico && d[1] > 0
+                return (
+                  <div key={i} className="flex-1 flex flex-col items-center gap-1 min-w-0">
+                    <span className="text-[8px] num" style={{ color: pico ? 'var(--accent)' : 'transparent', fontWeight: 700, whiteSpace: 'nowrap' }}>{brl0(d[1])}</span>
+                    <div className="w-full rounded-t-md" style={{ height: Math.max(4, d[1] / maxDia * 62), background: pico ? 'linear-gradient(180deg,#ff2b9d,var(--accent))' : 'linear-gradient(180deg,var(--accent),rgba(214,0,127,.35))', boxShadow: pico ? '0 0 16px rgba(214,0,127,.5)' : 'none' }} title={brl(d[1])} />
+                    <span className="text-[8px] text-faint num truncate w-full text-center">{diaLabel(d[0])}</span>
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>
         <div className="glass rounded-xl p-3 flex-1 min-w-0">
           <div className="text-[9px] uppercase tracking-wide text-faint font-bold mb-2">Resumo · «{aba}»</div>
-          <div className="space-y-1.5 text-[11px]">
-            <div className="flex items-center gap-2"><Package size={11} className="text-faint" /><span className="flex-1 text-dim">Pedidos</span><span className="num font-bold">{s.n}</span></div>
-            <div className="flex items-center gap-2"><Boxes size={11} className="text-faint" /><span className="flex-1 text-dim">Unidades</span><span className="num font-bold">{s.unidades}</span></div>
-            <div className="flex items-center gap-2"><Truck size={11} style={{ color: ML }} /><span className="flex-1 text-dim">Full (ML expede)</span><span className="num font-bold">{s.full}</span></div>
-            <div className="flex items-center gap-2"><TrendingUp size={11} className="text-faint" /><span className="flex-1 text-dim">Margem média</span><span className="num font-bold" style={{ color: 'var(--ok)' }}>{s.margem != null ? `${s.margem.toFixed(0)}%` : '—'}</span></div>
+          <div className="flex items-center gap-3">
+            <div className="space-y-1.5 text-[11px] flex-1">
+              <div className="flex items-center gap-2"><Package size={11} className="text-faint" /><span className="flex-1 text-dim">Pedidos</span><span className="num font-bold">{s.n}</span></div>
+              <div className="flex items-center gap-2"><Boxes size={11} className="text-faint" /><span className="flex-1 text-dim">Unidades</span><span className="num font-bold">{s.unidades}</span></div>
+              <div className="flex items-center gap-2"><Truck size={11} style={{ color: ML }} /><span className="flex-1 text-dim">Full (ML expede)</span><span className="num font-bold">{s.full}</span></div>
+              <div className="flex items-center gap-2"><Wallet size={11} className="text-faint" /><span className="flex-1 text-dim">Líquido</span><span className="num font-bold" style={{ color: 'var(--ok)' }}>{brl0(s.liquido)}</span></div>
+            </div>
+            <div className="flex flex-col items-center" style={{ flex: 'none' }}>
+              <Donut pct={s.margem} cor={margemCor} size={64} />
+              <span className="text-[8px] uppercase tracking-wide text-faint font-bold mt-1">margem média</span>
+            </div>
           </div>
         </div>
       </div>
@@ -796,6 +862,19 @@ function estadoEnvioCard(p) {
   return { texto: `Em preparação${prazo ? ' · despachar ' + prazo.texto : ''}`, tom: 'var(--warn)', icon: Package }
 }
 
+function contagemAteHora(hhmm) {
+  if (!hhmm) return null
+  const p = String(hhmm).split(':')
+  const h = Number(p[0]), m = Number(p[1] || 0)
+  if (isNaN(h)) return null
+  const alvo = new Date(); alvo.setHours(h, m || 0, 0, 0)
+  const ms = alvo.getTime() - Date.now()
+  if (ms <= 0) return { texto: 'coleta já passou hoje', tom: 'var(--danger)', urgente: true }
+  const horas = ms / 3600000
+  const hh = Math.floor(horas), mm = Math.floor((horas - hh) * 60)
+  return { texto: hh >= 1 ? `faltam ${hh}h${mm ? ' ' + mm + 'm' : ''} p/ coleta` : `faltam ${mm}m p/ coleta`, tom: horas < 2 ? 'var(--danger)' : (horas < 5 ? 'var(--warn)' : 'var(--accent)'), urgente: horas < 2 }
+}
+
 function contagemDespacho(iso) {
   if (!iso) return null
   const d = new Date(iso); if (isNaN(d)) return null
@@ -822,7 +901,23 @@ function MiniKpi({ icon, label, valor, sub, cor, destaque }) {
   )
 }
 
-function Card({ p, nfe, ativo, onOpen, sel, onToggleSel }) {
+function Donut({ pct, cor, size = 44 }) {
+  const p = Math.max(0, Math.min(100, pct == null ? 0 : pct))
+  const r = (size - 6) / 2
+  const c = 2 * Math.PI * r
+  const off = c * (1 - p / 100)
+  return (
+    <div style={{ position: 'relative', width: size, height: size, flex: 'none' }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ transform: 'rotate(-90deg)' }}>
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,.08)" strokeWidth="4" />
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={cor} strokeWidth="4" strokeLinecap="round" strokeDasharray={c} strokeDashoffset={off} />
+      </svg>
+      <span className="num" style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', fontSize: size < 40 ? 9 : 11, fontWeight: 800, color: cor }}>{pct != null ? Math.round(pct) + '%' : '—'}</span>
+    </div>
+  )
+}
+
+function Card({ p, nfe, corteHoje, compacto, donut, ativo, onOpen, sel, onToggleSel }) {
   const [imgErro, setImgErro] = useState(false)
   const st = ST_PEDIDO[p.status] || { t: p.status, c: 'var(--dim)' }
   const env = p.envio || null
@@ -845,8 +940,32 @@ function Card({ p, nfe, ativo, onOpen, sel, onToggleSel }) {
   const es = estadoEnvioCard(p)
   const EnvIcon = es.icon
   const prazoRef = env ? (p.balde === 'proximos' && env.buffering_date ? env.buffering_date : (env.handling_limit || env.buffering_date)) : null
-  const cd = ['hoje', 'proximos', 'fiscal'].includes(p.balde) ? contagemDespacho(prazoRef) : null
+  const cd = (p.balde === 'hoje' && corteHoje) ? contagemAteHora(corteHoje)
+    : (['hoje', 'proximos', 'fiscal'].includes(p.balde) ? contagemDespacho(prazoRef) : null)
   const estornado = p.status === 'cancelled' || (r && r.estornado)
+
+  if (compacto) {
+    return (
+      <div className="glass rounded-2xl px-3 py-2 transition-shadow" style={(sel || ativo) ? { borderColor: 'var(--accent)' } : (env && env.fiscal_pendente ? { borderColor: 'rgba(255,122,122,.4)' } : undefined)}>
+        <div className="flex items-center gap-2.5">
+          <button onClick={onToggleSel} disabled={!podeSelecionar} className="shrink-0 grid place-items-center" style={{ width: 16, height: 16, borderRadius: 4, border: `1.5px solid ${sel ? 'var(--accent)' : 'var(--faint)'}`, background: sel ? 'var(--accent)' : 'transparent', color: sel ? '#fff' : 'transparent', opacity: podeSelecionar ? 1 : 0.3 }}><Check size={11} /></button>
+          <button onClick={onOpen} className="rounded-lg overflow-hidden shrink-0 grid place-items-center" style={{ width: 34, height: 34, background: 'var(--glass-hover)', color: 'var(--faint)' }}>
+            {principal.imagem && !imgErro ? <img src={principal.imagem} alt="" className="h-full w-full object-cover" onError={() => setImgErro(true)} /> : <Package size={15} />}
+          </button>
+          <button onClick={onOpen} className="min-w-0 text-left" style={{ flex: '1 1 190px' }}>
+            <div className="text-[12.5px] font-medium truncate">{principal.titulo || 'Pedido'}{extras > 0 ? ` +${extras}` : ''}</div>
+            <div className="text-[10px] text-faint num truncate">#{p.id} · {p.buyer?.nickname || 'comprador'}</div>
+          </button>
+          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1 shrink-0" style={{ background: 'var(--glass-hover)', color: es.tom }}><EnvIcon size={10} className={es.spin ? 'animate-spin' : ''} /> {es.texto}</span>
+          {cd && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full num shrink-0" style={{ background: cd.urgente ? 'rgba(255,122,122,.14)' : 'rgba(0,0,0,.2)', color: cd.tom }}>{cd.texto}</span>}
+          <span className="text-[10px] num shrink-0 hidden md:inline" style={{ color: 'var(--faint)' }}>Taxas <b style={{ color: 'var(--warn)' }}>−{brl0(taxasCfg != null ? taxasCfg : r.tarifa)}</b></span>
+          <span className="text-[10px] num shrink-0" style={{ color: cor }}>Sobra <b>{r.liquido != null ? brl0(r.liquido) : '—'}</b>{r.margem != null ? ` · ${r.margem.toFixed(0)}%` : ''}</span>
+          <div className="num font-bold text-right shrink-0" style={{ fontSize: 14, minWidth: 66 }}>{brl(r.receita != null ? r.receita : p.total)}</div>
+          <button onClick={onOpen} className="text-faint shrink-0">{ativo ? <ChevronUp size={15} /> : <ChevronDown size={15} />}</button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="glass rounded-2xl p-3 transition-shadow" style={(sel || ativo) ? { borderColor: 'var(--accent)', boxShadow: '0 0 0 1px rgba(214,0,127,.3)' } : (env && env.fiscal_pendente ? { borderColor: 'rgba(255,122,122,.4)' } : undefined)}>
@@ -888,11 +1007,19 @@ function Card({ p, nfe, ativo, onOpen, sel, onToggleSel }) {
         {nfe && nfe.numero && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'rgba(0,0,0,.2)', color: nfeCor(nfe) }} title={nfe.situacao_label || 'NF-e'}><FileText size={10} /> NF {nfe.numero}</span>}
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2.5">
+      <div className="flex items-stretch gap-3 mt-2.5">
+        {donut && (
+          <div className="flex flex-col items-center justify-center px-1" style={{ flex: 'none' }}>
+            <Donut pct={r.margem} cor={cor} size={48} />
+            <span className="text-[8px] uppercase tracking-wide text-faint font-bold mt-1">margem</span>
+          </div>
+        )}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 flex-1">
         <MiniKpi icon={<Wallet size={11} />} label="Vendido" valor={brl(r.receita)} sub={blingTotal != null ? `alvo Bling ${brl0(blingTotal)}` : null} />
         <MiniKpi icon={<Tag size={11} />} label="Taxas mkt" valor={taxasCfg != null ? '−' + brl(taxasCfg) : (r.tarifa != null ? '−' + brl(r.tarifa) : '—')} cor="var(--warn)" sub="comissão + fixo + imposto" />
         <MiniKpi icon={<Truck size={11} />} label="Frete ML" valor={r.frete_vendedor ? '−' + brl(r.frete_vendedor) : '—'} cor={r.frete_vendedor ? 'var(--warn)' : 'var(--faint)'} sub={r.frete_vendedor ? 'frete grátis: você paga' : 'sem custo p/ você'} />
         <MiniKpi icon={<TrendingUp size={11} />} label="Sobra (líquido)" valor={r.liquido != null ? brl(r.liquido) : '—'} cor={cor} sub={vsAlvo != null ? `${vsAlvo >= -0.01 ? '+' : '−'}${brl0(Math.abs(vsAlvo))} vs alvo` : (r.margem != null ? `margem ${r.margem.toFixed(0)}%` : null)} destaque />
+        </div>
       </div>
     </div>
   )

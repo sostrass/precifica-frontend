@@ -134,6 +134,7 @@ export const api = {
   mlNaoLidas: () => req('/api/mercadolivre/mensagens-nao-lidas'),
   mlNfeStatus: (orderIds = []) => req('/api/mercadolivre/nfe-status', { method: 'POST', body: { order_ids: orderIds } }),
   mlDadosFiscais: (orderId) => req(`/api/mercadolivre/dados-fiscais/${orderId}`),
+  mlColeta: () => req('/api/mercadolivre/coleta'),
   mlEtiqueta: async (shipmentIds, formato = 'pdf') => {
     const headers = {}
     if (getToken()) headers.Authorization = `Bearer ${getToken()}`
