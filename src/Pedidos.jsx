@@ -344,7 +344,7 @@ export default function Pedidos() {
     setSincronizando(true)
     try {
       const r = await api.mlEnviosSincronizar(ids.slice(0, 15), 15)
-      setSyncErro(r && (r.total || 0) > 0 && (r.buscados || 0) === 0 ? 'nao_leu' : '')
+      setSyncErro(r && (r.total || 0) > 0 && (r.buscados || 0) === 0 ? ((r.erros && r.erros[0]) || 'nao_leu') : '')
       await buscar()
     } catch (_) { setSyncErro('falhou') }
     setSincronizando(false)
@@ -440,6 +440,7 @@ export default function Pedidos() {
     const porDia = {}
     filtrada.forEach((p) => {
       const r = p.resumo || {}
+      if (r.estornado || p.status === 'cancelled') return
       receita += r.receita || 0; tarifas += r.tarifa || 0; frete += r.frete_vendedor || 0
       custo += r.custo || 0; liquido += r.liquido || 0; unidades += r.unidades || 0
       if (p.is_full) full += 1
@@ -619,7 +620,7 @@ export default function Pedidos() {
               <div className="rounded-xl px-3 py-2 flex items-center gap-3 flex-wrap mt-3 mb-1" style={{ background: syncErro ? 'rgba(255,122,122,.08)' : 'rgba(242,194,0,.08)', border: `1px solid ${syncErro ? 'var(--danger)' : 'rgba(242,194,0,.3)'}` }}>
                 {sincronizando ? <Loader2 size={14} className="animate-spin" style={{ color: ML }} /> : syncErro ? <AlertTriangle size={14} style={{ color: 'var(--danger)' }} /> : <RotateCcw size={14} style={{ color: ML }} />}
                 {syncErro ? (
-                  <span className="text-[12px] flex-1" style={{ color: 'var(--danger)' }}>Não consegui ler o estado de envio no Mercado Livre para <b className="num">{nSync}</b> pedido(s). Os valores por venda seguem corretos; as abas de envio ficam indisponíveis até isso resolver.</span>
+                  <span className="text-[12px] flex-1" style={{ color: 'var(--danger)' }}>Não consegui ler o estado de envio no Mercado Livre para <b className="num">{nSync}</b> pedido(s). Os valores por venda seguem corretos.{syncErro && syncErro !== 'falhou' && syncErro !== 'nao_leu' ? <span className="text-faint"> · {syncErro}</span> : ''}</span>
                 ) : (
                   <span className="text-[12px] text-dim flex-1">Sincronizando o estado de envio de <b className="num">{nSync}</b> pedido(s) com o Mercado Livre. As abas se ajustam conforme carrega — em tempo real depois disso.</span>
                 )}
@@ -731,8 +732,8 @@ function Estatisticas({ s, aba }) {
         <Kpi label="Receita" icon={<Wallet size={11} />} valor={brl0(s.receita)} sub="na aba" />
         <Kpi label="Ticket médio" icon={<DollarSign size={11} />} valor={brl(s.ticket)} sub="por pedido" />
         <Kpi label="Custos ML" icon={<Tag size={11} />} valor={'−' + brl0(s.custosML)} cor="var(--warn)" sub={s.frete > 0 ? `comissão ${brl0(s.tarifas)} + frete ${brl0(s.frete)}` : (s.receita > 0 ? `${Math.round(s.tarifas / s.receita * 100)}% da receita` : null)} />
-        <Kpi label="Custo produtos" icon={<AlertTriangle size={11} />} valor={'−' + brl0(s.custo)} cor={s.custo < 1 && s.n > 0 ? 'var(--danger)' : 'var(--warn)'} sub={s.custo < 1 && s.n > 0 ? 'sem custo no Bling — margem parcial' : 'via Bling'} />
-        <Kpi label="Líquido" icon={<TrendingUp size={11} />} valor={brl0(s.liquido)} cor="var(--ok)" sub={s.margem != null ? `margem ${s.margem.toFixed(0)}%${s.custo < 1 && s.n > 0 ? ' (s/ custo)' : ''}` : null} destaque />
+        <Kpi label="Custo produtos" icon={<Boxes size={11} />} valor={'−' + brl0(s.custo)} cor="var(--warn)" sub="base Preço Bling" />
+        <Kpi label="Líquido" icon={<TrendingUp size={11} />} valor={brl0(s.liquido)} cor="var(--ok)" sub={s.margem != null ? `margem ${s.margem.toFixed(0)}%` : null} destaque />
       </div>
       <div className="flex gap-3 flex-col md:flex-row">
         <div className="glass rounded-xl p-3 flex-[2] min-w-0">
@@ -822,6 +823,7 @@ function Card({ p, nfe, ativo, onOpen, sel, onToggleSel }) {
             {env && env.fiscal_pendente && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'rgba(255,122,122,.16)', color: 'var(--danger)' }}><AlertTriangle size={10} /> Sem dados fiscais</span>}
             {env && env.devolucao && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'rgba(224,162,60,.16)', color: 'var(--warn)' }}><Undo2 size={10} /> Devolução</span>}
             {nfe && nfe.numero && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'var(--glass-hover)', color: nfeCor(nfe) }} title={nfe.situacao_label || 'NF-e'}><FileText size={10} /> NF-e {nfe.numero}</span>}
+            {(p.status === 'cancelled' || (p.resumo && p.resumo.estornado)) && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'rgba(255,122,122,.14)', color: 'var(--danger)' }} title="Cancelado — tarifa estornada pelo ML, fora dos totais">estornado</span>}
             {!env && p.balde === 'sincronizando' && <span className="text-[10px] px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'var(--glass-hover)', color: 'var(--faint)' }}><Loader2 size={10} className="animate-spin" /> sincronizando</span>}
           </div>
         </button>
@@ -836,8 +838,8 @@ function Card({ p, nfe, ativo, onOpen, sel, onToggleSel }) {
         <Cell label="Vendido ML" valor={brl(r.receita)} forte />
         <Cell label="Preço Bling" valor={blingTotal != null ? brl(blingTotal) : '—'} dim />
         <Cell label="Anúncio ML" valor={mlListTotal != null ? brl(mlListTotal) : '—'} dim />
-        <Cell label="Tarifa ML" valor={(r.tarifa_total != null ? r.tarifa_total : r.tarifa) != null ? '−' + brl(r.tarifa_total != null ? r.tarifa_total : r.tarifa) : '—'} sub={r.frete_vendedor ? 'inc. frete' : null} cor="var(--warn)" />
-        <Cell label="Custo" valor={r.custo != null ? '−' + brl(r.custo) : '—'} cor="var(--warn)" />
+        <Cell label="Comissão ML" valor={r.tarifa != null ? '−' + brl(r.tarifa) : '—'} cor="var(--warn)" />
+        <Cell label="Frete ML" valor={r.frete_vendedor ? '−' + brl(r.frete_vendedor) : '—'} cor="var(--warn)" />
         <Cell label="Líquido" valor={r.liquido != null ? brl(r.liquido) : '—'} sub={r.margem != null ? `${r.margem.toFixed(0)}%` : null} cor={cor} forte destaque />
       </div>
       {vsBling != null && (
@@ -850,8 +852,15 @@ function Card({ p, nfe, ativo, onOpen, sel, onToggleSel }) {
   )
 }
 
-function Timeline({ orderStatus, shipStatus }) {
-  const passos = ['Pedido criado', 'Pagamento aprovado', 'Pronto p/ despachar', 'Despachado', 'Entregue']
+function Timeline({ orderStatus, shipStatus, env }) {
+  const e = env || {}
+  const passos = [
+    { t: 'Pedido criado' },
+    { t: 'Pagamento aprovado' },
+    { t: 'Pronto p/ despachar', data: e.date_ready },
+    { t: 'Despachado', data: e.date_shipped, extra: e.tracking_number ? `rastreio ${e.tracking_number}` : null },
+    { t: 'Entregue', data: e.date_delivered },
+  ]
   let cur = orderStatus === 'paid' ? 2 : 1
   if (shipStatus === 'delivered') cur = 5
   else if (shipStatus === 'shipped') cur = 4
@@ -859,7 +868,7 @@ function Timeline({ orderStatus, shipStatus }) {
   const iconFor = (idx) => idx === 3 ? <Tag size={12} /> : idx === 4 ? <Truck size={12} /> : idx === 5 ? <MapPin size={12} /> : <Clock size={12} />
   return (
     <div className="relative">
-      {passos.map((t, i) => {
+      {passos.map((p, i) => {
         const idx = i + 1
         const estado = idx < cur ? 'done' : (idx === cur ? (cur === 5 ? 'done' : 'cur') : 'wait')
         const col = estado === 'done' ? 'var(--ok)' : estado === 'cur' ? 'var(--accent)' : 'var(--faint)'
@@ -870,9 +879,11 @@ function Timeline({ orderStatus, shipStatus }) {
             <div className="grid place-items-center shrink-0" style={{ width: 22, height: 22, borderRadius: 99, border: `2px solid ${col}`, color: col, background: 'var(--surface)', zIndex: 1, boxShadow: estado === 'cur' ? '0 0 0 4px rgba(214,0,127,.12)' : 'none' }}>
               {estado === 'done' ? <Check size={12} /> : iconFor(idx)}
             </div>
-            <div>
-              <div className="text-[12px] font-medium">{t}</div>
-              <div className="text-[10px]" style={{ color: estado === 'cur' ? 'var(--accent)' : 'var(--faint)' }}>{estado === 'cur' ? (idx === 3 ? 'imprima a etiqueta e despache' : 'em andamento') : estado === 'done' ? 'concluído' : '—'}</div>
+            <div className="min-w-0">
+              <div className="text-[12px] font-medium">{p.t}</div>
+              <div className="text-[10px] num" style={{ color: estado === 'cur' ? 'var(--accent)' : 'var(--faint)' }}>
+                {p.data ? dataHora(p.data) : (estado === 'cur' ? (idx === 3 ? 'imprima a etiqueta e despache' : 'em andamento') : estado === 'done' ? 'concluído' : '—')}{p.extra ? ` · ${p.extra}` : ''}
+              </div>
             </div>
           </div>
         )
@@ -1006,7 +1017,7 @@ function Drawer({ p, nfe, envio, baixando, imprimindo, onEtiqueta, onImprimir, o
             {frete > 0 && <div className="flex justify-between text-[12px] py-0.5"><span className="text-dim">Frete do vendedor</span><span className="num" style={{ color: 'var(--danger)' }}>−{brl(frete)}</span></div>}
             <div className="flex justify-between text-[12px] py-1" style={{ borderTop: '1px dashed var(--glass-border)' }}><span className="text-dim">Total de custos ML</span><span className="num" style={{ color: 'var(--danger)' }}>−{brl(totalML)}</span></div>
             <div className="flex justify-between text-[12px] py-2 mt-1 font-bold" style={{ borderTop: '1px solid var(--glass-border)' }}><span>Você recebe do ML</span><span className="num" style={{ color: 'var(--ok)' }}>{brl(recebeML)}</span></div>
-            <div className="flex justify-between text-[12px] py-0.5"><span className="text-dim">Custo dos produtos (Bling)</span><span className="num" style={{ color: r.custo ? 'var(--fg)' : 'var(--faint)' }}>{r.custo ? '−' + brl(r.custo) : 'R$ 0,00 — cadastre'}</span></div>
+            <div className="flex justify-between text-[12px] py-0.5"><span className="text-dim">Custo (Preço Bling)</span><span className="num" style={{ color: r.custo ? 'var(--fg)' : 'var(--faint)' }}>{r.custo ? '−' + brl(r.custo) : '—'}</span></div>
           </div>
           <button onClick={verTarifa} className="text-[10.5px] mt-1.5 inline-flex items-center gap-1 text-dim hover:text-fg">
             <DollarSign size={11} /> {tarifaDet ? 'Ocultar' : 'Ver'} detalhamento de faturamento
@@ -1031,7 +1042,7 @@ function Drawer({ p, nfe, envio, baixando, imprimindo, onEtiqueta, onImprimir, o
             <span className="text-[12px] font-bold flex items-center gap-1.5" style={{ color: cor }}><TrendingUp size={13} /> Margem após taxas</span>
             <span className="num font-bold" style={{ fontSize: 16, color: cor }}>{brl(r.liquido)}{r.margem != null ? <span style={{ fontSize: 11 }}> ({r.margem.toFixed(0)}%)</span> : ''}</span>
           </div>
-          {!r.custo && <div className="text-[10px] mt-1.5 flex items-start gap-1.5" style={{ color: 'var(--warn)' }}><AlertTriangle size={11} className="mt-0.5" /> Custo R$ 0,00 no Bling — cadastre o custo pra ver o lucro real.</div>}
+          {!r.custo && <div className="text-[10px] mt-1.5 flex items-start gap-1.5" style={{ color: 'var(--warn)' }}><AlertTriangle size={11} className="mt-0.5" /> Produto sem Preço Bling — a margem fica parcial até vincular o SKU no Bling.</div>}
         </div>
 
         <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--glass-border)' }}>
@@ -1083,7 +1094,7 @@ function Drawer({ p, nfe, envio, baixando, imprimindo, onEtiqueta, onImprimir, o
         {sid && (
           <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--glass-border)' }}>
             <div className="text-[9.5px] uppercase tracking-wide text-faint font-bold mb-2.5 flex items-center gap-1.5"><Truck size={12} /> Logística</div>
-            <Timeline orderStatus={p.status} shipStatus={shipStatus} />
+            <Timeline orderStatus={p.status} shipStatus={shipStatus} env={ec} />
           </div>
         )}
 
@@ -1102,7 +1113,16 @@ function Drawer({ p, nfe, envio, baixando, imprimindo, onEtiqueta, onImprimir, o
                             <div className="rounded-xl px-2.5 py-1.5 max-w-[85%]" style={{ background: m.de_vendedor ? 'rgba(214,0,127,.14)' : 'rgba(0,0,0,.25)', border: '1px solid var(--glass-border)' }}>
                               <div className="text-[9px] font-bold mb-0.5" style={{ color: m.de_vendedor ? 'var(--accent)' : 'var(--faint)' }}>{m.de_vendedor ? 'Você' : (p.buyer?.nickname || 'Comprador')}</div>
                               <div className="text-[11.5px] whitespace-pre-wrap break-words" style={{ color: 'var(--fg)' }}>{m.texto || '(sem texto)'}</div>
-                              {m.anexos && m.anexos.length > 0 && <div className="text-[9.5px] text-faint mt-0.5 flex items-center gap-1"><FileText size={9} /> {m.anexos.map((a) => a.nome).filter(Boolean).join(', ')}</div>}
+                              {m.anexos && m.anexos.length > 0 && (
+                                <div className="mt-1 space-y-0.5">
+                                  {m.anexos.map((a, k) => {
+                                    const tp = (a.tipo || '').toLowerCase()
+                                    const rotulo = tp.includes('image') ? 'Imagem' : tp.includes('video') ? 'Vídeo' : 'Arquivo'
+                                    return (<div key={k} className="text-[9.5px] text-faint flex items-center gap-1"><FileText size={9} /> {rotulo}: {a.nome || 'anexo'}</div>)
+                                  })}
+                                  <div className="text-[9px] text-faint">Imagem/vídeo abrem no Mercado Livre.</div>
+                                </div>
+                              )}
                               <div className="text-[9px] text-faint mt-0.5 num">{dataHora(m.data)}{m.moderacao && m.moderacao !== 'clean' ? ' · em moderação' : ''}</div>
                             </div>
                           </div>
