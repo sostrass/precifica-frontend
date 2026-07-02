@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Package, MapPin, RefreshCw, Search, Plug, Loader2, Truck, Filter, Boxes,
   ChevronDown, ChevronUp, ChevronLeft, ChevronRight, User, ExternalLink,
   CheckCircle2, Zap, Check, CheckCheck, AlertTriangle, TrendingUp, Printer,
   Wallet, DollarSign, Tag, Clock, X, SlidersHorizontal, ClipboardList, FileText,
+  Send, RotateCcw, PackageCheck, CalendarClock, MapPinned, Undo2,
 } from 'lucide-react'
 import { api } from './api.js'
 import { useToast } from './toast.jsx'
@@ -18,12 +19,14 @@ const PAGE_SIZE = 15
 const PERIODOS = [{ id: 7, label: '7d' }, { id: 15, label: '15d' }, { id: 30, label: '30d' }]
 const ESCOPOS = [{ id: 'tudo', label: 'Tudo' }, { id: 'pedido', label: '# Pedido' }, { id: 'comprador', label: 'Comprador' }, { id: 'produto', label: 'Produto / SKU' }]
 
+// Baldes vindos do backend (estado REAL do envio) — mesmo eixo da tela Vendas do ML
 const ENVIO_TABS = [
-  { id: 'todos', label: 'Todos' },
-  { id: 'a_enviar', label: 'A enviar' },
-  { id: 'enviado', label: 'Enviado' },
-  { id: 'entregue', label: 'Entregue' },
-  { id: 'cancelado', label: 'Cancelados' },
+  { id: 'todos', label: 'Todos', icon: Boxes },
+  { id: 'hoje', label: 'A despachar hoje', icon: CalendarClock },
+  { id: 'proximos', label: 'Próximos dias', icon: Clock },
+  { id: 'transito', label: 'Em trânsito', icon: Truck },
+  { id: 'finalizado', label: 'Finalizados', icon: PackageCheck },
+  { id: 'cancelado', label: 'Cancelados', icon: X },
 ]
 const PGTO_CHIPS = [
   { id: 'todos', label: 'Todos' },
@@ -44,18 +47,31 @@ const ST_PEDIDO = {
 const ST_ENVIO = {
   pending: { t: 'Pendente', c: 'var(--warn)' },
   handling: { t: 'Preparando', c: 'var(--warn)' },
-  ready_to_ship: { t: 'Pronto p/ enviar', c: 'var(--accent)' },
-  shipped: { t: 'Enviado', c: 'var(--ok)' },
+  ready_to_ship: { t: 'A despachar', c: 'var(--accent)' },
+  shipped: { t: 'Despachado', c: 'var(--ok)' },
   delivered: { t: 'Entregue', c: 'var(--ok)' },
   not_delivered: { t: 'Não entregue', c: 'var(--danger)' },
+  returned: { t: 'Devolvido', c: 'var(--danger)' },
   cancelled: { t: 'Cancelado', c: 'var(--danger)' },
 }
-
-function bucketEnvio(p) {
-  if (p.status === 'cancelled' || p.envio_status === 'cancelled') return 'cancelado'
-  if (p.envio_status === 'delivered') return 'entregue'
-  if (p.envio_status === 'shipped') return 'enviado'
-  return 'a_enviar'
+const SUBSTATUS_LABEL = {
+  ready_to_print: 'Etiqueta a imprimir',
+  printed: 'Etiqueta impressa',
+  ready_to_ship: 'Pronto p/ despachar',
+  in_packing_list: 'Em separação',
+  invoice_pending: 'Nota fiscal pendente',
+  picked_up: 'Coletado',
+  dropped_off: 'Postado',
+  in_hub: 'No centro de distribuição',
+  in_transit: 'Em trânsito',
+  out_for_delivery: 'Saiu para entrega',
+  delivery_failed: 'Tentativa de entrega falhou',
+  receiver_absent: 'Destinatário ausente',
+  waiting_for_withdrawal: 'Aguardando retirada',
+  delivered: 'Entregue',
+  not_delivered: 'Não entregue',
+  returning_to_sender: 'Retornando ao remetente',
+  shipped: 'Despachado',
 }
 
 function dataBR(iso) {
@@ -78,6 +94,17 @@ function moneyCor(liq, margem) {
   if (margem != null && margem < 15) return 'var(--warn)'
   return 'var(--ok)'
 }
+// Prazo de despacho → texto curto + tom (atrasado / hoje / data)
+function prazoInfo(iso) {
+  if (!iso) return null
+  const d = new Date(iso)
+  if (isNaN(d)) return null
+  const agora = new Date()
+  const fimHoje = new Date(); fimHoje.setHours(23, 59, 59, 999)
+  if (d < agora) return { texto: 'atrasado', tom: 'var(--danger)', forte: true }
+  if (d <= fimHoje) return { texto: `hoje ${d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`, tom: 'var(--warn)', forte: true }
+  return { texto: d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }), tom: 'var(--dim)' }
+}
 function extrairDestino(env) {
   if (!env) return null
   const ra = env.receiver_address || env.destination?.receiver_address || env.destination?.shipping_address || {}
@@ -91,21 +118,16 @@ function extrairDestino(env) {
   const compl = ra.comment || ra.address_line_secondary || ''
   return { nome, linha, bairro, cidade, estado, cep, compl }
 }
-function extrairEnvioMeta(env) {
-  if (!env || env === 'loading' || env === 'erro') return {}
-  const lt = env.logistic_type || ''
-  const modo = lt === 'fulfillment' ? 'Full · o ML expede'
+function modoEnvio(env) {
+  const lt = (env && env.logistic_type) || ''
+  return lt === 'fulfillment' ? 'Full · o ML expede'
     : lt === 'cross_docking' ? 'Mercado Envios · Coleta'
       : lt === 'self_service' ? 'Flex · você entrega'
         : (lt === 'xd_drop_off' || lt === 'drop_off') ? 'Mercado Envios · Agência'
-          : (env.mode ? 'Mercado Envios' : '')
-  const prazo = env.lead_time?.estimated_handling_limit?.date
-    || env.lead_time?.estimated_delivery_limit?.date
-    || env.estimated_handling_limit
-    || null
-  return { modo, prazo }
+          : (env && env.mode ? 'Mercado Envios' : '')
 }
 
+/* ------------------------- Impressão própria do ML ------------------------- */
 const LS_REM = 'ml_pedidos_remetente'
 function lerRemetente() {
   try { return JSON.parse(localStorage.getItem(LS_REM) || '{}') || {} } catch { return {} }
@@ -113,7 +135,6 @@ function lerRemetente() {
 function salvarRemetente(r) {
   try { localStorage.setItem(LS_REM, JSON.stringify(r || {})) } catch (_) { /* ignore */ }
 }
-
 const PRINT_CSS = `
 * { box-sizing: border-box; }
 body { font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #111; margin: 0; padding: 18px; font-size: 12px; }
@@ -142,20 +163,16 @@ td.chk:after { content: ''; display: inline-block; width: 16px; height: 16px; bo
 .qbox { display: inline-grid; place-items: center; min-width: 26px; height: 24px; padding: 0 6px; background: #111; color: #fff; border-radius: 6px; font-weight: 800; }
 @media print { body { padding: 0; } .box { break-inside: avoid; } }
 `
-
 function abrirImpressao(titulo, corpo) {
   const win = window.open('', '_blank')
   if (!win) { alert('Habilite os pop-ups deste site para imprimir.'); return }
   win.document.open()
   win.document.write(
     '<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>' + esc(titulo) + '</title><style>' + PRINT_CSS + '</style></head><body>' +
-    corpo +
-    '<scr' + 'ipt>window.onload=function(){setTimeout(function(){window.print()},250)}</scr' + 'ipt>' +
-    '</body></html>'
+    corpo + '<scr' + 'ipt>window.onload=function(){setTimeout(function(){window.print()},250)}</scr' + 'ipt></body></html>'
   )
   win.document.close()
 }
-
 function htmlFolhaML(p, dest, rem) {
   const r = p.resumo || {}
   const itens = (p.itens || []).map((it) =>
@@ -168,29 +185,23 @@ function htmlFolhaML(p, dest, rem) {
       `<div>${esc([dest.cidade, dest.estado].filter(Boolean).join(' · '))}${dest.cep ? ' · CEP ' + esc(dest.cep) : ''}</div>`
     : `<div class="mut">O endereço completo do comprador sai na etiqueta oficial do Mercado Livre.</div>`
   return (
-    `<section class="folha">` +
-      `<header class="fh">` +
-        `<div><div class="tt">Pedido #${esc(p.id)}</div><div class="mut">${esc(dataHora(p.date_created))}</div></div>` +
-        `<div class="rem"><div><b>${esc(rem.nome || 'Remetente')}</b></div>` +
-          (rem.cnpj ? `<div class="mut">${esc(rem.cnpj)}</div>` : '') +
-          (rem.endereco ? `<div class="mut">${esc(rem.endereco)}</div>` : '') +
-          (rem.telefone ? `<div class="mut">${esc(rem.telefone)}</div>` : '') +
-        `</div>` +
-      `</header>` +
+    `<section class="folha"><header class="fh">` +
+      `<div><div class="tt">Pedido #${esc(p.id)}</div><div class="mut">${esc(dataHora(p.date_created))}</div></div>` +
+      `<div class="rem"><div><b>${esc(rem.nome || 'Remetente')}</b></div>` +
+        (rem.cnpj ? `<div class="mut">${esc(rem.cnpj)}</div>` : '') +
+        (rem.endereco ? `<div class="mut">${esc(rem.endereco)}</div>` : '') +
+        (rem.telefone ? `<div class="mut">${esc(rem.telefone)}</div>` : '') +
+      `</div></header>` +
       `<table class="it"><thead><tr><th class="c">Qtd</th><th>Produto</th><th class="m">SKU</th><th class="r">Unit.</th></tr></thead><tbody>${itens}</tbody></table>` +
-      `<div class="grid2">` +
-        `<div class="box"><div class="bt">Entrega</div>${entrega}</div>` +
+      `<div class="grid2"><div class="box"><div class="bt">Entrega</div>${entrega}</div>` +
         `<div class="box"><div class="bt">Financeiro</div><table class="fin">` +
           `<tr><td>Vendido</td><td class="r">${brl(r.receita)}</td></tr>` +
           `<tr><td>Tarifa ML</td><td class="r">−${brl(r.tarifa)}</td></tr>` +
           `<tr><td>Custo</td><td class="r">${r.custo ? '−' + brl(r.custo) : '—'}</td></tr>` +
           `<tr class="tot"><td>Líquido</td><td class="r">${brl(r.liquido)}${r.margem != null ? ' (' + r.margem.toFixed(0) + '%)' : ''}</td></tr>` +
-        `</table></div>` +
-      `</div>` +
-    `</section>`
+        `</table></div></div></section>`
   )
 }
-
 function htmlSeparacaoML(pedidos, rem) {
   const mapa = new Map()
   ;(pedidos || []).forEach((p) => (p.itens || []).forEach((it) => {
@@ -205,13 +216,10 @@ function htmlSeparacaoML(pedidos, rem) {
     `<tr><td class="c"><span class="qbox">${l.qtd}</span></td><td>${esc(l.titulo)}</td><td class="m">${esc(l.sku || '—')}</td><td class="chk"></td></tr>`
   ).join('')
   return (
-    `<section class="folha">` +
-      `<header class="fh">` +
-        `<div><div class="tt">Lista de separação</div><div class="mut">${(pedidos || []).length} pedido(s) · ${totalUn} unidade(s)</div></div>` +
-        `<div class="rem"><div><b>${esc(rem.nome || 'Sóstrass')}</b></div><div class="mut">${esc(new Date().toLocaleString('pt-BR'))}</div></div>` +
-      `</header>` +
-      `<table class="it sep"><thead><tr><th class="c">Qtd</th><th>Produto</th><th class="m">SKU</th><th class="chk">✓</th></tr></thead><tbody>${corpo}</tbody></table>` +
-    `</section>`
+    `<section class="folha"><header class="fh">` +
+      `<div><div class="tt">Lista de separação</div><div class="mut">${(pedidos || []).length} pedido(s) · ${totalUn} unidade(s)</div></div>` +
+      `<div class="rem"><div><b>${esc(rem.nome || 'Sóstrass')}</b></div><div class="mut">${esc(new Date().toLocaleString('pt-BR'))}</div></div>` +
+      `</header><table class="it sep"><thead><tr><th class="c">Qtd</th><th>Produto</th><th class="m">SKU</th><th class="chk">✓</th></tr></thead><tbody>${corpo}</tbody></table></section>`
   )
 }
 
@@ -234,11 +242,11 @@ function Paginacao({ page, total, onIr }) {
   const on = { background: 'var(--accent)', color: '#fff', border: '1px solid var(--accent)' }
   return (
     <div className="flex items-center justify-center gap-1.5 flex-wrap">
-      <button onClick={() => onIr(page - 1)} disabled={page <= 1} className={cls} style={off} aria-label="Página anterior"><ChevronLeft size={15} /></button>
+      <button onClick={() => onIr(page - 1)} disabled={page <= 1} className={cls} style={off} aria-label="Anterior"><ChevronLeft size={15} /></button>
       {janelaPaginas(page, total).map((p, i) => p === '…'
         ? <span key={'e' + i} className="px-1 text-faint text-xs select-none">…</span>
         : <button key={p} onClick={() => onIr(p)} aria-current={p === page ? 'page' : undefined} className={cls} style={p === page ? on : off}>{p}</button>)}
-      <button onClick={() => onIr(page + 1)} disabled={page >= total} className={cls} style={off} aria-label="Próxima página"><ChevronRight size={15} /></button>
+      <button onClick={() => onIr(page + 1)} disabled={page >= total} className={cls} style={off} aria-label="Próxima"><ChevronRight size={15} /></button>
     </div>
   )
 }
@@ -248,11 +256,14 @@ export default function Pedidos() {
   const notify = useToast()
   const [conn, setConn] = useState(null)
   const [periodo, setPeriodo] = useState(15)
-  const [envioTab, setEnvioTab] = useState('a_enviar')
+  const [envioTab, setEnvioTab] = useState('hoje')
   const [pgto, setPgto] = useState('todos')
+  const [flagFiscal, setFlagFiscal] = useState(false)
+  const [flagDevol, setFlagDevol] = useState(false)
   const [escopo, setEscopo] = useState('tudo')
   const [busca, setBusca] = useState('')
   const [pedidos, setPedidos] = useState(null)
+  const [sstats, setSstats] = useState(null)
   const [paging, setPaging] = useState({ total: 0, carregados: 0 })
   const [page, setPage] = useState(1)
   const [ativo, setAtivo] = useState(null)
@@ -261,6 +272,8 @@ export default function Pedidos() {
   const [baixando, setBaixando] = useState('')
   const [imprimindo, setImprimindo] = useState('')
   const [personalizar, setPersonalizar] = useState(false)
+  const [sincronizando, setSincronizando] = useState(false)
+  const rodadasRef = useRef(0)
 
   const checar = useCallback(() => {
     api.mlConta().then((d) => setConn(d?.conta ? d : { conta: false })).catch(() => setConn({ conta: false }))
@@ -269,23 +282,42 @@ export default function Pedidos() {
 
   const desdeISO = useCallback(() => { const d = new Date(); d.setDate(d.getDate() - periodo); return d.toISOString() }, [periodo])
 
-  // Busca TODOS os pedidos do período de uma vez (status=''); abas, filtros, contadores
-  // e estatísticas são calculados client-side sobre esse mesmo conjunto — por isso os
-  // números sempre batem entre si.
+  // Busca TODOS os pedidos do período (status=''); baldes/estado do envio vêm
+  // prontos do backend (cache alimentado por webhooks + backfill).
   const carregar = useCallback(async () => {
     setPedidos(null); setSel(new Set()); setAtivo(null); setPage(1)
     try {
       const d = await api.mlPedidosEnriquecido('', 0, 500, desdeISO())
       const arr = d.pedidos || []
       setPedidos(arr)
+      setSstats(d.stats || null)
       setPaging(d.paging || { total: arr.length, carregados: arr.length })
     } catch (e) {
-      notify(e.message, 'danger'); setPedidos([])
+      notify(e.message, 'danger'); setPedidos([]); setSstats(null)
     }
   }, [desdeISO, notify])
 
   useEffect(() => { if (conn?.conta) carregar() }, [conn?.conta, carregar])
-  useEffect(() => { setPage(1) }, [busca, escopo, envioTab, pgto])
+  useEffect(() => { rodadasRef.current = 0 }, [periodo])
+  useEffect(() => { setPage(1) }, [busca, escopo, envioTab, pgto, flagFiscal, flagDevol])
+
+  // Aquece o cache de envios progressivamente (sem travar a lista); webhooks fazem o resto.
+  const backfill = useCallback(async (auto) => {
+    const ids = (pedidos || []).filter((p) => !p.envio && p.shipping_id).map((p) => String(p.shipping_id))
+    if (!ids.length) return
+    setSincronizando(true)
+    try { await api.mlEnviosSincronizar(ids.slice(0, 60), 60); if (auto) rodadasRef.current += 1; await carregar() }
+    catch (_) { /* silencioso */ }
+    setSincronizando(false)
+  }, [pedidos, carregar])
+
+  useEffect(() => {
+    if (!pedidos || !sstats) return
+    if ((sstats.sincronizando || 0) <= 0) return
+    if (rodadasRef.current >= 6 || sincronizando) return
+    const t = setTimeout(() => backfill(true), 150)
+    return () => clearTimeout(t)
+  }, [pedidos, sstats, sincronizando, backfill])
 
   const abrir = async (p) => {
     if (ativo === p.id) { setAtivo(null); return }
@@ -297,28 +329,25 @@ export default function Pedidos() {
       catch { setEnvios((e) => ({ ...e, [sid]: 'erro' })) }
     }
   }
-
   const baixarEtiqueta = async (sid) => {
     if (!sid) return
     setBaixando(String(sid))
     try {
-      const url = await api.mlEtiqueta(sid, 'pdf')
-      window.open(url, '_blank')
+      const url = await api.mlEtiqueta(sid, 'pdf'); window.open(url, '_blank')
       setTimeout(() => URL.revokeObjectURL(url), 60000)
-    } catch (e) {
-      notify('Etiqueta indisponível: ' + (e.message || '') + ' — envios Full são etiquetados pelo próprio ML.', 'danger')
-    }
+    } catch (e) { notify('Etiqueta indisponível: ' + (e.message || '') + ' — envios Full são etiquetados pelo próprio ML.', 'danger') }
     setBaixando('')
   }
 
   const contagens = useMemo(() => {
-    const c = { todos: 0, a_enviar: 0, enviado: 0, entregue: 0, cancelado: 0 }
-    ;(pedidos || []).forEach((p) => { c.todos += 1; c[bucketEnvio(p)] += 1 })
-    return c
-  }, [pedidos])
+    const b = (sstats && sstats.baldes) || {}
+    return { todos: (pedidos || []).length, hoje: b.hoje || 0, proximos: b.proximos || 0, transito: b.transito || 0, finalizado: b.finalizado || 0, cancelado: b.cancelado || 0 }
+  }, [sstats, pedidos])
+  const nSync = (sstats && sstats.sincronizando) || 0
+  const nFiscal = (sstats && sstats.fiscal_pendentes) || 0
+  const nDevol = (sstats && sstats.devolucoes) || 0
 
-  const naAba = useMemo(() => (pedidos || []).filter((p) => envioTab === 'todos' || bucketEnvio(p) === envioTab), [pedidos, envioTab])
-
+  const naAba = useMemo(() => (pedidos || []).filter((p) => envioTab === 'todos' || p.balde === envioTab), [pedidos, envioTab])
   const contPgto = useMemo(() => {
     const c = { todos: naAba.length, paid: 0, payment_required: 0, confirmed: 0 }
     naAba.forEach((p) => { if (c[p.status] != null) c[p.status] += 1 })
@@ -327,16 +356,19 @@ export default function Pedidos() {
 
   const filtrada = useMemo(() => naAba.filter((p) => {
     if (pgto !== 'todos' && p.status !== pgto) return false
+    if (flagFiscal && !(p.envio && p.envio.fiscal_pendente)) return false
+    if (flagDevol && !(p.envio && p.envio.devolucao)) return false
     if (!busca.trim()) return true
     const t = busca.toLowerCase()
     const id = String(p.id).toLowerCase()
     const comp = (p.buyer?.nickname || '').toLowerCase()
     const prod = (p.itens || []).map((it) => (it.titulo || '') + ' ' + (it.sku || '')).join(' ').toLowerCase()
-    if (escopo === 'pedido') return id.includes(t)
+    const trk = (p.envio && p.envio.tracking_number ? String(p.envio.tracking_number) : '').toLowerCase()
+    if (escopo === 'pedido') return id.includes(t) || trk.includes(t)
     if (escopo === 'comprador') return comp.includes(t)
     if (escopo === 'produto') return prod.includes(t)
-    return id.includes(t) || comp.includes(t) || prod.includes(t)
-  }), [naAba, pgto, busca, escopo])
+    return id.includes(t) || comp.includes(t) || prod.includes(t) || trk.includes(t)
+  }), [naAba, pgto, flagFiscal, flagDevol, busca, escopo])
 
   const paginas = Math.max(1, Math.ceil(filtrada.length / PAGE_SIZE))
   const pageSafe = Math.min(page, paginas)
@@ -351,20 +383,20 @@ export default function Pedidos() {
   const alvoImpressao = useCallback(() => (sel.size ? pedidosSel : paginaItens), [sel.size, pedidosSel, paginaItens])
   const alvoEtiqueta = useMemo(() => (sel.size ? pedidosSel : paginaItens).filter((p) => p.shipping_id), [sel.size, pedidosSel, paginaItens])
 
-  const stats = useMemo(() => {
-    let receita = 0, tarifas = 0, custo = 0, liquido = 0, unidades = 0, full = 0
+  const kpi = useMemo(() => {
+    let receita = 0, tarifas = 0, frete = 0, custo = 0, liquido = 0, unidades = 0, full = 0
     const porDia = {}
     filtrada.forEach((p) => {
       const r = p.resumo || {}
-      receita += r.receita || 0; tarifas += r.tarifa || 0; custo += r.custo || 0
-      liquido += r.liquido || 0; unidades += r.unidades || 0
+      receita += r.receita || 0; tarifas += r.tarifa || 0; frete += r.frete_vendedor || 0
+      custo += r.custo || 0; liquido += r.liquido || 0; unidades += r.unidades || 0
       if (p.is_full) full += 1
       const dia = (p.date_created || '').slice(0, 10)
       if (dia) porDia[dia] = (porDia[dia] || 0) + (r.receita || 0)
     })
     const n = filtrada.length
     const dias = Object.entries(porDia).sort((a, b) => a[0].localeCompare(b[0])).slice(-14)
-    return { n, receita, tarifas, custo, liquido, unidades, full, ticket: n ? receita / n : 0, margem: receita > 0 ? liquido / receita * 100 : null, dias }
+    return { n, receita, tarifas, frete, custosML: tarifas + frete, custo, liquido, unidades, full, ticket: n ? receita / n : 0, margem: receita > 0 ? liquido / receita * 100 : null, dias }
   }, [filtrada])
 
   const ativoPedido = useMemo(() => (pedidos || []).find((p) => p.id === ativo) || null, [pedidos, ativo])
@@ -381,7 +413,8 @@ export default function Pedidos() {
       if (p.shipping_id && (!env || env === 'loading' || env === 'erro')) {
         try { env = await api.mlEnvio(p.shipping_id) } catch { env = null }
       }
-      const dest = env && env !== 'loading' && env !== 'erro' ? extrairDestino(env) : null
+      const dest = env && env !== 'loading' && env !== 'erro' ? extrairDestino(env)
+        : (p.envio && p.envio.receiver_nome ? { nome: p.envio.receiver_nome, linha: p.envio.receiver_endereco, cidade: p.envio.receiver_cidade, estado: p.envio.receiver_estado, cep: p.envio.receiver_cep } : null)
       return htmlFolhaML(p, dest, rem)
     }))
     return partes.join('')
@@ -390,14 +423,12 @@ export default function Pedidos() {
     const alvo = alvoImpressao()
     if (!alvo.length) { notify('Nenhum pedido para imprimir.', 'warn'); return }
     setImprimindo('folha')
-    try { abrirImpressao('Pedidos', await montarFolhas(alvo)) }
-    catch (e) { notify('Não consegui montar as folhas: ' + (e.message || ''), 'danger') }
+    try { abrirImpressao('Pedidos', await montarFolhas(alvo)) } catch (e) { notify('Não consegui montar as folhas: ' + (e.message || ''), 'danger') }
     setImprimindo('')
   }
   const imprimirUm = async (p) => {
     setImprimindo('um')
-    try { abrirImpressao('Pedido #' + p.id, await montarFolhas([p])) }
-    catch (e) { notify('Não consegui montar a folha: ' + (e.message || ''), 'danger') }
+    try { abrirImpressao('Pedido #' + p.id, await montarFolhas([p])) } catch (e) { notify('Não consegui montar a folha: ' + (e.message || ''), 'danger') }
     setImprimindo('')
   }
   const imprimirEtiquetas = async () => {
@@ -405,12 +436,9 @@ export default function Pedidos() {
     if (!ids.length) { notify('Nenhum pedido com envio para etiquetar.', 'warn'); return }
     setImprimindo('etiq')
     try {
-      const url = await api.mlEtiqueta(ids.join(','), 'pdf')
-      window.open(url, '_blank')
+      const url = await api.mlEtiqueta(ids.join(','), 'pdf'); window.open(url, '_blank')
       setTimeout(() => URL.revokeObjectURL(url), 60000)
-    } catch (e) {
-      notify('Etiquetas indisponíveis: ' + (e.message || '') + ' — pedidos Full são etiquetados pelo próprio ML.', 'danger')
-    }
+    } catch (e) { notify('Etiquetas indisponíveis: ' + (e.message || '') + ' — pedidos Full são etiquetados pelo ML.', 'danger') }
     setImprimindo('')
   }
 
@@ -424,7 +452,7 @@ export default function Pedidos() {
         <div className="max-w-lg mx-auto">
           <div className="h-12 w-12 rounded-2xl grid place-items-center mx-auto mb-4" style={{ background: 'rgba(242,194,0,.16)', color: ML }}><Plug size={22} /></div>
           <div className="font-display font-semibold text-lg">Conecte o Mercado Livre</div>
-          <p className="text-sm text-dim mt-2">Os pedidos, com o resultado por venda (tarifa, custo e margem), o nome e endereço reais do comprador e a etiqueta oficial, aparecem aqui assim que você conectar a conta.</p>
+          <p className="text-sm text-dim mt-2">Os pedidos, com resultado por venda, endereço real, status de envio e etiqueta oficial, aparecem aqui assim que você conectar a conta.</p>
           <button onClick={checar} className="glass rounded-xl px-4 py-2 text-sm text-dim hover:text-fg inline-flex items-center gap-2 mt-4"><RefreshCw size={15} /> Já conectei</button>
         </div>
       </div>
@@ -442,33 +470,35 @@ export default function Pedidos() {
                 <span className="font-display font-semibold text-base">Central de pedidos</span>
                 <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'rgba(242,194,0,.18)', color: ML }}>Mercado Livre</span>
               </div>
-              <div className="text-[11.5px] text-dim mt-0.5">Resultado real por venda — vendido, tarifa, custo e margem — com nome e endereço reais do comprador e etiqueta oficial.</div>
+              <div className="text-[11.5px] text-dim mt-0.5">Cockpit em tempo real — envio, prazo de coleta, rastreio, tarifa, custo e margem, com endereço real e etiqueta oficial.</div>
             </div>
             <div className="ml-auto flex items-center gap-1.5 flex-wrap">
-              <button onClick={() => setPersonalizar(true)} className={btnTxt} title="Dados do remetente que saem na folha e na separação"><SlidersHorizontal size={13} /> Personalizar</button>
-              <button onClick={imprimirSeparacao} disabled={!!imprimindo || semPedidos} className={btnTxt} title="Lista de separação: produtos A→Z somando quantidades"><ClipboardList size={13} /> Separação</button>
-              <button onClick={imprimirPedidos} disabled={!!imprimindo || semPedidos} className={btnTxt} title="Folha por pedido (uma página cada), com itens, entrega e financeiro">
+              <button onClick={() => setPersonalizar(true)} className={btnTxt} title="Dados do remetente que saem na impressão"><SlidersHorizontal size={13} /> Personalizar</button>
+              <button onClick={imprimirSeparacao} disabled={!!imprimindo || semPedidos} className={btnTxt} title="Lista de separação (produtos A→Z somando quantidades)"><ClipboardList size={13} /> Separação</button>
+              <button onClick={imprimirPedidos} disabled={!!imprimindo || semPedidos} className={btnTxt} title="Folha por pedido">
                 {imprimindo === 'folha' ? <Loader2 size={13} className="animate-spin" /> : <Printer size={13} />} Imprimir
               </button>
               <button onClick={imprimirEtiquetas} disabled={!!imprimindo || !alvoEtiqueta.length}
                 className="text-xs font-semibold px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5 disabled:opacity-40"
-                style={{ background: ML, color: '#3a2c00' }} title="Etiqueta oficial do Mercado Livre (PDF, até 50 por vez)">
+                style={{ background: ML, color: '#3a2c00' }} title="Etiqueta oficial do ML (PDF, até 50 por vez)">
                 {imprimindo === 'etiq' ? <Loader2 size={13} className="animate-spin" /> : <Tag size={13} />} Etiquetas em lote{alvoEtiqueta.length ? ` (${alvoEtiqueta.length})` : ''}
               </button>
-              <a href="https://www.mercadolivre.com.br/vendas" target="_blank" rel="noreferrer" className={btnTxt} title="Abrir Vendas/Full no Mercado Livre"><Truck size={13} /> Envios / Full</a>
-              <button disabled className={btnTxt + ' cursor-default'} title="Em breve: emissão e status da nota junto ao Bling"><FileText size={13} /> NF-e <span className="text-[9px] font-bold px-1 py-0.5 rounded" style={{ background: 'var(--glass-hover)', color: 'var(--faint)' }}>em breve</span></button>
+              <a href="https://www.mercadolivre.com.br/vendas" target="_blank" rel="noreferrer" className={btnTxt} title="Abrir Vendas/Full no ML"><Truck size={13} /> Envios / Full</a>
+              <button disabled className={btnTxt + ' cursor-default'} title="Em breve: NF-e via Bling"><FileText size={13} /> NF-e <span className="text-[9px] font-bold px-1 py-0.5 rounded" style={{ background: 'var(--glass-hover)', color: 'var(--faint)' }}>em breve</span></button>
             </div>
           </div>
 
+          {/* Baldes reais do envio + período */}
           <div className="flex items-center gap-2 flex-wrap mt-3">
             <span className="text-[10px] uppercase tracking-wide text-faint font-bold">Meus pedidos</span>
             <div className="flex items-center gap-1.5 flex-wrap">
               {ENVIO_TABS.map((f) => {
                 const on = envioTab === f.id
+                const Icon = f.icon
                 return (
                   <button key={f.id} onClick={() => setEnvioTab(f.id)} className="text-xs font-semibold px-3 py-1.5 rounded-full transition-all inline-flex items-center gap-1.5"
                     style={on ? { background: 'var(--accent)', color: '#fff' } : { border: '1px solid var(--glass-border)', color: 'var(--dim)' }}>
-                    {f.label}
+                    <Icon size={12} /> {f.label}
                     <span className="text-[10px] font-bold px-1.5 rounded-full num" style={{ background: on ? 'rgba(255,255,255,.22)' : 'var(--glass-hover)', color: on ? '#fff' : 'var(--faint)' }}>{contagens[f.id] ?? 0}</span>
                   </button>
                 )
@@ -482,6 +512,7 @@ export default function Pedidos() {
             </div>
           </div>
 
+          {/* Pagamento + alertas (fiscal / devolução) */}
           <div className="flex items-center gap-2 flex-wrap mt-2">
             <span className="text-[10px] uppercase tracking-wide text-faint font-bold">Pagamento</span>
             {PGTO_CHIPS.map((c) => {
@@ -493,20 +524,40 @@ export default function Pedidos() {
                 </button>
               )
             })}
-            <span className="ml-3 text-[10px] uppercase tracking-wide text-faint font-bold">Nota fiscal</span>
-            <span className="text-[11px] text-faint inline-flex items-center gap-1.5" title="Emissão e status da NF-e chegam com a integração do Bling"><FileText size={12} /> emissão via Bling <span className="text-[9px] font-bold px-1 py-0.5 rounded" style={{ background: 'var(--glass-hover)' }}>em breve</span></span>
+            <button onClick={() => setFlagFiscal((v) => !v)} className="text-[11px] font-semibold px-2.5 py-1 rounded-lg inline-flex items-center gap-1.5 ml-1"
+              style={flagFiscal ? { background: 'rgba(255,122,122,.16)', color: 'var(--danger)', border: '1px solid var(--danger)' } : { border: '1px solid var(--glass-border)', color: nFiscal ? 'var(--danger)' : 'var(--faint)' }} title="Pedidos sem dados fiscais (bloqueiam NF-e/despacho)">
+              <AlertTriangle size={12} /> Sem dados fiscais <span className="num">{nFiscal}</span>
+            </button>
+            <button onClick={() => setFlagDevol((v) => !v)} className="text-[11px] font-semibold px-2.5 py-1 rounded-lg inline-flex items-center gap-1.5"
+              style={flagDevol ? { background: 'rgba(224,162,60,.16)', color: 'var(--warn)', border: '1px solid var(--warn)' } : { border: '1px solid var(--glass-border)', color: nDevol ? 'var(--warn)' : 'var(--faint)' }} title="Devoluções / pós-venda">
+              <Undo2 size={12} /> Devoluções <span className="num">{nDevol}</span>
+            </button>
           </div>
         </div>
 
         {pedidos === null ? (
-          <div className="text-dim text-sm flex items-center gap-2 p-4"><Loader2 size={16} className="animate-spin" /> Carregando o período… (buscando todos os pedidos de uma vez)</div>
+          <div className="text-dim text-sm flex items-center gap-2 p-4"><Loader2 size={16} className="animate-spin" /> Carregando o período…</div>
         ) : (
           <>
-            <Estatisticas s={stats} aba={abaAtual} />
+            {nSync > 0 && (
+              <div className="rounded-xl px-3 py-2 flex items-center gap-3 flex-wrap mt-3 mb-1" style={{ background: 'rgba(242,194,0,.08)', border: '1px solid rgba(242,194,0,.3)' }}>
+                {sincronizando ? <Loader2 size={14} className="animate-spin" style={{ color: ML }} /> : <RotateCcw size={14} style={{ color: ML }} />}
+                <span className="text-[12px] text-dim flex-1">Sincronizando o estado de envio de <b className="num">{nSync}</b> pedido(s) com o Mercado Livre. Os baldes se ajustam conforme carrega — em tempo real depois disso.</span>
+                {rodadasRef.current >= 6 && !sincronizando && (
+                  <button onClick={() => { rodadasRef.current = 0; backfill(false) }} className="text-[11px] font-semibold px-2.5 py-1 rounded-lg" style={{ background: ML, color: '#3a2c00' }}>Sincronizar mais</button>
+                )}
+              </div>
+            )}
+
+            {flagDevol ? (
+              <PosVenda onFechar={() => setFlagDevol(false)} />
+            ) : (
+            <>
+            <Estatisticas s={kpi} aba={abaAtual} />
 
             <div className="glass rounded-xl px-3 py-2 flex items-center gap-2 flex-wrap mt-3 mb-2.5">
               <Search size={14} className="text-faint" />
-              <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar por pedido, comprador, produto…" className="bg-transparent outline-none text-sm flex-1 min-w-[140px] text-fg placeholder:text-faint" />
+              <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar por pedido, comprador, produto, rastreio…" className="bg-transparent outline-none text-sm flex-1 min-w-[140px] text-fg placeholder:text-faint" />
               <Filter size={13} className="text-faint" />
               {ESCOPOS.map((e) => (
                 <button key={e.id} onClick={() => setEscopo(e.id)} className="text-[11px] font-medium px-2.5 py-1 rounded-lg"
@@ -529,11 +580,11 @@ export default function Pedidos() {
             {filtrada.length === 0 ? (
               <div className="glass rounded-2xl p-10 text-center mt-1">
                 <CheckCircle2 size={28} className="mx-auto mb-3" style={{ color: 'var(--ok)' }} />
-                <div className="font-medium">Nenhum pedido nesta aba</div>
-                <div className="text-sm text-dim mt-1">Ajuste o status, o pagamento, o período ou a busca.</div>
+                <div className="font-medium">Nada em «{abaAtual}»{flagFiscal ? ' sem dados fiscais' : ''}{flagDevol ? ' com devolução' : ''}</div>
+                <div className="text-sm text-dim mt-1">{nSync > 0 ? 'Alguns envios ainda estão sincronizando.' : 'Ajuste o balde, o pagamento, o período ou a busca.'}</div>
               </div>
             ) : (
-              <div className={ativoPedido ? 'grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(380px,460px)] gap-4 items-start' : ''}>
+              <div className={ativoPedido ? 'grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(380px,470px)] gap-4 items-start' : ''}>
                 <div>
                   {paginas > 1 && <div className="mb-3"><Paginacao page={pageSafe} total={paginas} onIr={setPage} /></div>}
                   <div className="space-y-2.5">
@@ -544,9 +595,8 @@ export default function Pedidos() {
                   </div>
                   {paginas > 1 && <div className="mt-4"><Paginacao page={pageSafe} total={paginas} onIr={setPage} /></div>}
                   <div className="text-[11px] text-faint text-center mt-3">
-                    Mostrando {(pageSafe - 1) * PAGE_SIZE + 1}–{Math.min(pageSafe * PAGE_SIZE, filtrada.length)} de {filtrada.length} em «{abaAtual}»
-                    {busca.trim() ? ` · filtro "${busca.trim()}"` : ''} · período de {periodo}d com {paging.carregados ?? (pedidos || []).length} pedidos carregados
-                    {(paging.total ?? 0) > (paging.carregados ?? 0) ? ` (de ${paging.total} — mostrando os mais recentes)` : ''}
+                    {(pageSafe - 1) * PAGE_SIZE + 1}–{Math.min(pageSafe * PAGE_SIZE, filtrada.length)} de {filtrada.length} em «{abaAtual}» · período de {periodo}d, {paging.carregados ?? (pedidos || []).length} pedidos carregados
+                    {(paging.total ?? 0) > (paging.carregados ?? 0) ? ` (de ${paging.total} — mais recentes)` : ''}
                   </div>
                 </div>
 
@@ -562,8 +612,10 @@ export default function Pedidos() {
             )}
 
             <div className="text-[10.5px] text-faint mt-4 leading-relaxed border-t pt-3" style={{ borderColor: 'var(--glass-border)' }}>
-              As abas seguem o status do <b>envio</b> (A enviar, Enviado, Entregue) e o sub-filtro segue o <b>pagamento</b>. Tudo é calculado sobre os pedidos carregados do período, então os totais dos cartões batem com a aba selecionada. A tarifa vem do próprio pedido. Preço Bling, Anúncio ML e imagem aparecem quando o mesmo SKU está nos dois catálogos. Emissão e status de NF-e chegam com a integração do Bling. Etiqueta de pedidos <b>Full</b> é emitida pelo próprio Mercado Livre.
+              Os baldes seguem o <b>estado real do envio</b> (substatus e prazo de coleta), como na tela Vendas do ML — mantidos vivos pelos webhooks. "A despachar hoje" = coleta hoje/atrasada; "Próximos dias" = coleta agendada à frente. Tarifa, custo e margem por venda; endereço real e etiqueta oficial do ML. NF-e via Bling entra em seguida. Etiqueta de pedido <b>Full</b> é emitida pelo próprio Mercado Livre.
             </div>
+            </>
+            )}
           </>
         )}
       </div>
@@ -583,7 +635,6 @@ function Kpi({ label, valor, sub, cor, icon, destaque }) {
     </div>
   )
 }
-
 function Estatisticas({ s, aba }) {
   const maxDia = Math.max(1, ...s.dias.map((d) => d[1]))
   const diaLabel = (iso) => { const d = new Date(iso + 'T12:00:00'); return isNaN(d) ? '' : d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) }
@@ -593,7 +644,7 @@ function Estatisticas({ s, aba }) {
         <Kpi label={`Pedidos · ${aba}`} icon={<Package size={11} />} valor={s.n.toLocaleString('pt-BR')} sub={`${s.unidades} un.`} />
         <Kpi label="Receita" icon={<Wallet size={11} />} valor={brl0(s.receita)} sub="na aba" />
         <Kpi label="Ticket médio" icon={<DollarSign size={11} />} valor={brl(s.ticket)} sub="por pedido" />
-        <Kpi label="Tarifas ML" icon={<Tag size={11} />} valor={'−' + brl0(s.tarifas)} cor="var(--warn)" sub={s.receita > 0 ? `${Math.round(s.tarifas / s.receita * 100)}% da receita` : null} />
+        <Kpi label="Custos ML" icon={<Tag size={11} />} valor={'−' + brl0(s.custosML)} cor="var(--warn)" sub={s.frete > 0 ? `comissão ${brl0(s.tarifas)} + frete ${brl0(s.frete)}` : (s.receita > 0 ? `${Math.round(s.tarifas / s.receita * 100)}% da receita` : null)} />
         <Kpi label="Custo produtos" icon={<AlertTriangle size={11} />} valor={'−' + brl0(s.custo)} cor="var(--warn)" sub="via Bling" />
         <Kpi label="Líquido" icon={<TrendingUp size={11} />} valor={brl0(s.liquido)} cor="var(--ok)" sub={s.margem != null ? `margem ${s.margem.toFixed(0)}%` : null} destaque />
       </div>
@@ -612,7 +663,7 @@ function Estatisticas({ s, aba }) {
           )}
         </div>
         <div className="glass rounded-xl p-3 flex-1 min-w-0">
-          <div className="text-[9px] uppercase tracking-wide text-faint font-bold mb-2">Resumo da aba «{aba}»</div>
+          <div className="text-[9px] uppercase tracking-wide text-faint font-bold mb-2">Resumo · «{aba}»</div>
           <div className="space-y-1.5 text-[11px]">
             <div className="flex items-center gap-2"><Package size={11} className="text-faint" /><span className="flex-1 text-dim">Pedidos</span><span className="num font-bold">{s.n}</span></div>
             <div className="flex items-center gap-2"><Boxes size={11} className="text-faint" /><span className="flex-1 text-dim">Unidades</span><span className="num font-bold">{s.unidades}</span></div>
@@ -624,7 +675,6 @@ function Estatisticas({ s, aba }) {
     </div>
   )
 }
-
 function Cell({ label, valor, sub, cor, forte, dim, destaque }) {
   return (
     <div className="rounded-lg px-2 py-1.5 text-center min-w-0" style={{ background: destaque ? 'var(--glass-hover)' : 'rgba(0,0,0,.2)' }}>
@@ -637,7 +687,9 @@ function Cell({ label, valor, sub, cor, forte, dim, destaque }) {
 function Card({ p, ativo, onOpen, sel, onToggleSel }) {
   const [imgErro, setImgErro] = useState(false)
   const st = ST_PEDIDO[p.status] || { t: p.status, c: 'var(--dim)' }
-  const stEnv = p.envio_status ? (ST_ENVIO[p.envio_status] || { t: p.envio_status, c: 'var(--dim)' }) : null
+  const env = p.envio || null
+  const stEnv = env && env.status ? (ST_ENVIO[env.status] || { t: env.status, c: 'var(--dim)' }) : null
+  const subLabel = env && env.substatus ? (SUBSTATUS_LABEL[env.substatus] || null) : null
   const itens = p.itens || []
   const principal = itens[0] || {}
   const extras = itens.length - 1
@@ -645,7 +697,6 @@ function Card({ p, ativo, onOpen, sel, onToggleSel }) {
   const h = horasDesde(p.date_created)
   const novo = h != null && h < 1
   const podeSelecionar = !!p.shipping_id
-
   const somaCampo = (campo) => {
     let tot = 0, tem = false
     itens.forEach((it) => { if (it[campo] != null) { tot += it[campo] * (it.quantidade || 1); tem = true } })
@@ -655,18 +706,17 @@ function Card({ p, ativo, onOpen, sel, onToggleSel }) {
   const mlListTotal = somaCampo('ml_preco')
   const cor = moneyCor(r.liquido, r.margem)
   const vsBling = (blingTotal != null && r.receita != null) ? r.receita - blingTotal : null
+  const prazo = env && (p.balde === 'hoje' || p.balde === 'proximos') ? prazoInfo(env.handling_limit) : null
 
   return (
-    <div className="glass rounded-2xl p-3" style={(sel || ativo) ? { borderColor: 'var(--accent)', boxShadow: '0 0 0 1px rgba(214,0,127,.3)' } : undefined}>
+    <div className="glass rounded-2xl p-3" style={(sel || ativo) ? { borderColor: 'var(--accent)', boxShadow: '0 0 0 1px rgba(214,0,127,.3)' } : (env && env.fiscal_pendente ? { borderColor: 'var(--danger)' } : undefined)}>
       <div className="flex items-start gap-3">
-        <button onClick={onToggleSel} disabled={!podeSelecionar} title={podeSelecionar ? 'Selecionar para impressão' : 'Sem envio associado'}
+        <button onClick={onToggleSel} disabled={!podeSelecionar} title={podeSelecionar ? 'Selecionar' : 'Sem envio'}
           className="shrink-0 mt-0.5 grid place-items-center" style={{ width: 18, height: 18, borderRadius: 5, border: `1.5px solid ${sel ? 'var(--accent)' : 'var(--faint)'}`, background: sel ? 'var(--accent)' : 'transparent', color: sel ? '#fff' : 'transparent', opacity: podeSelecionar ? 1 : 0.3, cursor: podeSelecionar ? 'pointer' : 'not-allowed' }}>
           <Check size={12} />
         </button>
         <button onClick={onOpen} className="rounded-lg overflow-hidden shrink-0 grid place-items-center" style={{ width: 52, height: 52, background: 'var(--glass-hover)', color: 'var(--faint)' }}>
-          {principal.imagem && !imgErro
-            ? <img src={principal.imagem} alt="" className="h-full w-full object-cover" onError={() => setImgErro(true)} />
-            : <Package size={20} />}
+          {principal.imagem && !imgErro ? <img src={principal.imagem} alt="" className="h-full w-full object-cover" onError={() => setImgErro(true)} /> : <Package size={20} />}
         </button>
         <button onClick={onOpen} className="flex-1 min-w-0 text-left">
           <div className="flex items-center gap-2 flex-wrap">
@@ -680,6 +730,12 @@ function Card({ p, ativo, onOpen, sel, onToggleSel }) {
             <span className="text-[10px] px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'rgba(0,0,0,.2)', color: 'var(--dim)' }}><User size={10} /> {p.buyer?.nickname || 'comprador'}</span>
             <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: 'var(--glass-hover)', color: st.c }}>{st.t}</span>
             {stEnv && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'var(--glass-hover)', color: stEnv.c }}><Truck size={10} /> {stEnv.t}</span>}
+            {subLabel && <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ background: 'rgba(0,0,0,.2)', color: 'var(--faint)' }}>{subLabel}</span>}
+            {prazo && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'var(--glass-hover)', color: prazo.tom }}><CalendarClock size={10} /> Despachar: {prazo.texto}</span>}
+            {env && env.tracking_number && p.balde === 'transito' && <span className="text-[10px] num px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'rgba(0,0,0,.2)', color: 'var(--dim)' }}><MapPinned size={10} /> {env.tracking_number}</span>}
+            {env && env.fiscal_pendente && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'rgba(255,122,122,.16)', color: 'var(--danger)' }}><AlertTriangle size={10} /> Sem dados fiscais</span>}
+            {env && env.devolucao && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'rgba(224,162,60,.16)', color: 'var(--warn)' }}><Undo2 size={10} /> Devolução</span>}
+            {!env && p.balde === 'sincronizando' && <span className="text-[10px] px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'var(--glass-hover)', color: 'var(--faint)' }}><Loader2 size={10} className="animate-spin" /> sincronizando</span>}
           </div>
         </button>
         <button onClick={onOpen} className="text-right shrink-0">
@@ -693,7 +749,7 @@ function Card({ p, ativo, onOpen, sel, onToggleSel }) {
         <Cell label="Vendido ML" valor={brl(r.receita)} forte />
         <Cell label="Preço Bling" valor={blingTotal != null ? brl(blingTotal) : '—'} dim />
         <Cell label="Anúncio ML" valor={mlListTotal != null ? brl(mlListTotal) : '—'} dim />
-        <Cell label="Tarifa ML" valor={r.tarifa != null ? '−' + brl(r.tarifa) : '—'} cor="var(--warn)" />
+        <Cell label="Tarifa ML" valor={(r.tarifa_total != null ? r.tarifa_total : r.tarifa) != null ? '−' + brl(r.tarifa_total != null ? r.tarifa_total : r.tarifa) : '—'} sub={r.frete_vendedor ? 'inc. frete' : null} cor="var(--warn)" />
         <Cell label="Custo" valor={r.custo != null ? '−' + brl(r.custo) : '—'} cor="var(--warn)" />
         <Cell label="Líquido" valor={r.liquido != null ? brl(r.liquido) : '—'} sub={r.margem != null ? `${r.margem.toFixed(0)}%` : null} cor={cor} forte destaque />
       </div>
@@ -708,7 +764,7 @@ function Card({ p, ativo, onOpen, sel, onToggleSel }) {
 }
 
 function Timeline({ orderStatus, shipStatus }) {
-  const passos = ['Pedido criado', 'Pagamento aprovado', 'Pronto p/ enviar', 'Enviado', 'Entregue']
+  const passos = ['Pedido criado', 'Pagamento aprovado', 'Pronto p/ despachar', 'Despachado', 'Entregue']
   let cur = orderStatus === 'paid' ? 2 : 1
   if (shipStatus === 'delivered') cur = 5
   else if (shipStatus === 'shipped') cur = 4
@@ -746,11 +802,26 @@ function Drawer({ p, envio, baixando, imprimindo, onEtiqueta, onImprimir, onClos
   const recebe = (r.receita != null && r.tarifa != null) ? r.receita - r.tarifa : null
   const tarifaPct = (r.receita > 0 && r.tarifa != null) ? Math.round(r.tarifa / r.receita * 100) : null
   const cor = moneyCor(r.liquido, r.margem)
+  const frete = r.frete_vendedor || 0
+  const totalML = r.tarifa_total != null ? r.tarifa_total : ((r.tarifa || 0) + frete)
+  const recebeML = (r.receita != null) ? r.receita - totalML : null
+  const comPct = r.comissao_pct != null ? r.comissao_pct : tarifaPct
+  const [tarifaDet, setTarifaDet] = useState(null)
+  const verTarifa = async () => {
+    if (tarifaDet) { setTarifaDet(null); return }
+    setTarifaDet('loading')
+    try { const d = await api.mlTarifaDetalhe(p.id); setTarifaDet(d) } catch { setTarifaDet('erro') }
+  }
   const sid = p.shipping_id
-  const dest = envio && envio !== 'loading' && envio !== 'erro' ? extrairDestino(envio) : null
-  const meta = extrairEnvioMeta(envio)
-  const shipStatus = envio && envio !== 'loading' && envio !== 'erro' ? envio.status : (p.envio_status || null)
+  const ec = p.envio || {}
+  const full = envio && envio !== 'loading' && envio !== 'erro' ? envio : null
+  const dest = full ? extrairDestino(full)
+    : (ec.receiver_nome ? { nome: ec.receiver_nome, linha: ec.receiver_endereco, cidade: ec.receiver_cidade, estado: ec.receiver_estado, cep: ec.receiver_cep } : null)
+  const shipStatus = ec.status || (full ? full.status : null)
   const stEnv = shipStatus ? (ST_ENVIO[shipStatus] || { t: shipStatus, c: 'var(--dim)' }) : null
+  const subLabel = ec.substatus ? (SUBSTATUS_LABEL[ec.substatus] || ec.substatus) : null
+  const prazo = prazoInfo(ec.handling_limit)
+  const modo = modoEnvio(ec.logistic_type ? ec : full)
 
   return (
     <div className="glass rounded-2xl overflow-hidden" style={{ borderColor: 'var(--accent)' }}>
@@ -758,12 +829,17 @@ function Drawer({ p, envio, baixando, imprimindo, onEtiqueta, onImprimir, onClos
         <span className="grid place-items-center shrink-0" style={{ width: 34, height: 34, borderRadius: 99, background: 'var(--accent2)', color: '#fff', fontWeight: 800, fontSize: 13 }}>{inicial}</span>
         <div className="flex-1 min-w-0">
           <div className="font-semibold truncate">{p.buyer?.nickname || 'Comprador'}</div>
-          <div className="text-[10px] text-faint num">#{p.id} · <span style={{ color: st.c }}>{stEnv ? stEnv.t : st.t}</span>{p.is_full ? <span style={{ color: ML }}> · Full</span> : ''}</div>
+          <div className="text-[10px] text-faint num">#{p.id} · <span style={{ color: (stEnv || st).c }}>{stEnv ? stEnv.t : st.t}</span>{p.is_full ? <span style={{ color: ML }}> · Full</span> : ''}</div>
         </div>
         <button onClick={onClose} className="text-faint hover:text-fg"><X size={18} /></button>
       </div>
 
       <div className="px-4 py-3">
+        {ec.fiscal_pendente && (
+          <div className="rounded-xl px-3 py-2 mb-3 flex items-start gap-2 text-[11.5px]" style={{ background: 'rgba(255,122,122,.12)', border: '1px solid var(--danger)', color: 'var(--danger)' }}>
+            <AlertTriangle size={14} className="mt-0.5 shrink-0" /> <span>Este pedido está <b>sem dados fiscais</b>. O ML exige a nota antes de despachar. A emissão via Bling entra em seguida no painel.</span>
+          </div>
+        )}
         <div className="grid grid-cols-2 gap-2 mb-3">
           <button onClick={onEtiqueta} disabled={!sid || baixando} className="text-[11.5px] font-medium px-2 py-2 rounded-lg text-white inline-flex items-center justify-center gap-1.5 disabled:opacity-50" style={{ background: 'var(--accent)' }}>
             {baixando ? <Loader2 size={13} className="animate-spin" /> : <Tag size={13} />} Baixar etiqueta
@@ -771,7 +847,7 @@ function Drawer({ p, envio, baixando, imprimindo, onEtiqueta, onImprimir, onClos
           <button onClick={onImprimir} disabled={imprimindo} className="text-[11.5px] font-medium px-2 py-2 rounded-lg inline-flex items-center justify-center gap-1.5 disabled:opacity-50" style={{ border: '1px solid var(--glass-border)', color: 'var(--dim)' }}>
             {imprimindo ? <Loader2 size={13} className="animate-spin" /> : <Printer size={13} />} Imprimir pedido
           </button>
-          <button disabled className="text-[11.5px] font-medium px-2 py-2 rounded-lg inline-flex items-center justify-center gap-1.5 opacity-50 cursor-default" style={{ border: '1px solid var(--glass-border)', color: 'var(--faint)' }} title="Em breve: nota fiscal via Bling">
+          <button disabled className="text-[11.5px] font-medium px-2 py-2 rounded-lg inline-flex items-center justify-center gap-1.5 opacity-50 cursor-default" style={{ border: '1px solid var(--glass-border)', color: 'var(--faint)' }} title="Em breve: NF-e via Bling">
             <FileText size={13} /> NF-e (Bling)
           </button>
           <a href={`https://www.mercadolivre.com.br/vendas/${p.id}/detalhe`} target="_blank" rel="noreferrer" className="text-[11.5px] font-medium px-2 py-2 rounded-lg inline-flex items-center justify-center gap-1.5" style={{ border: '1px solid var(--glass-border)', color: 'var(--dim)' }}>
@@ -782,8 +858,11 @@ function Drawer({ p, envio, baixando, imprimindo, onEtiqueta, onImprimir, onClos
         <div className="text-[11.5px] space-y-0.5">
           <div className="flex justify-between py-0.5"><span className="text-dim flex items-center gap-1.5"><Clock size={12} /> Criado</span><span className="num font-medium">{dataHora(p.date_created)}</span></div>
           {p.pago_em && <div className="flex justify-between py-0.5"><span className="text-dim flex items-center gap-1.5"><CheckCircle2 size={12} /> Pago</span><span className="num font-medium">{dataHora(p.pago_em)}</span></div>}
-          {meta.prazo && <div className="flex justify-between py-0.5"><span className="text-dim flex items-center gap-1.5"><Truck size={12} /> Despachar até</span><span className="num font-medium" style={{ color: 'var(--warn)' }}>{dataHora(meta.prazo)}</span></div>}
-          {meta.modo && <div className="flex justify-between py-0.5"><span className="text-dim flex items-center gap-1.5"><Boxes size={12} /> Envio</span><span className="font-medium">{meta.modo}</span></div>}
+          {prazo && <div className="flex justify-between py-0.5"><span className="text-dim flex items-center gap-1.5"><CalendarClock size={12} /> Despachar até</span><span className="num font-medium" style={{ color: prazo.tom }}>{prazo.texto === 'atrasado' ? 'atrasado' : dataHora(ec.handling_limit)}</span></div>}
+          {modo && <div className="flex justify-between py-0.5"><span className="text-dim flex items-center gap-1.5"><Boxes size={12} /> Envio</span><span className="font-medium">{modo}</span></div>}
+          {subLabel && <div className="flex justify-between py-0.5"><span className="text-dim flex items-center gap-1.5"><Truck size={12} /> Situação</span><span className="font-medium">{subLabel}</span></div>}
+          {ec.tracking_number && <div className="flex justify-between py-0.5"><span className="text-dim flex items-center gap-1.5"><MapPinned size={12} /> Rastreio</span><span className="num font-medium">{ec.tracking_number}{ec.tracking_method ? ` · ${ec.tracking_method}` : ''}</span></div>}
+          {ec.custo_comprador != null && <div className="flex justify-between py-0.5"><span className="text-dim flex items-center gap-1.5"><Truck size={12} /> Frete (comprador)</span><span className="num font-medium">{brl(ec.custo_comprador)}</span></div>}
         </div>
 
         <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--glass-border)' }}>
@@ -808,10 +887,31 @@ function Drawer({ p, envio, baixando, imprimindo, onEtiqueta, onImprimir, onClos
           <div className="text-[9.5px] uppercase tracking-wide text-faint font-bold mb-2 flex items-center gap-1.5"><Wallet size={12} /> Repasse do Mercado Livre</div>
           <div className="rounded-xl p-3" style={{ background: 'rgba(0,0,0,.2)' }}>
             <div className="flex justify-between text-[12px] py-0.5"><span className="text-dim">Receita (comprador pagou)</span><span className="num">{brl(r.receita)}</span></div>
-            <div className="flex justify-between text-[12px] py-0.5"><span className="text-dim">Tarifa do Mercado Livre{tarifaPct != null ? ` (${tarifaPct}%)` : ''}</span><span className="num" style={{ color: 'var(--danger)' }}>−{brl(r.tarifa)}</span></div>
-            <div className="flex justify-between text-[12px] py-2 mt-1 font-bold" style={{ borderTop: '1px solid var(--glass-border)' }}><span>Você recebe (líquido de tarifa)</span><span className="num" style={{ color: 'var(--ok)' }}>{brl(recebe)}</span></div>
+            <div className="flex justify-between text-[12px] py-0.5"><span className="text-dim">Comissão do ML{comPct != null ? ` (${typeof comPct === 'number' ? comPct.toFixed(1) : comPct}%)` : ''}</span><span className="num" style={{ color: 'var(--danger)' }}>−{brl(r.tarifa)}</span></div>
+            {frete > 0 && <div className="flex justify-between text-[12px] py-0.5"><span className="text-dim">Frete do vendedor</span><span className="num" style={{ color: 'var(--danger)' }}>−{brl(frete)}</span></div>}
+            <div className="flex justify-between text-[12px] py-1" style={{ borderTop: '1px dashed var(--glass-border)' }}><span className="text-dim">Total de custos ML</span><span className="num" style={{ color: 'var(--danger)' }}>−{brl(totalML)}</span></div>
+            <div className="flex justify-between text-[12px] py-2 mt-1 font-bold" style={{ borderTop: '1px solid var(--glass-border)' }}><span>Você recebe do ML</span><span className="num" style={{ color: 'var(--ok)' }}>{brl(recebeML)}</span></div>
             <div className="flex justify-between text-[12px] py-0.5"><span className="text-dim">Custo dos produtos (Bling)</span><span className="num" style={{ color: r.custo ? 'var(--fg)' : 'var(--faint)' }}>{r.custo ? '−' + brl(r.custo) : 'R$ 0,00 — cadastre'}</span></div>
           </div>
+          <button onClick={verTarifa} className="text-[10.5px] mt-1.5 inline-flex items-center gap-1 text-dim hover:text-fg">
+            <DollarSign size={11} /> {tarifaDet ? 'Ocultar' : 'Ver'} detalhamento de faturamento
+          </button>
+          {tarifaDet === 'loading' && <div className="text-[10.5px] text-faint mt-1 flex items-center gap-1.5"><Loader2 size={11} className="animate-spin" /> lendo faturamento…</div>}
+          {tarifaDet === 'erro' && <div className="text-[10.5px] text-faint mt-1">Faturamento ainda não disponível para este pedido (a fatura fecha após a venda).</div>}
+          {tarifaDet && tarifaDet !== 'loading' && tarifaDet !== 'erro' && (
+            <div className="rounded-lg p-2 mt-1 text-[10.5px]" style={{ background: 'rgba(0,0,0,.2)' }}>
+              {(!tarifaDet.itens || !tarifaDet.itens.length) ? <span className="text-faint">Sem detalhamento de fatura para este pedido ainda.</span>
+                : tarifaDet.itens.map((t, i) => (
+                  <div key={i} className="space-y-0.5">
+                    {t.tarifa_bruta != null && <div className="flex justify-between"><span className="text-faint">Tarifa bruta</span><span className="num">{brl(t.tarifa_bruta)}</span></div>}
+                    {t.rebate != null && t.rebate !== 0 && <div className="flex justify-between"><span className="text-faint">Bonificação</span><span className="num" style={{ color: 'var(--ok)' }}>+{brl(t.rebate)}</span></div>}
+                    {t.tarifa_liquida != null && <div className="flex justify-between font-bold"><span>Tarifa líquida cobrada</span><span className="num">{brl(t.tarifa_liquida)}</span></div>}
+                    {t.financing_fee != null && t.financing_fee !== 0 && <div className="flex justify-between"><span className="text-faint">Parcelamento</span><span className="num">{brl(t.financing_fee)}</span></div>}
+                  </div>
+                ))}
+              <div className="text-[9.5px] text-faint mt-1">Fonte: relatório de faturamento do Mercado Livre.</div>
+            </div>
+          )}
           <div className="flex justify-between items-center rounded-xl px-3 py-2.5 mt-2" style={{ background: 'rgba(47,217,141,.08)', border: '1px solid rgba(47,217,141,.3)' }}>
             <span className="text-[12px] font-bold flex items-center gap-1.5" style={{ color: cor }}><TrendingUp size={13} /> Margem após taxas</span>
             <span className="num font-bold" style={{ fontSize: 16, color: cor }}>{brl(r.liquido)}{r.margem != null ? <span style={{ fontSize: 11 }}> ({r.margem.toFixed(0)}%)</span> : ''}</span>
@@ -822,8 +922,8 @@ function Drawer({ p, envio, baixando, imprimindo, onEtiqueta, onImprimir, onClos
         <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--glass-border)' }}>
           <div className="text-[9.5px] uppercase tracking-wide text-faint font-bold mb-2 flex items-center gap-1.5"><MapPin size={12} /> Entrega <span className="text-[8px] px-1 py-0.5 rounded" style={{ background: 'rgba(242,194,0,.18)', color: ML }}>endereço real · ML</span></div>
           {!sid ? <div className="text-[11px] text-faint">Este pedido não tem envio associado.</div>
-            : envio === 'loading' ? <div className="text-[11px] text-faint flex items-center gap-2"><Loader2 size={12} className="animate-spin" /> lendo endereço…</div>
-              : envio === 'erro' || !dest ? <div className="text-[11px] text-faint">Não consegui ler o endereço deste envio.</div>
+            : !dest && envio === 'loading' ? <div className="text-[11px] text-faint flex items-center gap-2"><Loader2 size={12} className="animate-spin" /> lendo endereço…</div>
+              : !dest ? <div className="text-[11px] text-faint">Endereço ainda não sincronizado.</div>
                 : (
                   <div className="text-[12px] leading-relaxed">
                     <div className="flex items-center gap-1.5 font-medium"><User size={12} className="text-faint" /> {dest.nome || '—'}</div>
@@ -865,7 +965,7 @@ function PersonalizarModal({ onClose }) {
           <button onClick={onClose} className="ml-auto text-faint hover:text-fg"><X size={18} /></button>
         </div>
         <div className="p-4 space-y-3">
-          <p className="text-[11.5px] text-dim">Estes dados aparecem no topo da folha por pedido e na lista de separação. Ficam salvos só neste navegador.</p>
+          <p className="text-[11.5px] text-dim">Estes dados aparecem no topo da folha por pedido e na separação. Ficam salvos só neste navegador.</p>
           {campo('Nome / Loja', 'nome', 'Sóstrass Armarinhos')}
           {campo('CNPJ', 'cnpj', '00.000.000/0001-00')}
           {campo('Endereço', 'endereco', 'Rua, nº, bairro — Limeira/SP')}
@@ -876,6 +976,122 @@ function PersonalizarModal({ onClose }) {
           <button onClick={salvar} className="text-sm px-4 py-1.5 rounded-lg text-white inline-flex items-center gap-1.5" style={{ background: 'var(--accent)' }}><Check size={14} /> Salvar</button>
         </div>
       </div>
+    </div>
+  )
+}
+
+/* =========================================================================== */
+const CLAIM_STAGE = { claim: 'Reclamação', dispute: 'Disputa', recontact: 'Recontato', none: '—' }
+const CLAIM_STATUS = { opened: { t: 'Aberta', c: 'var(--warn)' }, closed: { t: 'Fechada', c: 'var(--dim)' } }
+
+function PosVenda({ onFechar }) {
+  const [itens, setItens] = useState(null)
+  const [status, setStatus] = useState('opened')
+  const [aberto, setAberto] = useState(null)
+  const [detalhe, setDetalhe] = useState({})
+
+  useEffect(() => {
+    let vivo = true
+    setItens(null); setAberto(null)
+    api.mlPosvenda(status).then((d) => { if (vivo) setItens(d.itens || []) }).catch(() => { if (vivo) setItens([]) })
+    return () => { vivo = false }
+  }, [status])
+
+  const abrir = async (c) => {
+    if (aberto === c.claim_id) { setAberto(null); return }
+    setAberto(c.claim_id)
+    if (!detalhe[c.claim_id]) {
+      setDetalhe((d) => ({ ...d, [c.claim_id]: 'loading' }))
+      try { const x = await api.mlPosvendaDetalhe(c.claim_id); setDetalhe((d) => ({ ...d, [c.claim_id]: x })) }
+      catch { setDetalhe((d) => ({ ...d, [c.claim_id]: 'erro' })) }
+    }
+  }
+
+  return (
+    <div className="mt-3">
+      <div className="flex items-center gap-2 flex-wrap mb-3">
+        <span className="font-display font-semibold text-sm inline-flex items-center gap-1.5"><Undo2 size={15} style={{ color: 'var(--warn)' }} /> Pós-venda / Devoluções</span>
+        <div className="inline-flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--glass-border)' }}>
+          {[{ id: 'opened', l: 'Abertas' }, { id: 'closed', l: 'Fechadas' }].map((s) => (
+            <button key={s.id} onClick={() => setStatus(s.id)} className="text-[11px] font-bold px-3 py-1.5"
+              style={status === s.id ? { background: 'var(--accent)', color: '#fff' } : { background: 'transparent', color: 'var(--faint)' }}>{s.l}</button>
+          ))}
+        </div>
+        <button onClick={onFechar} className="ml-auto text-[11px] px-2.5 py-1.5 rounded-lg glass text-dim hover:text-fg inline-flex items-center gap-1.5"><ChevronLeft size={13} /> Voltar aos pedidos</button>
+      </div>
+
+      {itens === null ? (
+        <div className="text-dim text-sm flex items-center gap-2 p-4"><Loader2 size={16} className="animate-spin" /> Buscando reclamações no Mercado Livre…</div>
+      ) : itens.length === 0 ? (
+        <div className="glass rounded-2xl p-10 text-center">
+          <CheckCircle2 size={28} className="mx-auto mb-3" style={{ color: 'var(--ok)' }} />
+          <div className="font-medium">Nenhuma reclamação {status === 'opened' ? 'aberta' : 'fechada'}</div>
+          <div className="text-sm text-dim mt-1">Reclamações e devoluções aparecem aqui com o que precisa ser feito e o prazo.</div>
+        </div>
+      ) : (
+        <div className="space-y-2.5">
+          {itens.map((c) => {
+            const stt = CLAIM_STATUS[c.status] || { t: c.status, c: 'var(--dim)' }
+            const det = detalhe[c.claim_id]
+            const detOk = det && det !== 'loading' && det !== 'erro'
+            const on = aberto === c.claim_id
+            return (
+              <div key={c.claim_id} className="glass rounded-2xl p-3" style={on ? { borderColor: 'var(--warn)' } : undefined}>
+                <button onClick={() => abrir(c)} className="w-full text-left flex items-start gap-3">
+                  <span className="grid place-items-center shrink-0 mt-0.5" style={{ width: 34, height: 34, borderRadius: 10, background: 'rgba(224,162,60,.14)', color: 'var(--warn)' }}><Undo2 size={16} /></span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-medium">{c.reason_grupo || 'Reclamação'}</span>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: 'var(--glass-hover)', color: stt.c }}>{stt.t}</span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ background: 'rgba(0,0,0,.2)', color: 'var(--faint)' }}>{CLAIM_STAGE[c.stage] || c.stage}</span>
+                    </div>
+                    <div className="text-[11px] text-faint num mt-0.5">
+                      {c.order_id ? `Pedido #${c.order_id}` : `Claim #${c.claim_id}`}{c.reason_id ? ` · motivo ${c.reason_id}` : ''}{c.last_updated ? ` · ${dataHora(c.last_updated)}` : ''}
+                    </div>
+                  </div>
+                  <span className="text-faint shrink-0 mt-1">{on ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</span>
+                </button>
+
+                {on && (
+                  <div className="mt-3 pt-3 text-[12px]" style={{ borderTop: '1px solid var(--glass-border)' }}>
+                    {det === 'loading' ? <div className="text-faint flex items-center gap-2"><Loader2 size={13} className="animate-spin" /> lendo detalhe…</div>
+                      : det === 'erro' || !detOk ? <div className="text-faint">Não consegui ler o detalhe desta reclamação.</div>
+                        : (
+                          <div className="space-y-2">
+                            {det.tem_incentivo && (
+                              <div className="rounded-lg px-3 py-2 flex items-start gap-2" style={{ background: 'rgba(255,122,122,.12)', border: '1px solid var(--danger)', color: 'var(--danger)' }}>
+                                <AlertTriangle size={13} className="mt-0.5 shrink-0" /> <span><b>Responda em até 48h</b> para não afetar sua reputação.</span>
+                              </div>
+                            )}
+                            {det.afeta_reputacao && !det.tem_incentivo && (
+                              <div className="text-[11px]" style={{ color: 'var(--warn)' }}><AlertTriangle size={11} className="inline mr-1" /> Esta reclamação afeta a reputação.</div>
+                            )}
+                            {(det.titulo || det.reason_nome) && <div><span className="text-faint">Motivo:</span> <b>{det.titulo || det.reason_nome}</b></div>}
+                            {det.problema && <div><span className="text-faint">Problema:</span> {det.problema}</div>}
+                            {det.descricao && <div className="text-dim">{det.descricao}</div>}
+                            <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-dim">
+                              {det.due_date && <span className="inline-flex items-center gap-1"><Clock size={11} /> Prazo: <span className="num">{dataHora(det.due_date)}</span></span>}
+                              {det.responsavel && <span className="inline-flex items-center gap-1"><User size={11} /> Ação de: {det.responsavel === 'seller' ? 'você' : det.responsavel === 'buyer' ? 'comprador' : 'mediador'}</span>}
+                            </div>
+                            {det.acoes_vendedor && det.acoes_vendedor.length > 0 && (
+                              <div className="text-[11px] text-dim">Ações disponíveis: {det.acoes_vendedor.map((a) => a.action).filter(Boolean).join(', ')}</div>
+                            )}
+                            <div className="flex gap-2 pt-1">
+                              <a href={c.order_id ? `https://www.mercadolivre.com.br/vendas/${c.order_id}/detalhe` : 'https://www.mercadolivre.com.br/vendas'} target="_blank" rel="noreferrer"
+                                className="text-[11.5px] font-semibold px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5" style={{ background: ML, color: '#3a2c00' }}>
+                                <ExternalLink size={13} /> Abrir no Mercado Livre
+                              </a>
+                            </div>
+                            <div className="text-[10px] text-faint pt-1">Responder e resolver a reclamação por aqui (mensagens e devolução) entra na próxima onda; por ora, a ação é feita no ML.</div>
+                          </div>
+                        )}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

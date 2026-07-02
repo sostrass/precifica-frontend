@@ -125,6 +125,10 @@ export const api = {
   mlPedidosEnriquecido: (status = 'paid', offset = 0, limit = 30, desde = '') => req(`/api/mercadolivre/pedidos-enriquecido?status=${status}&offset=${offset}&limit=${limit}${desde ? `&desde=${encodeURIComponent(desde)}` : ''}`),
   mlPedido: (id) => req(`/api/mercadolivre/pedido/${id}`),
   mlEnvio: (shipmentId) => req(`/api/mercadolivre/envio/${shipmentId}`),
+  mlEnviosSincronizar: (shipmentIds = [], cap = 60) => req('/api/mercadolivre/envios/sincronizar', { method: 'POST', body: { shipment_ids: shipmentIds, cap } }),
+  mlPosvenda: (status = 'opened') => req(`/api/mercadolivre/posvenda?status=${status}`),
+  mlPosvendaDetalhe: (claimId) => req(`/api/mercadolivre/posvenda/${claimId}`),
+  mlTarifaDetalhe: (orderId) => req(`/api/mercadolivre/tarifa/${orderId}`),
   mlEtiqueta: async (shipmentIds, formato = 'pdf') => {
     const headers = {}
     if (getToken()) headers.Authorization = `Bearer ${getToken()}`
