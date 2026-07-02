@@ -268,6 +268,7 @@ export default function Pedidos() {
   const [pgto, setPgto] = useState('todos')
   const [flagFiscal, setFlagFiscal] = useState(false)
   const [flagDevol, setFlagDevol] = useState(false)
+  const [flagNaoLidas, setFlagNaoLidas] = useState(false)
   const [escopo, setEscopo] = useState('tudo')
   const [busca, setBusca] = useState('')
   const [pedidos, setPedidos] = useState(null)
@@ -281,6 +282,7 @@ export default function Pedidos() {
   const [imprimindo, setImprimindo] = useState('')
   const [personalizar, setPersonalizar] = useState(false)
   const [sincronizando, setSincronizando] = useState(false)
+  const [syncErro, setSyncErro] = useState('')
   const [naoLidas, setNaoLidas] = useState(null)
   const [nfeMap, setNfeMap] = useState({})
   const [calAberto, setCalAberto] = useState(false)
@@ -316,7 +318,15 @@ export default function Pedidos() {
   }, [buscar, notify])
 
   useEffect(() => { if (conn?.conta) carregar() }, [conn?.conta, carregar])
-  useEffect(() => { if (conn?.conta) api.mlNaoLidas().then((d) => setNaoLidas(d && d.ok ? d.total : null)).catch(() => setNaoLidas(null)) }, [conn?.conta])
+  useEffect(() => {
+    if (!conn?.conta) return
+    api.mlNaoLidas().then((d) => {
+      if (!d || !d.ok) { setNaoLidas(null); return }
+      const ids = new Set()
+      ;(d.recursos || []).forEach((r) => { const m = String(r.resource || '').match(/packs?\/(\d+)/); if (m) ids.add(m[1]) })
+      setNaoLidas({ total: d.total || 0, ids })
+    }).catch(() => setNaoLidas(null))
+  }, [conn?.conta])
   useEffect(() => { rodadasRef.current = 0 }, [periodo, custom])
   useEffect(() => {
     if (!pedidos || !pedidos.length) { setNfeMap({}); return }
@@ -324,23 +334,27 @@ export default function Pedidos() {
     api.mlNfeStatus(pedidos.map((p) => String(p.id))).then((d) => { if (vivo) setNfeMap((d && d.mapa) || {}) }).catch(() => {})
     return () => { vivo = false }
   }, [pedidos])
-  useEffect(() => { setPage(1) }, [busca, escopo, envioTab, pgto, flagFiscal, flagDevol, ordem])
+  useEffect(() => { setPage(1) }, [busca, escopo, envioTab, pgto, flagFiscal, flagDevol, flagNaoLidas, ordem])
 
   // Aquece o cache de envios progressivamente (sem travar a lista); webhooks fazem o resto.
   const backfill = useCallback(async (auto) => {
     const ids = (pedidos || []).filter((p) => !p.envio && p.shipping_id).map((p) => String(p.shipping_id))
     if (!ids.length) return
+    if (auto) rodadasRef.current += 1
     setSincronizando(true)
-    try { await api.mlEnviosSincronizar(ids.slice(0, 60), 60); if (auto) rodadasRef.current += 1; await buscar() }
-    catch (_) { /* silencioso */ }
+    try {
+      const r = await api.mlEnviosSincronizar(ids.slice(0, 15), 15)
+      setSyncErro(r && (r.total || 0) > 0 && (r.buscados || 0) === 0 ? 'nao_leu' : '')
+      await buscar()
+    } catch (_) { setSyncErro('falhou') }
     setSincronizando(false)
   }, [pedidos, buscar])
 
   useEffect(() => {
     if (!pedidos || !sstats) return
     if ((sstats.sincronizando || 0) <= 0) return
-    if (rodadasRef.current >= 6 || sincronizando) return
-    const t = setTimeout(() => backfill(true), 150)
+    if (rodadasRef.current >= 12 || sincronizando) return
+    const t = setTimeout(() => backfill(true), 200)
     return () => clearTimeout(t)
   }, [pedidos, sstats, sincronizando, backfill])
 
@@ -368,9 +382,11 @@ export default function Pedidos() {
     const b = (sstats && sstats.baldes) || {}
     return { todos: (pedidos || []).length, hoje: b.hoje || 0, proximos: b.proximos || 0, transito: b.transito || 0, finalizado: b.finalizado || 0, cancelado: b.cancelado || 0 }
   }, [sstats, pedidos])
+
   const nSync = (sstats && sstats.sincronizando) || 0
   const nFiscal = (sstats && sstats.fiscal_pendentes) || 0
   const nDevol = (sstats && sstats.devolucoes) || 0
+  const nNaoLidas = (naoLidas && naoLidas.total) || 0
 
   const naAba = useMemo(() => (pedidos || []).filter((p) => envioTab === 'todos' || p.balde === envioTab), [pedidos, envioTab])
   const contPgto = useMemo(() => {
@@ -383,6 +399,7 @@ export default function Pedidos() {
     if (pgto !== 'todos' && p.status !== pgto) return false
     if (flagFiscal && !(p.envio && p.envio.fiscal_pendente)) return false
     if (flagDevol && !(p.envio && p.envio.devolucao)) return false
+    if (flagNaoLidas && !(naoLidas && naoLidas.ids && naoLidas.ids.has(String(p.pack_id || p.id)))) return false
     if (!busca.trim()) return true
     const t = busca.toLowerCase()
     const id = String(p.id).toLowerCase()
@@ -393,7 +410,7 @@ export default function Pedidos() {
     if (escopo === 'comprador') return comp.includes(t)
     if (escopo === 'produto') return prod.includes(t)
     return id.includes(t) || comp.includes(t) || prod.includes(t) || trk.includes(t)
-  }), [naAba, pgto, flagFiscal, flagDevol, busca, escopo])
+  }), [naAba, pgto, flagFiscal, flagDevol, flagNaoLidas, naoLidas, busca, escopo])
 
   const ordenada = useMemo(() => {
     const arr = [...filtrada]
@@ -585,10 +602,11 @@ export default function Pedidos() {
               style={flagDevol ? { background: 'rgba(224,162,60,.16)', color: 'var(--warn)', border: '1px solid var(--warn)' } : { border: '1px solid var(--glass-border)', color: nDevol ? 'var(--warn)' : 'var(--faint)' }} title="Devoluções / pós-venda">
               <Undo2 size={12} /> Devoluções <span className="num">{nDevol}</span>
             </button>
-            {naoLidas > 0 && (
-              <span className="text-[11px] font-semibold px-2.5 py-1 rounded-lg inline-flex items-center gap-1.5" style={{ background: 'rgba(214,0,127,.14)', color: 'var(--accent)' }} title="Conversas não lidas — abra um pedido para responder">
-                <Send size={12} /> {naoLidas} não lida(s)
-              </span>
+            {nNaoLidas > 0 && (
+              <button onClick={() => setFlagNaoLidas((v) => !v)} className="text-[11px] font-semibold px-2.5 py-1 rounded-lg inline-flex items-center gap-1.5"
+                style={flagNaoLidas ? { background: 'var(--accent)', color: '#fff' } : { background: 'rgba(214,0,127,.14)', color: 'var(--accent)' }} title="Mostrar só pedidos com conversa não lida">
+                <Send size={12} /> {nNaoLidas} não lida(s)
+              </button>
             )}
           </div>
         </div>
@@ -598,11 +616,15 @@ export default function Pedidos() {
         ) : (
           <>
             {nSync > 0 && (
-              <div className="rounded-xl px-3 py-2 flex items-center gap-3 flex-wrap mt-3 mb-1" style={{ background: 'rgba(242,194,0,.08)', border: '1px solid rgba(242,194,0,.3)' }}>
-                {sincronizando ? <Loader2 size={14} className="animate-spin" style={{ color: ML }} /> : <RotateCcw size={14} style={{ color: ML }} />}
-                <span className="text-[12px] text-dim flex-1">Sincronizando o estado de envio de <b className="num">{nSync}</b> pedido(s) com o Mercado Livre. As abas se ajustam conforme carrega — em tempo real depois disso.</span>
-                {rodadasRef.current >= 6 && !sincronizando && (
-                  <button onClick={() => { rodadasRef.current = 0; backfill(false) }} className="text-[11px] font-semibold px-2.5 py-1 rounded-lg" style={{ background: ML, color: '#3a2c00' }}>Sincronizar mais</button>
+              <div className="rounded-xl px-3 py-2 flex items-center gap-3 flex-wrap mt-3 mb-1" style={{ background: syncErro ? 'rgba(255,122,122,.08)' : 'rgba(242,194,0,.08)', border: `1px solid ${syncErro ? 'var(--danger)' : 'rgba(242,194,0,.3)'}` }}>
+                {sincronizando ? <Loader2 size={14} className="animate-spin" style={{ color: ML }} /> : syncErro ? <AlertTriangle size={14} style={{ color: 'var(--danger)' }} /> : <RotateCcw size={14} style={{ color: ML }} />}
+                {syncErro ? (
+                  <span className="text-[12px] flex-1" style={{ color: 'var(--danger)' }}>Não consegui ler o estado de envio no Mercado Livre para <b className="num">{nSync}</b> pedido(s). Os valores por venda seguem corretos; as abas de envio ficam indisponíveis até isso resolver.</span>
+                ) : (
+                  <span className="text-[12px] text-dim flex-1">Sincronizando o estado de envio de <b className="num">{nSync}</b> pedido(s) com o Mercado Livre. As abas se ajustam conforme carrega — em tempo real depois disso.</span>
+                )}
+                {!sincronizando && (
+                  <button onClick={() => { rodadasRef.current = 0; setSyncErro(''); backfill(false) }} className="text-[11px] font-semibold px-2.5 py-1 rounded-lg" style={{ background: ML, color: '#3a2c00' }}>Tentar sincronizar</button>
                 )}
               </div>
             )}
@@ -644,8 +666,8 @@ export default function Pedidos() {
             {filtrada.length === 0 ? (
               <div className="glass rounded-2xl p-10 text-center mt-1">
                 <CheckCircle2 size={28} className="mx-auto mb-3" style={{ color: 'var(--ok)' }} />
-                <div className="font-medium">Nada em «{abaAtual}»{flagFiscal ? ' sem dados fiscais' : ''}{flagDevol ? ' com devolução' : ''}</div>
-                <div className="text-sm text-dim mt-1">{nSync > 0 ? 'Alguns envios ainda estão sincronizando.' : 'Ajuste o balde, o pagamento, o período ou a busca.'}</div>
+                <div className="font-medium">Nada em «{abaAtual}»{flagFiscal ? ' sem dados fiscais' : ''}{flagDevol ? ' com devolução' : ''}{flagNaoLidas ? ' com conversa não lida' : ''}</div>
+                <div className="text-sm text-dim mt-1">{nSync > 0 ? 'Alguns envios ainda estão sincronizando.' : 'Ajuste a aba, o pagamento, o período ou a busca.'}</div>
               </div>
             ) : (
               <div className={ativoPedido ? 'grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(380px,470px)] gap-4 items-start' : ''}>
@@ -709,8 +731,8 @@ function Estatisticas({ s, aba }) {
         <Kpi label="Receita" icon={<Wallet size={11} />} valor={brl0(s.receita)} sub="na aba" />
         <Kpi label="Ticket médio" icon={<DollarSign size={11} />} valor={brl(s.ticket)} sub="por pedido" />
         <Kpi label="Custos ML" icon={<Tag size={11} />} valor={'−' + brl0(s.custosML)} cor="var(--warn)" sub={s.frete > 0 ? `comissão ${brl0(s.tarifas)} + frete ${brl0(s.frete)}` : (s.receita > 0 ? `${Math.round(s.tarifas / s.receita * 100)}% da receita` : null)} />
-        <Kpi label="Custo produtos" icon={<AlertTriangle size={11} />} valor={'−' + brl0(s.custo)} cor="var(--warn)" sub="via Bling" />
-        <Kpi label="Líquido" icon={<TrendingUp size={11} />} valor={brl0(s.liquido)} cor="var(--ok)" sub={s.margem != null ? `margem ${s.margem.toFixed(0)}%` : null} destaque />
+        <Kpi label="Custo produtos" icon={<AlertTriangle size={11} />} valor={'−' + brl0(s.custo)} cor={s.custo < 1 && s.n > 0 ? 'var(--danger)' : 'var(--warn)'} sub={s.custo < 1 && s.n > 0 ? 'sem custo no Bling — margem parcial' : 'via Bling'} />
+        <Kpi label="Líquido" icon={<TrendingUp size={11} />} valor={brl0(s.liquido)} cor="var(--ok)" sub={s.margem != null ? `margem ${s.margem.toFixed(0)}%${s.custo < 1 && s.n > 0 ? ' (s/ custo)' : ''}` : null} destaque />
       </div>
       <div className="flex gap-3 flex-col md:flex-row">
         <div className="glass rounded-xl p-3 flex-[2] min-w-0">
@@ -1263,25 +1285,38 @@ function PosVenda({ onFechar }) {
 
 /* =========================================================================== */
 const MES_LONGO = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro']
+const MES_CURTO = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
 const DIA_SEMANA = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S']
 function ymd(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
+function ultimoDiaMes(ano, m) { return new Date(ano, m + 1, 0).getDate() }
 
 function CalendarioRange({ de, ate, onAplicar, onClose }) {
-  const hoje = new Date(); hoje.setHours(23, 59, 59, 999)
+  const hojeFim = new Date(); hojeFim.setHours(23, 59, 59, 999)
+  const anoAtual = new Date().getFullYear()
   const inicial = de ? new Date(de + 'T12:00:00') : new Date()
+  const [modo, setModo] = useState('dia')
   const [mes, setMes] = useState(new Date(inicial.getFullYear(), inicial.getMonth(), 1))
+  const [anoView, setAnoView] = useState(inicial.getFullYear())
   const [selDe, setSelDe] = useState(de || null)
   const [selAte, setSelAte] = useState(ate || null)
 
-  const clicar = (dstr) => {
+  const clicarDia = (dstr) => {
     if (!selDe || (selDe && selAte)) { setSelDe(dstr); setSelAte(null) }
     else if (dstr < selDe) { setSelAte(selDe); setSelDe(dstr) }
     else setSelAte(dstr)
   }
+  const escolherMes = (ano, m) => {
+    const fim = new Date(ano, m, ultimoDiaMes(ano, m)); const fimReal = fim > hojeFim ? new Date() : fim
+    setSelDe(ymd(new Date(ano, m, 1))); setSelAte(ymd(fimReal))
+  }
+  const escolherAno = (ano) => {
+    const fim = new Date(ano, 11, 31); const fimReal = fim > hojeFim ? new Date() : fim
+    setSelDe(`${ano}-01-01`); setSelAte(ymd(fimReal))
+  }
   const dias = useMemo(() => {
     const ano = mes.getFullYear(), m = mes.getMonth()
     const offset = new Date(ano, m, 1).getDay()
-    const qtd = new Date(ano, m + 1, 0).getDate()
+    const qtd = ultimoDiaMes(ano, m)
     const cells = []
     for (let i = 0; i < offset; i++) cells.push(null)
     for (let d = 1; d <= qtd; d++) cells.push(new Date(ano, m, d))
@@ -1289,39 +1324,87 @@ function CalendarioRange({ de, ate, onAplicar, onClose }) {
   }, [mes])
   const naFaixa = (dstr) => selDe && selAte && dstr > selDe && dstr < selAte
   const nav = (delta) => setMes((x) => new Date(x.getFullYear(), x.getMonth() + delta, 1))
-  const atalho = (dias) => { const a = new Date(); const d = new Date(); d.setDate(d.getDate() - dias); setSelDe(ymd(d)); setSelAte(ymd(a)); setMes(new Date(d.getFullYear(), d.getMonth(), 1)) }
+  const mesTemFaixa = (ano, m) => { const ini = `${ano}-${String(m + 1).padStart(2, '0')}-01`; const fim = `${ano}-${String(m + 1).padStart(2, '0')}-${String(ultimoDiaMes(ano, m)).padStart(2, '0')}`; return selDe && ((selAte || selDe) >= ini && selDe <= fim) }
+
+  const TabBtn = ({ id, children }) => (
+    <button onClick={() => setModo(id)} className="text-[11px] font-bold px-3 py-1 rounded-lg"
+      style={modo === id ? { background: 'var(--accent)', color: '#fff' } : { color: 'var(--dim)' }}>{children}</button>
+  )
 
   return (
     <div className="rounded-2xl p-3 w-[300px]" style={{ background: 'var(--surface)', border: '1px solid var(--glass-border)', boxShadow: '0 20px 60px rgba(0,0,0,.5)' }}>
-      <div className="flex items-center justify-between mb-2">
-        <button onClick={() => nav(-1)} className="text-dim hover:text-fg p-1" aria-label="Mês anterior"><ChevronLeft size={16} /></button>
-        <span className="text-sm font-semibold">{MES_LONGO[mes.getMonth()]} {mes.getFullYear()}</span>
-        <button onClick={() => nav(1)} className="text-dim hover:text-fg p-1" aria-label="Próximo mês"><ChevronRight size={16} /></button>
+      <div className="flex items-center gap-1 mb-3 p-0.5 rounded-lg" style={{ background: 'rgba(0,0,0,.25)' }}>
+        <TabBtn id="dia">Dia</TabBtn><TabBtn id="mes">Mês</TabBtn><TabBtn id="ano">Ano</TabBtn>
+        <span className="ml-auto text-[9px] text-faint pr-1">intervalo</span>
       </div>
-      <div className="grid grid-cols-7 gap-1 text-center mb-1">
-        {DIA_SEMANA.map((d, i) => <span key={i} className="text-[9px] text-faint font-bold">{d}</span>)}
-      </div>
-      <div className="grid grid-cols-7 gap-1">
-        {dias.map((d, i) => {
-          if (!d) return <span key={i} />
-          const dstr = ymd(d)
-          const futuro = d > hoje
-          const sel = dstr === selDe || dstr === selAte
-          return (
-            <button key={i} disabled={futuro} onClick={() => clicar(dstr)} className="h-8 rounded-lg text-[11px] num disabled:opacity-25 disabled:cursor-default"
-              style={sel ? { background: 'var(--accent)', color: '#fff', fontWeight: 700 } : naFaixa(dstr) ? { background: 'rgba(214,0,127,.16)', color: 'var(--accent)' } : { color: 'var(--dim)' }}>
-              {d.getDate()}
-            </button>
-          )
-        })}
-      </div>
-      <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-        {[{ l: '60d', d: 60 }, { l: '90d', d: 90 }, { l: '6m', d: 182 }].map((a) => (
-          <button key={a.l} onClick={() => atalho(a.d)} className="text-[10px] px-2 py-0.5 rounded-lg" style={{ background: 'rgba(255,255,255,.04)', color: 'var(--dim)' }}>{a.l}</button>
+
+      {modo === 'dia' && (
+        <>
+          <div className="flex items-center justify-between mb-2">
+            <button onClick={() => nav(-1)} className="text-dim hover:text-fg p-1" aria-label="Mês anterior"><ChevronLeft size={16} /></button>
+            <span className="text-sm font-semibold">{MES_LONGO[mes.getMonth()]} {mes.getFullYear()}</span>
+            <button onClick={() => nav(1)} className="text-dim hover:text-fg p-1" aria-label="Próximo mês"><ChevronRight size={16} /></button>
+          </div>
+          <div className="grid grid-cols-7 gap-1 text-center mb-1">
+            {DIA_SEMANA.map((d, i) => <span key={i} className="text-[9px] text-faint font-bold">{d}</span>)}
+          </div>
+          <div className="grid grid-cols-7 gap-1">
+            {dias.map((d, i) => {
+              if (!d) return <span key={i} />
+              const dstr = ymd(d)
+              const futuro = d > hojeFim
+              const sel = dstr === selDe || dstr === selAte
+              return (
+                <button key={i} disabled={futuro} onClick={() => clicarDia(dstr)} className="h-8 rounded-lg text-[11px] num disabled:opacity-25 disabled:cursor-default"
+                  style={sel ? { background: 'var(--accent)', color: '#fff', fontWeight: 700 } : naFaixa(dstr) ? { background: 'rgba(214,0,127,.16)', color: 'var(--accent)' } : { color: 'var(--dim)' }}>
+                  {d.getDate()}
+                </button>
+              )
+            })}
+          </div>
+        </>
+      )}
+
+      {modo === 'mes' && (
+        <>
+          <div className="flex items-center justify-between mb-2">
+            <button onClick={() => setAnoView((y) => y - 1)} className="text-dim hover:text-fg p-1" aria-label="Ano anterior"><ChevronLeft size={16} /></button>
+            <span className="text-sm font-semibold num">{anoView}</span>
+            <button onClick={() => setAnoView((y) => Math.min(anoAtual, y + 1))} disabled={anoView >= anoAtual} className="text-dim hover:text-fg p-1 disabled:opacity-30" aria-label="Próximo ano"><ChevronRight size={16} /></button>
+          </div>
+          <div className="grid grid-cols-3 gap-1.5">
+            {MES_CURTO.map((mm, i) => {
+              const futuro = anoView > anoAtual || (anoView === anoAtual && i > new Date().getMonth())
+              const on = mesTemFaixa(anoView, i)
+              return (
+                <button key={i} disabled={futuro} onClick={() => escolherMes(anoView, i)} className="h-10 rounded-lg text-[12px] font-medium disabled:opacity-25 disabled:cursor-default"
+                  style={on ? { background: 'var(--accent)', color: '#fff' } : { background: 'rgba(255,255,255,.04)', color: 'var(--dim)' }}>{mm}</button>
+              )
+            })}
+          </div>
+        </>
+      )}
+
+      {modo === 'ano' && (
+        <div className="grid grid-cols-3 gap-1.5">
+          {Array.from({ length: 9 }, (_, i) => anoAtual - i).map((y) => {
+            const on = selDe && selDe.startsWith(String(y))
+            return (
+              <button key={y} onClick={() => escolherAno(y)} className="h-10 rounded-lg text-[12px] font-medium num"
+                style={on ? { background: 'var(--accent)', color: '#fff' } : { background: 'rgba(255,255,255,.04)', color: 'var(--dim)' }}>{y}</button>
+            )
+          })}
+        </div>
+      )}
+
+      <div className="flex items-center gap-1.5 mt-3 flex-wrap">
+        {[{ l: '60 dias', d: 60 }, { l: '90 dias', d: 90 }, { l: '6 meses', d: 182 }].map((a) => (
+          <button key={a.l} onClick={() => { const hj = new Date(); const di = new Date(); di.setDate(di.getDate() - a.d); setSelDe(ymd(di)); setSelAte(ymd(hj)); setModo('dia'); setMes(new Date(di.getFullYear(), di.getMonth(), 1)) }}
+            className="text-[10px] px-2 py-0.5 rounded-lg" style={{ background: 'rgba(255,255,255,.04)', color: 'var(--dim)' }}>{a.l}</button>
         ))}
       </div>
       <div className="flex items-center gap-2 mt-2 pt-2" style={{ borderTop: '1px solid var(--glass-border)' }}>
-        <span className="text-[10.5px] text-faint flex-1">{selDe ? (selAte ? `${dataBR(selDe)} → ${dataBR(selAte)}` : `${dataBR(selDe)} → …`) : 'Escolha início e fim'}</span>
+        <span className="text-[10.5px] text-faint flex-1">{selDe ? (selAte ? `${dataBR(selDe)} → ${dataBR(selAte)}` : `${dataBR(selDe)} → …`) : 'Escolha o intervalo'}</span>
         <button onClick={onClose} className="text-[11px] px-2 py-1 rounded-lg glass text-dim hover:text-fg">Cancelar</button>
         <button onClick={() => onAplicar(selDe, selAte || selDe)} disabled={!selDe} className="text-[11px] font-semibold px-3 py-1 rounded-lg text-white disabled:opacity-40" style={{ background: 'var(--accent)' }}>Aplicar</button>
       </div>
