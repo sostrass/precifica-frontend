@@ -60,6 +60,7 @@ const SUBSTATUS_LABEL = {
   ready_to_ship: 'Pronto p/ despachar',
   in_packing_list: 'Em separação',
   invoice_pending: 'Nota fiscal pendente',
+  buffered: 'Aguardando liberação da etiqueta',
   picked_up: 'Coletado',
   dropped_off: 'Postado',
   in_hub: 'No centro de distribuição',
@@ -771,12 +772,33 @@ function Cell({ label, valor, sub, cor, forte, dim, destaque }) {
   )
 }
 
+const SUB_PRONTO = ['ready_to_print', 'printed', 'ready_to_ship', 'in_packing_list', 'picked_up', 'dropped_off']
+function estadoEnvioCard(p) {
+  const env = p.envio || null
+  if (p.status === 'cancelled' || (env && env.status === 'cancelled')) return { texto: 'Cancelado', tom: 'var(--danger)', icon: X }
+  if (!env) return { texto: 'Sincronizando envio…', tom: 'var(--faint)', icon: Loader2, spin: true }
+  const st = env.status, sub = env.substatus || ''
+  if (st === 'delivered') return { texto: `Entregue${env.date_delivered ? ' · ' + dataBR(env.date_delivered) : ''}`, tom: 'var(--ok)', icon: PackageCheck }
+  if (env.devolucao || st === 'returned') return { texto: 'Em devolução', tom: 'var(--warn)', icon: Undo2 }
+  if (st === 'shipped' || ['in_hub', 'in_transit', 'out_for_delivery', 'receiver_absent'].includes(sub))
+    return { texto: `Em trânsito${env.tracking_number ? ' · ' + env.tracking_number : ''}`, tom: 'var(--accent)', icon: Truck }
+  if ((sub === 'buffered' || env.buffering_date) && st !== 'ready_to_ship')
+    return { texto: `Etiqueta disponível ${env.buffering_date ? dataBR(env.buffering_date) : 'em breve'}`, tom: 'var(--warn)', icon: Clock }
+  const pronto = SUB_PRONTO.includes(sub) || (st === 'ready_to_ship' && sub !== 'invoice_pending')
+  if (p.balde === 'proximos') {
+    const d = env.handling_limit ? dataBR(env.handling_limit) : (env.buffering_date ? dataBR(env.buffering_date) : null)
+    return { texto: d ? `Coleta ${d}` : 'Coleta programada', tom: 'var(--dim)', icon: CalendarClock }
+  }
+  if (env.fiscal_pendente) return { texto: 'Falta nota fiscal p/ despachar', tom: 'var(--danger)', icon: AlertTriangle }
+  const prazo = prazoInfo(env.handling_limit)
+  if (pronto) return { texto: `Pronto p/ despachar${prazo ? ' · ' + prazo.texto : ''}`, tom: prazo && prazo.forte ? prazo.tom : 'var(--ok)', icon: Tag }
+  return { texto: `Em preparação${prazo ? ' · despachar ' + prazo.texto : ''}`, tom: 'var(--warn)', icon: Package }
+}
+
 function Card({ p, nfe, ativo, onOpen, sel, onToggleSel }) {
   const [imgErro, setImgErro] = useState(false)
   const st = ST_PEDIDO[p.status] || { t: p.status, c: 'var(--dim)' }
   const env = p.envio || null
-  const stEnv = env && env.status ? (ST_ENVIO[env.status] || { t: env.status, c: 'var(--dim)' }) : null
-  const subLabel = env && env.substatus ? (SUBSTATUS_LABEL[env.substatus] || null) : null
   const itens = p.itens || []
   const principal = itens[0] || {}
   const extras = itens.length - 1
@@ -793,61 +815,63 @@ function Card({ p, nfe, ativo, onOpen, sel, onToggleSel }) {
   const mlListTotal = somaCampo('ml_preco')
   const cor = moneyCor(r.liquido, r.margem)
   const vsBling = (blingTotal != null && r.receita != null) ? r.receita - blingTotal : null
-  const prazo = env && (p.balde === 'hoje' || p.balde === 'proximos') ? prazoInfo(env.handling_limit) : null
+  const es = estadoEnvioCard(p)
+  const EnvIcon = es.icon
+  const fundoLiq = cor === 'var(--ok)' ? 'rgba(47,217,141,.12)' : cor === 'var(--warn)' ? 'rgba(224,162,60,.12)' : 'rgba(255,122,122,.12)'
+  const estornado = p.status === 'cancelled' || (r && r.estornado)
 
   return (
-    <div className="glass rounded-2xl p-3" style={(sel || ativo) ? { borderColor: 'var(--accent)', boxShadow: '0 0 0 1px rgba(214,0,127,.3)' } : (env && env.fiscal_pendente ? { borderColor: 'var(--danger)' } : undefined)}>
+    <div className="glass rounded-2xl p-3 transition-shadow" style={(sel || ativo) ? { borderColor: 'var(--accent)', boxShadow: '0 0 0 1px rgba(214,0,127,.3)' } : (env && env.fiscal_pendente ? { borderColor: 'rgba(255,122,122,.4)' } : undefined)}>
       <div className="flex items-start gap-3">
         <button onClick={onToggleSel} disabled={!podeSelecionar} title={podeSelecionar ? 'Selecionar' : 'Sem envio'}
-          className="shrink-0 mt-0.5 grid place-items-center" style={{ width: 18, height: 18, borderRadius: 5, border: `1.5px solid ${sel ? 'var(--accent)' : 'var(--faint)'}`, background: sel ? 'var(--accent)' : 'transparent', color: sel ? '#fff' : 'transparent', opacity: podeSelecionar ? 1 : 0.3, cursor: podeSelecionar ? 'pointer' : 'not-allowed' }}>
+          className="shrink-0 mt-1 grid place-items-center" style={{ width: 18, height: 18, borderRadius: 5, border: `1.5px solid ${sel ? 'var(--accent)' : 'var(--faint)'}`, background: sel ? 'var(--accent)' : 'transparent', color: sel ? '#fff' : 'transparent', opacity: podeSelecionar ? 1 : 0.3, cursor: podeSelecionar ? 'pointer' : 'not-allowed' }}>
           <Check size={12} />
         </button>
-        <button onClick={onOpen} className="rounded-lg overflow-hidden shrink-0 grid place-items-center" style={{ width: 52, height: 52, background: 'var(--glass-hover)', color: 'var(--faint)' }}>
+        <button onClick={onOpen} className="rounded-xl overflow-hidden shrink-0 grid place-items-center" style={{ width: 50, height: 50, background: 'var(--glass-hover)', color: 'var(--faint)' }}>
           {principal.imagem && !imgErro ? <img src={principal.imagem} alt="" className="h-full w-full object-cover" onError={() => setImgErro(true)} /> : <Package size={20} />}
         </button>
         <button onClick={onOpen} className="flex-1 min-w-0 text-left">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm font-medium truncate max-w-full">{principal.titulo || 'Pedido'}{extras > 0 ? <span className="text-faint font-normal"> +{extras} item(s)</span> : ''}</span>
-            {principal.quantidade > 0 && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'rgba(214,0,127,.14)', color: 'var(--accent)' }}>{principal.quantidade} un.</span>}
+            <span className="text-sm font-medium truncate max-w-full">{principal.titulo || 'Pedido'}{extras > 0 ? <span className="text-faint font-normal"> +{extras}</span> : ''}</span>
+            {principal.quantidade > 0 && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'rgba(214,0,127,.14)', color: 'var(--accent)' }}>{principal.quantidade}un</span>}
             {p.is_full && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded inline-flex items-center gap-1" style={{ background: 'rgba(242,194,0,.18)', color: ML }}><Truck size={9} /> Full</span>}
             {novo && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded inline-flex items-center gap-1" style={{ background: 'rgba(47,217,141,.14)', color: 'var(--ok)' }}><Zap size={9} /> novo</span>}
+            {estornado && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: 'rgba(255,122,122,.14)', color: 'var(--danger)' }}>estornado</span>}
           </div>
-          <div className="text-[11px] text-faint num mt-0.5">#{p.id} · {dataBR(p.date_created)}{principal.sku ? ` · ${principal.sku}` : ''}</div>
-          <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-            <span className="text-[10px] px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'rgba(0,0,0,.2)', color: 'var(--dim)' }}><User size={10} /> {p.buyer?.nickname || 'comprador'}</span>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: 'var(--glass-hover)', color: st.c }}>{st.t}</span>
-            {stEnv && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'var(--glass-hover)', color: stEnv.c }}><Truck size={10} /> {stEnv.t}</span>}
-            {subLabel && <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ background: 'rgba(0,0,0,.2)', color: 'var(--faint)' }}>{subLabel}</span>}
-            {prazo && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'var(--glass-hover)', color: prazo.tom }}><CalendarClock size={10} /> Despachar: {prazo.texto}</span>}
-            {env && env.tracking_number && p.balde === 'transito' && <span className="text-[10px] num px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'rgba(0,0,0,.2)', color: 'var(--dim)' }}><MapPinned size={10} /> {env.tracking_number}</span>}
-            {env && env.fiscal_pendente && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'rgba(255,122,122,.16)', color: 'var(--danger)' }}><AlertTriangle size={10} /> Sem dados fiscais</span>}
-            {env && env.devolucao && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'rgba(224,162,60,.16)', color: 'var(--warn)' }}><Undo2 size={10} /> Devolução</span>}
-            {nfe && nfe.numero && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'var(--glass-hover)', color: nfeCor(nfe) }} title={nfe.situacao_label || 'NF-e'}><FileText size={10} /> NF-e {nfe.numero}</span>}
-            {(p.status === 'cancelled' || (p.resumo && p.resumo.estornado)) && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'rgba(255,122,122,.14)', color: 'var(--danger)' }} title="Cancelado — tarifa estornada pelo ML, fora dos totais">estornado</span>}
-            {!env && p.balde === 'sincronizando' && <span className="text-[10px] px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'var(--glass-hover)', color: 'var(--faint)' }}><Loader2 size={10} className="animate-spin" /> sincronizando</span>}
+          <div className="text-[11px] text-faint num mt-0.5 flex items-center gap-1.5 flex-wrap">
+            <span>#{p.id}</span><span>·</span><span>{dataBR(p.date_created)}</span>
+            <span className="inline-flex items-center gap-1"><User size={9} /> {p.buyer?.nickname || 'comprador'}</span>
+            {principal.sku ? <span>· {principal.sku}</span> : null}
+          </div>
+          <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+            <span className="text-[11px] font-semibold inline-flex items-center gap-1.5 px-2 py-1 rounded-lg" style={{ background: 'var(--glass-hover)', color: es.tom }}>
+              <EnvIcon size={12} className={es.spin ? 'animate-spin' : ''} /> {es.texto}
+            </span>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: 'rgba(0,0,0,.2)', color: st.c }}>{st.t}</span>
+            {nfe && nfe.numero && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'rgba(0,0,0,.2)', color: nfeCor(nfe) }} title={nfe.situacao_label || 'NF-e'}><FileText size={10} /> NF {nfe.numero}</span>}
           </div>
         </button>
         <button onClick={onOpen} className="text-right shrink-0">
           <div className="num text-base font-bold">{brl(r.receita != null ? r.receita : p.total)}</div>
-          {principal.unit_price != null && principal.quantidade > 1 && <div className="text-[9px] text-faint num">{principal.quantidade} × {brl(principal.unit_price)}</div>}
-          <span className="text-faint mt-1 inline-flex">{ativo ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</span>
+          {principal.unit_price != null && principal.quantidade > 1 && <div className="text-[9px] text-faint num">{principal.quantidade}×{brl(principal.unit_price)}</div>}
+          <span className="text-faint mt-1 inline-flex justify-end w-full">{ativo ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</span>
         </button>
       </div>
 
-      <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5 mt-3">
-        <Cell label="Vendido ML" valor={brl(r.receita)} forte />
-        <Cell label="Preço Bling" valor={blingTotal != null ? brl(blingTotal) : '—'} dim />
-        <Cell label="Anúncio ML" valor={mlListTotal != null ? brl(mlListTotal) : '—'} dim />
-        <Cell label="Comissão ML" valor={r.tarifa != null ? '−' + brl(r.tarifa) : '—'} cor="var(--warn)" />
-        <Cell label="Frete ML" valor={r.frete_vendedor ? '−' + brl(r.frete_vendedor) : '—'} cor="var(--warn)" />
-        <Cell label="Líquido" valor={r.liquido != null ? brl(r.liquido) : '—'} sub={r.margem != null ? `${r.margem.toFixed(0)}%` : null} cor={cor} forte destaque />
-      </div>
-      {vsBling != null && (
-        <div className="text-[10px] mt-1.5" style={{ color: vsBling >= -0.01 ? 'var(--ok)' : 'var(--warn)' }}>
-          {vsBling >= -0.01 ? <CheckCircle2 size={11} className="inline mr-1" /> : <AlertTriangle size={11} className="inline mr-1" />}
-          {vsBling >= -0.01 ? `${brl(vsBling)} acima do Preço Bling` : `${brl(Math.abs(vsBling))} abaixo do Preço Bling`}
+      <div className="flex items-center gap-x-3 gap-y-1 mt-2.5 rounded-xl px-3 py-2 flex-wrap" style={{ background: 'rgba(0,0,0,.22)' }}>
+        <span className="text-[10.5px] text-dim">Custo Bling <b className="num" style={{ color: 'var(--fg)' }}>{blingTotal != null ? brl(blingTotal) : '—'}</b></span>
+        <span className="text-[10.5px] text-dim">Comissão <b className="num" style={{ color: 'var(--warn)' }}>−{brl(r.tarifa)}</b></span>
+        {r.frete_vendedor ? <span className="text-[10.5px] text-dim">Frete <b className="num" style={{ color: 'var(--warn)' }}>−{brl(r.frete_vendedor)}</b></span> : null}
+        {mlListTotal != null && <span className="text-[10.5px] text-faint hidden md:inline">Anúncio {brl(mlListTotal)}</span>}
+        <div className="ml-auto flex items-center gap-2.5">
+          {vsBling != null && <span className="text-[10px]" style={{ color: vsBling >= -0.01 ? 'var(--ok)' : 'var(--warn)' }}>{vsBling >= -0.01 ? '+' : '−'}{brl(Math.abs(vsBling))} vs Bling</span>}
+          <span className="rounded-lg px-2.5 py-1 inline-flex items-baseline gap-1.5" style={{ background: fundoLiq }}>
+            <span className="text-[8px] uppercase tracking-wide" style={{ color: cor }}>Líquido</span>
+            <b className="num text-sm" style={{ color: cor }}>{r.liquido != null ? brl(r.liquido) : '—'}</b>
+            {r.margem != null && <span className="text-[10px] num" style={{ color: cor }}>{r.margem.toFixed(0)}%</span>}
+          </span>
         </div>
-      )}
+      </div>
     </div>
   )
 }
@@ -987,6 +1011,7 @@ function Drawer({ p, nfe, envio, baixando, imprimindo, onEtiqueta, onImprimir, o
           {prazo && <div className="flex justify-between py-0.5"><span className="text-dim flex items-center gap-1.5"><CalendarClock size={12} /> Despachar até</span><span className="num font-medium" style={{ color: prazo.tom }}>{prazo.texto === 'atrasado' ? 'atrasado' : dataHora(ec.handling_limit)}</span></div>}
           {modo && <div className="flex justify-between py-0.5"><span className="text-dim flex items-center gap-1.5"><Boxes size={12} /> Envio</span><span className="font-medium">{modo}</span></div>}
           {subLabel && <div className="flex justify-between py-0.5"><span className="text-dim flex items-center gap-1.5"><Truck size={12} /> Situação</span><span className="font-medium">{subLabel}</span></div>}
+          {ec.buffering_date && <div className="flex justify-between py-0.5"><span className="text-dim flex items-center gap-1.5"><Clock size={12} /> Etiqueta disponível</span><span className="num font-medium" style={{ color: 'var(--warn)' }}>{dataHora(ec.buffering_date)}</span></div>}
           {ec.tracking_number && <div className="flex justify-between py-0.5"><span className="text-dim flex items-center gap-1.5"><MapPinned size={12} /> Rastreio</span><span className="num font-medium">{ec.tracking_number}{ec.tracking_method ? ` · ${ec.tracking_method}` : ''}</span></div>}
           {ec.custo_comprador != null && <div className="flex justify-between py-0.5"><span className="text-dim flex items-center gap-1.5"><Truck size={12} /> Frete (comprador)</span><span className="num font-medium">{brl(ec.custo_comprador)}</span></div>}
         </div>
