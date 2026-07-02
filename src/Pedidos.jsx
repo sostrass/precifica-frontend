@@ -1123,7 +1123,7 @@ function Drawer({ p, nfe, envio, baixando, imprimindo, onEtiqueta, onImprimir, o
   const modo = modoEnvio(ec.logistic_type ? ec : full)
 
   return (
-    <div className="glass rounded-2xl overflow-hidden" style={{ borderColor: 'var(--accent)' }}>
+    <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid transparent', background: 'linear-gradient(180deg,var(--surface),#160c13) padding-box, linear-gradient(155deg, rgba(214,0,127,.65), rgba(214,0,127,.06) 42%, rgba(255,255,255,.10)) border-box', boxShadow: '0 20px 60px rgba(0,0,0,.5)' }}>
       <div className="px-4 py-3 flex items-center gap-2.5" style={{ borderBottom: '1px solid var(--glass-border)' }}>
         <span className="grid place-items-center shrink-0" style={{ width: 34, height: 34, borderRadius: 99, background: 'var(--accent2)', color: '#fff', fontWeight: 800, fontSize: 13 }}>{inicial}</span>
         <div className="flex-1 min-w-0">
@@ -1163,9 +1163,31 @@ function Drawer({ p, nfe, envio, baixando, imprimindo, onEtiqueta, onImprimir, o
           {ec.buffering_date && <div className="flex justify-between py-0.5"><span className="text-dim flex items-center gap-1.5"><Clock size={12} /> Etiqueta disponível</span><span className="num font-medium" style={{ color: 'var(--warn)' }}>{dataHora(ec.buffering_date)}</span></div>}
           {ec.tracking_number && <div className="flex justify-between py-0.5"><span className="text-dim flex items-center gap-1.5"><MapPinned size={12} /> Rastreio</span><span className="num font-medium">{ec.tracking_number}{ec.tracking_method ? ` · ${ec.tracking_method}` : ''}</span></div>}
           {ec.custo_comprador != null && <div className="flex justify-between py-0.5"><span className="text-dim flex items-center gap-1.5"><Truck size={12} /> Frete (comprador)</span><span className="num font-medium">{brl(ec.custo_comprador)}</span></div>}
+          {ec.delivery_limit && <div className="flex justify-between py-0.5"><span className="text-dim flex items-center gap-1.5"><CalendarClock size={12} /> Prazo limite (comprador)</span><span className="num font-medium">{dataHora(ec.delivery_limit)}</span></div>}
         </div>
 
-        <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--glass-border)' }}>
+        {p.sinais && p.sinais.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mt-3">
+            {p.sinais.map((s, i) => (
+              <span key={i} className="text-[10px] font-bold px-2 py-1 rounded-lg inline-flex items-center gap-1.5" style={{ background: s.tom === 'danger' ? 'rgba(255,122,122,.14)' : s.tom === 'warn' ? 'rgba(224,162,60,.14)' : 'rgba(255,255,255,.06)', color: s.tom === 'danger' ? 'var(--danger)' : s.tom === 'warn' ? 'var(--warn)' : 'var(--dim)' }}>
+                <AlertTriangle size={11} /> {s.label}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {p.pagamento && (p.pagamento.metodo || p.pagamento.parcelas) && (
+          <div className="mt-3 rounded-xl p-3" style={{ background: 'linear-gradient(158deg,rgba(255,255,255,.05),rgba(0,0,0,.20))', border: '1px solid var(--glass-border)' }}>
+            <div className="text-[9.5px] uppercase tracking-wide text-faint font-bold mb-2 flex items-center gap-1.5"><Wallet size={12} /> Pagamento</div>
+            <div className="text-[11.5px] space-y-0.5">
+              {p.pagamento.metodo && <div className="flex justify-between py-0.5"><span className="text-dim">Método</span><span className="font-medium">{p.pagamento.metodo}</span></div>}
+              {p.pagamento.parcelas && <div className="flex justify-between py-0.5"><span className="text-dim">Parcelas</span><span className="num font-medium">{p.pagamento.parcelas}x{p.pagamento.valor_parcela ? ` de ${brl(p.pagamento.valor_parcela)}` : ''}</span></div>}
+              {p.pagamento.aprovado_em && <div className="flex justify-between py-0.5"><span className="text-dim">Aprovado em</span><span className="num font-medium">{dataHora(p.pagamento.aprovado_em)}</span></div>}
+            </div>
+          </div>
+        )}
+
+        <div className="mt-3 rounded-xl p-3" style={{ background: 'linear-gradient(158deg,rgba(255,255,255,.05),rgba(0,0,0,.20))', border: '1px solid var(--glass-border)' }}>
           <div className="text-[9.5px] uppercase tracking-wide text-faint font-bold mb-2 flex items-center gap-1.5"><Package size={12} /> Produtos ({itens.length})</div>
           <div className="space-y-1.5">
             {itens.map((it, i) => (
@@ -1183,7 +1205,7 @@ function Drawer({ p, nfe, envio, baixando, imprimindo, onEtiqueta, onImprimir, o
           </div>
         </div>
 
-        <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--glass-border)' }}>
+        <div className="mt-3 rounded-xl p-3" style={{ background: 'linear-gradient(158deg,rgba(255,255,255,.05),rgba(0,0,0,.20))', border: '1px solid var(--glass-border)' }}>
           <div className="text-[9.5px] uppercase tracking-wide text-faint font-bold mb-2 flex items-center gap-1.5"><Wallet size={12} /> Repasse do Mercado Livre</div>
           <div className="rounded-xl p-3" style={{ background: 'rgba(0,0,0,.2)' }}>
             <div className="flex justify-between text-[12px] py-0.5"><span className="text-dim">Receita (comprador pagou)</span><span className="num">{brl(r.receita)}</span></div>
@@ -1219,7 +1241,7 @@ function Drawer({ p, nfe, envio, baixando, imprimindo, onEtiqueta, onImprimir, o
           {!r.preco_bling && <div className="text-[10px] mt-1.5 flex items-start gap-1.5" style={{ color: 'var(--warn)' }}><AlertTriangle size={11} className="mt-0.5" /> Produto sem Preço Bling — vincule o SKU no Bling para a referência de preço.</div>}
         </div>
 
-        <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--glass-border)' }}>
+        <div className="mt-3 rounded-xl p-3" style={{ background: 'linear-gradient(158deg,rgba(255,255,255,.05),rgba(0,0,0,.20))', border: '1px solid var(--glass-border)' }}>
           <div className="text-[9.5px] uppercase tracking-wide text-faint font-bold mb-2 flex items-center gap-1.5"><FileText size={12} /> Nota fiscal</div>
           {nfe && nfe.numero ? (
             <div className="rounded-xl p-2.5 text-[12px]" style={{ background: 'rgba(0,0,0,.2)' }}>
@@ -1250,7 +1272,7 @@ function Drawer({ p, nfe, envio, baixando, imprimindo, onEtiqueta, onImprimir, o
           )}
         </div>
 
-        <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--glass-border)' }}>
+        <div className="mt-3 rounded-xl p-3" style={{ background: 'linear-gradient(158deg,rgba(255,255,255,.05),rgba(0,0,0,.20))', border: '1px solid var(--glass-border)' }}>
           <div className="text-[9.5px] uppercase tracking-wide text-faint font-bold mb-2 flex items-center gap-1.5"><MapPin size={12} /> Entrega <span className="text-[8px] px-1 py-0.5 rounded" style={{ background: 'rgba(242,194,0,.18)', color: ML }}>endereço real · ML</span></div>
           {!sid ? <div className="text-[11px] text-faint">Este pedido não tem envio associado.</div>
             : !dest && envio === 'loading' ? <div className="text-[11px] text-faint flex items-center gap-2"><Loader2 size={12} className="animate-spin" /> lendo endereço…</div>
@@ -1266,13 +1288,13 @@ function Drawer({ p, nfe, envio, baixando, imprimindo, onEtiqueta, onImprimir, o
         </div>
 
         {sid && (
-          <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--glass-border)' }}>
+          <div className="mt-3 rounded-xl p-3" style={{ background: 'linear-gradient(158deg,rgba(255,255,255,.05),rgba(0,0,0,.20))', border: '1px solid var(--glass-border)' }}>
             <div className="text-[9.5px] uppercase tracking-wide text-faint font-bold mb-2.5 flex items-center gap-1.5"><Truck size={12} /> Logística</div>
             <Timeline orderStatus={p.status} shipStatus={shipStatus} env={ec} />
           </div>
         )}
 
-        <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--glass-border)' }}>
+        <div className="mt-3 rounded-xl p-3" style={{ background: 'linear-gradient(158deg,rgba(255,255,255,.05),rgba(0,0,0,.20))', border: '1px solid var(--glass-border)' }}>
           <div className="text-[9.5px] uppercase tracking-wide text-faint font-bold mb-2 flex items-center gap-1.5"><Send size={12} /> Mensagens com o comprador</div>
           {msgs === null ? <div className="text-[11px] text-faint flex items-center gap-2"><Loader2 size={12} className="animate-spin" /> carregando conversa…</div>
             : msgs === 'erro' ? <div className="text-[11px] text-faint">Não consegui carregar as mensagens deste pedido.</div>
