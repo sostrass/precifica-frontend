@@ -19,11 +19,12 @@ const PAGE_SIZE = 15
 const PERIODOS = [{ id: 7, label: '7d' }, { id: 15, label: '15d' }, { id: 30, label: '30d' }]
 const ESCOPOS = [{ id: 'tudo', label: 'Tudo' }, { id: 'pedido', label: '# Pedido' }, { id: 'comprador', label: 'Comprador' }, { id: 'produto', label: 'Produto / SKU' }]
 
-// Baldes vindos do backend (estado REAL do envio) — mesmo eixo da tela Vendas do ML
+// Abas do envio (estado REAL) — mesmo eixo da tela de Vendas do ML
 const ENVIO_TABS = [
   { id: 'todos', label: 'Todos', icon: Boxes },
   { id: 'hoje', label: 'A despachar hoje', icon: CalendarClock },
   { id: 'proximos', label: 'Próximos dias', icon: Clock },
+  { id: 'fiscal', label: 'Aguardando NF-e', icon: FileText },
   { id: 'transito', label: 'Em trânsito', icon: Truck },
   { id: 'finalizado', label: 'Finalizados', icon: PackageCheck },
   { id: 'cancelado', label: 'Cancelados', icon: X },
@@ -344,7 +345,7 @@ export default function Pedidos() {
     if (auto) rodadasRef.current += 1
     setSincronizando(true)
     try {
-      const r = await api.mlEnviosSincronizar(ids.slice(0, 15), 15)
+      const r = await api.mlEnviosSincronizar(ids.slice(0, 12), 12)
       setSyncErro(r && (r.total || 0) > 0 && (r.buscados || 0) === 0 ? ((r.erros && r.erros[0]) || 'nao_leu') : '')
       await buscar()
     } catch (_) { setSyncErro('falhou') }
@@ -381,7 +382,7 @@ export default function Pedidos() {
 
   const contagens = useMemo(() => {
     const b = (sstats && sstats.baldes) || {}
-    return { todos: (pedidos || []).length, hoje: b.hoje || 0, proximos: b.proximos || 0, transito: b.transito || 0, finalizado: b.finalizado || 0, cancelado: b.cancelado || 0 }
+    return { todos: (pedidos || []).length, hoje: b.hoje || 0, proximos: b.proximos || 0, fiscal: b.fiscal || 0, transito: b.transito || 0, finalizado: b.finalizado || 0, cancelado: b.cancelado || 0 }
   }, [sstats, pedidos])
 
   const nSync = (sstats && sstats.sincronizando) || 0
@@ -795,6 +796,32 @@ function estadoEnvioCard(p) {
   return { texto: `Em preparação${prazo ? ' · despachar ' + prazo.texto : ''}`, tom: 'var(--warn)', icon: Package }
 }
 
+function contagemDespacho(iso) {
+  if (!iso) return null
+  const d = new Date(iso); if (isNaN(d)) return null
+  const ms = d.getTime() - Date.now()
+  if (ms <= 0) return { texto: 'despacho atrasado', tom: 'var(--danger)', urgente: true }
+  const horas = ms / 3600000
+  if (horas < 24) {
+    const hh = Math.floor(horas), mm = Math.floor((horas - hh) * 60)
+    return { texto: hh >= 1 ? `faltam ${hh}h${mm ? ' ' + mm + 'm' : ''} p/ despachar` : `faltam ${mm}m p/ despachar`, tom: horas < 4 ? 'var(--danger)' : 'var(--warn)', urgente: horas < 4 }
+  }
+  const dias = Math.ceil(horas / 24)
+  return { texto: `faltam ${dias} dia${dias > 1 ? 's' : ''}`, tom: 'var(--dim)' }
+}
+
+function MiniKpi({ icon, label, valor, sub, cor, destaque }) {
+  const fundo = destaque ? (cor === 'var(--ok)' ? 'rgba(47,217,141,.1)' : cor === 'var(--warn)' ? 'rgba(224,162,60,.1)' : 'rgba(255,122,122,.1)') : 'rgba(0,0,0,.22)'
+  const borda = destaque ? (cor === 'var(--ok)' ? 'rgba(47,217,141,.3)' : cor === 'var(--warn)' ? 'rgba(224,162,60,.3)' : 'rgba(255,122,122,.3)') : 'transparent'
+  return (
+    <div className="rounded-xl px-2.5 py-2 min-w-0" style={{ background: fundo, border: `1px solid ${borda}` }}>
+      <div className="text-[8px] uppercase tracking-wide text-faint font-bold flex items-center gap-1">{icon}{label}</div>
+      <div className={`num leading-tight mt-0.5 ${destaque ? 'text-sm font-bold' : 'text-[12.5px] font-semibold'}`} style={{ color: cor || 'var(--fg)' }}>{valor}</div>
+      {sub && <div className="text-[9px] num truncate" style={{ color: destaque && cor ? cor : 'var(--faint)' }}>{sub}</div>}
+    </div>
+  )
+}
+
 function Card({ p, nfe, ativo, onOpen, sel, onToggleSel }) {
   const [imgErro, setImgErro] = useState(false)
   const st = ST_PEDIDO[p.status] || { t: p.status, c: 'var(--dim)' }
@@ -812,12 +839,13 @@ function Card({ p, nfe, ativo, onOpen, sel, onToggleSel }) {
     return tem ? tot : null
   }
   const blingTotal = somaCampo('preco_bling')
-  const mlListTotal = somaCampo('ml_preco')
   const cor = moneyCor(r.liquido, r.margem)
   const vsBling = (blingTotal != null && r.receita != null) ? r.receita - blingTotal : null
+  const custosML = (r.tarifa || 0) + (r.frete_vendedor || 0)
   const es = estadoEnvioCard(p)
   const EnvIcon = es.icon
-  const fundoLiq = cor === 'var(--ok)' ? 'rgba(47,217,141,.12)' : cor === 'var(--warn)' ? 'rgba(224,162,60,.12)' : 'rgba(255,122,122,.12)'
+  const prazoRef = env ? (p.balde === 'proximos' && env.buffering_date ? env.buffering_date : (env.handling_limit || env.buffering_date)) : null
+  const cd = ['hoje', 'proximos', 'fiscal'].includes(p.balde) ? contagemDespacho(prazoRef) : null
   const estornado = p.status === 'cancelled' || (r && r.estornado)
 
   return (
@@ -827,7 +855,7 @@ function Card({ p, nfe, ativo, onOpen, sel, onToggleSel }) {
           className="shrink-0 mt-1 grid place-items-center" style={{ width: 18, height: 18, borderRadius: 5, border: `1.5px solid ${sel ? 'var(--accent)' : 'var(--faint)'}`, background: sel ? 'var(--accent)' : 'transparent', color: sel ? '#fff' : 'transparent', opacity: podeSelecionar ? 1 : 0.3, cursor: podeSelecionar ? 'pointer' : 'not-allowed' }}>
           <Check size={12} />
         </button>
-        <button onClick={onOpen} className="rounded-xl overflow-hidden shrink-0 grid place-items-center" style={{ width: 50, height: 50, background: 'var(--glass-hover)', color: 'var(--faint)' }}>
+        <button onClick={onOpen} className="rounded-xl overflow-hidden shrink-0 grid place-items-center" style={{ width: 52, height: 52, background: 'var(--glass-hover)', color: 'var(--faint)' }}>
           {principal.imagem && !imgErro ? <img src={principal.imagem} alt="" className="h-full w-full object-cover" onError={() => setImgErro(true)} /> : <Package size={20} />}
         </button>
         <button onClick={onOpen} className="flex-1 min-w-0 text-left">
@@ -843,13 +871,6 @@ function Card({ p, nfe, ativo, onOpen, sel, onToggleSel }) {
             <span className="inline-flex items-center gap-1"><User size={9} /> {p.buyer?.nickname || 'comprador'}</span>
             {principal.sku ? <span>· {principal.sku}</span> : null}
           </div>
-          <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-            <span className="text-[11px] font-semibold inline-flex items-center gap-1.5 px-2 py-1 rounded-lg" style={{ background: 'var(--glass-hover)', color: es.tom }}>
-              <EnvIcon size={12} className={es.spin ? 'animate-spin' : ''} /> {es.texto}
-            </span>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: 'rgba(0,0,0,.2)', color: st.c }}>{st.t}</span>
-            {nfe && nfe.numero && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'rgba(0,0,0,.2)', color: nfeCor(nfe) }} title={nfe.situacao_label || 'NF-e'}><FileText size={10} /> NF {nfe.numero}</span>}
-          </div>
         </button>
         <button onClick={onOpen} className="text-right shrink-0">
           <div className="num text-base font-bold">{brl(r.receita != null ? r.receita : p.total)}</div>
@@ -858,19 +879,20 @@ function Card({ p, nfe, ativo, onOpen, sel, onToggleSel }) {
         </button>
       </div>
 
-      <div className="flex items-center gap-x-3 gap-y-1 mt-2.5 rounded-xl px-3 py-2 flex-wrap" style={{ background: 'rgba(0,0,0,.22)' }}>
-        <span className="text-[10.5px] text-dim">Custo Bling <b className="num" style={{ color: 'var(--fg)' }}>{blingTotal != null ? brl(blingTotal) : '—'}</b></span>
-        <span className="text-[10.5px] text-dim">Comissão <b className="num" style={{ color: 'var(--warn)' }}>−{brl(r.tarifa)}</b></span>
-        {r.frete_vendedor ? <span className="text-[10.5px] text-dim">Frete <b className="num" style={{ color: 'var(--warn)' }}>−{brl(r.frete_vendedor)}</b></span> : null}
-        {mlListTotal != null && <span className="text-[10.5px] text-faint hidden md:inline">Anúncio {brl(mlListTotal)}</span>}
-        <div className="ml-auto flex items-center gap-2.5">
-          {vsBling != null && <span className="text-[10px]" style={{ color: vsBling >= -0.01 ? 'var(--ok)' : 'var(--warn)' }}>{vsBling >= -0.01 ? '+' : '−'}{brl(Math.abs(vsBling))} vs Bling</span>}
-          <span className="rounded-lg px-2.5 py-1 inline-flex items-baseline gap-1.5" style={{ background: fundoLiq }}>
-            <span className="text-[8px] uppercase tracking-wide" style={{ color: cor }}>Líquido</span>
-            <b className="num text-sm" style={{ color: cor }}>{r.liquido != null ? brl(r.liquido) : '—'}</b>
-            {r.margem != null && <span className="text-[10px] num" style={{ color: cor }}>{r.margem.toFixed(0)}%</span>}
-          </span>
-        </div>
+      <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+        <span className="text-[11px] font-semibold inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg" style={{ background: 'var(--glass-hover)', color: es.tom }}>
+          <EnvIcon size={12} className={es.spin ? 'animate-spin' : ''} /> {es.texto}
+        </span>
+        {cd && <span className="text-[10.5px] font-bold inline-flex items-center gap-1 px-2 py-1 rounded-lg" style={{ background: cd.urgente ? 'rgba(255,122,122,.14)' : 'rgba(0,0,0,.2)', color: cd.tom }}><Clock size={10} /> {cd.texto}</span>}
+        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: 'rgba(0,0,0,.2)', color: st.c }}>{st.t}</span>
+        {nfe && nfe.numero && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'rgba(0,0,0,.2)', color: nfeCor(nfe) }} title={nfe.situacao_label || 'NF-e'}><FileText size={10} /> NF {nfe.numero}</span>}
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2.5">
+        <MiniKpi icon={<Wallet size={11} />} label="Vendido" valor={brl(r.receita)} />
+        <MiniKpi icon={<Tag size={11} />} label="Custos ML" valor={'−' + brl(custosML)} cor="var(--warn)" sub={r.frete_vendedor ? `com. ${brl0(r.tarifa)} + frete ${brl0(r.frete_vendedor)}` : (r.comissao_pct != null ? `comissão ${r.comissao_pct.toFixed(0)}%` : 'comissão')} />
+        <MiniKpi icon={<Boxes size={11} />} label="Custo Bling" valor={blingTotal != null ? '−' + brl(blingTotal) : '—'} cor="var(--dim)" sub={vsBling != null ? `${vsBling >= -0.01 ? '+' : '−'}${brl0(Math.abs(vsBling))} vs venda` : null} />
+        <MiniKpi icon={<TrendingUp size={11} />} label="Líquido" valor={r.liquido != null ? brl(r.liquido) : '—'} cor={cor} sub={r.margem != null ? `margem ${r.margem.toFixed(0)}%` : null} destaque />
       </div>
     </div>
   )
