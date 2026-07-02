@@ -734,7 +734,7 @@ function Estatisticas({ s, aba }) {
         <Kpi label="Receita" icon={<Wallet size={11} />} valor={brl0(s.receita)} sub="na aba" />
         <Kpi label="Ticket médio" icon={<DollarSign size={11} />} valor={brl(s.ticket)} sub="por pedido" />
         <Kpi label="Custos ML" icon={<Tag size={11} />} valor={'−' + brl0(s.custosML)} cor="var(--warn)" sub={s.frete > 0 ? `comissão ${brl0(s.tarifas)} + frete ${brl0(s.frete)}` : (s.receita > 0 ? `${Math.round(s.tarifas / s.receita * 100)}% da receita` : null)} />
-        <Kpi label="Impostos e taxas" icon={<Percent size={11} />} valor={'−' + brl0(s.impostos != null ? s.impostos : s.custo)} cor="var(--warn)" sub="imposto + cartão (config)" />
+        <Kpi label="Taxas mkt (config)" icon={<Percent size={11} />} valor={'−' + brl0(s.impostos != null ? s.impostos : s.custo)} cor="var(--warn)" sub="faixa + imposto + cartão" />
         <Kpi label="Líquido" icon={<TrendingUp size={11} />} valor={brl0(s.liquido)} cor="var(--ok)" sub={s.margem != null ? `margem ${s.margem.toFixed(0)}%` : null} destaque />
       </div>
       <div className="flex gap-3 flex-col md:flex-row">
@@ -840,9 +840,8 @@ function Card({ p, nfe, ativo, onOpen, sel, onToggleSel }) {
   }
   const blingTotal = somaCampo('preco_bling')
   const cor = moneyCor(r.liquido, r.margem)
-  const vsBling = (blingTotal != null && r.receita != null) ? r.receita - blingTotal : null
-  const custosML = (r.tarifa || 0) + (r.frete_vendedor || 0)
-  const impostos = (r.imposto || 0) + (r.cartao || 0) + (r.embalagem || 0)
+  const taxasCfg = r.taxas != null ? r.taxas : null
+  const vsAlvo = (blingTotal != null && r.liquido != null) ? r.liquido - blingTotal : null
   const es = estadoEnvioCard(p)
   const EnvIcon = es.icon
   const prazoRef = env ? (p.balde === 'proximos' && env.buffering_date ? env.buffering_date : (env.handling_limit || env.buffering_date)) : null
@@ -887,14 +886,13 @@ function Card({ p, nfe, ativo, onOpen, sel, onToggleSel }) {
         {cd && <span className="text-[10.5px] font-bold inline-flex items-center gap-1 px-2 py-1 rounded-lg" style={{ background: cd.urgente ? 'rgba(255,122,122,.14)' : 'rgba(0,0,0,.2)', color: cd.tom }}><Clock size={10} /> {cd.texto}</span>}
         <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: 'rgba(0,0,0,.2)', color: st.c }}>{st.t}</span>
         {nfe && nfe.numero && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'rgba(0,0,0,.2)', color: nfeCor(nfe) }} title={nfe.situacao_label || 'NF-e'}><FileText size={10} /> NF {nfe.numero}</span>}
-        {blingTotal != null && <span className="text-[10px] px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'rgba(0,0,0,.2)', color: 'var(--faint)' }} title="Preço de referência no Bling (não é custo)"><Boxes size={10} /> Bling {brl0(blingTotal)}</span>}
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2.5">
-        <MiniKpi icon={<Wallet size={11} />} label="Vendido" valor={brl(r.receita)} />
-        <MiniKpi icon={<Tag size={11} />} label="Custos ML" valor={'−' + brl(custosML)} cor="var(--warn)" sub={r.frete_vendedor ? `com. ${brl0(r.tarifa)} + frete ${brl0(r.frete_vendedor)}` : (r.comissao_pct != null ? `comissão ${r.comissao_pct.toFixed(0)}%` : 'comissão')} />
-        <MiniKpi icon={<Percent size={11} />} label="Impostos" valor={impostos > 0.005 ? '−' + brl(impostos) : '—'} cor="var(--warn)" sub={impostos > 0.005 ? 'imposto + cartão' : 'config zerada'} />
-        <MiniKpi icon={<TrendingUp size={11} />} label="Líquido" valor={r.liquido != null ? brl(r.liquido) : '—'} cor={cor} sub={r.margem != null ? `margem ${r.margem.toFixed(0)}%` : null} destaque />
+        <MiniKpi icon={<Wallet size={11} />} label="Vendido" valor={brl(r.receita)} sub={blingTotal != null ? `alvo Bling ${brl0(blingTotal)}` : null} />
+        <MiniKpi icon={<Tag size={11} />} label="Taxas mkt" valor={taxasCfg != null ? '−' + brl(taxasCfg) : (r.tarifa != null ? '−' + brl(r.tarifa) : '—')} cor="var(--warn)" sub="comissão + fixo + imposto" />
+        <MiniKpi icon={<Truck size={11} />} label="Frete ML" valor={r.frete_vendedor ? '−' + brl(r.frete_vendedor) : '—'} cor={r.frete_vendedor ? 'var(--warn)' : 'var(--faint)'} sub={r.frete_vendedor ? 'frete grátis: você paga' : 'sem custo p/ você'} />
+        <MiniKpi icon={<TrendingUp size={11} />} label="Sobra (líquido)" valor={r.liquido != null ? brl(r.liquido) : '—'} cor={cor} sub={vsAlvo != null ? `${vsAlvo >= -0.01 ? '+' : '−'}${brl0(Math.abs(vsAlvo))} vs alvo` : (r.margem != null ? `margem ${r.margem.toFixed(0)}%` : null)} destaque />
       </div>
     </div>
   )
@@ -1062,13 +1060,11 @@ function Drawer({ p, nfe, envio, baixando, imprimindo, onEtiqueta, onImprimir, o
           <div className="text-[9.5px] uppercase tracking-wide text-faint font-bold mb-2 flex items-center gap-1.5"><Wallet size={12} /> Repasse do Mercado Livre</div>
           <div className="rounded-xl p-3" style={{ background: 'rgba(0,0,0,.2)' }}>
             <div className="flex justify-between text-[12px] py-0.5"><span className="text-dim">Receita (comprador pagou)</span><span className="num">{brl(r.receita)}</span></div>
-            <div className="flex justify-between text-[12px] py-0.5"><span className="text-dim">Comissão do ML{comPct != null ? ` (${typeof comPct === 'number' ? comPct.toFixed(1) : comPct}%)` : ''}</span><span className="num" style={{ color: 'var(--danger)' }}>−{brl(r.tarifa)}</span></div>
+            <div className="flex justify-between text-[12px] py-0.5"><span className="text-dim">Taxas do marketplace <span className="text-faint">(faixa da Configuração)</span></span><span className="num" style={{ color: 'var(--danger)' }}>−{brl(r.taxas != null ? r.taxas : r.tarifa)}</span></div>
             {frete > 0 && <div className="flex justify-between text-[12px] py-0.5"><span className="text-dim">Frete do vendedor</span><span className="num" style={{ color: 'var(--danger)' }}>−{brl(frete)}</span></div>}
-            {r.imposto > 0 && <div className="flex justify-between text-[12px] py-0.5"><span className="text-dim">Imposto <span className="text-faint">(config)</span></span><span className="num" style={{ color: 'var(--danger)' }}>−{brl(r.imposto)}</span></div>}
-            {r.cartao > 0 && <div className="flex justify-between text-[12px] py-0.5"><span className="text-dim">Cartão/financeiro <span className="text-faint">(config)</span></span><span className="num" style={{ color: 'var(--danger)' }}>−{brl(r.cartao)}</span></div>}
-            {r.embalagem > 0 && <div className="flex justify-between text-[12px] py-0.5"><span className="text-dim">Embalagem <span className="text-faint">(config)</span></span><span className="num" style={{ color: 'var(--danger)' }}>−{brl(r.embalagem)}</span></div>}
-            <div className="flex justify-between text-[12px] py-2 mt-1 font-bold" style={{ borderTop: '1px solid var(--glass-border)' }}><span>Líquido (você recebe)</span><span className="num" style={{ color: 'var(--ok)' }}>{brl(r.liquido)}</span></div>
-            {r.preco_bling != null && <div className="flex justify-between text-[11px] py-0.5"><span className="text-faint">Preço Bling (referência, não é custo)</span><span className="num text-faint">{brl(r.preco_bling)}</span></div>}
+            <div className="flex justify-between text-[12px] py-2 mt-1 font-bold" style={{ borderTop: '1px solid var(--glass-border)' }}><span>Sobra (líquido)</span><span className="num" style={{ color: 'var(--ok)' }}>{brl(r.liquido)}</span></div>
+            {r.preco_bling != null && <div className="flex justify-between text-[11px] py-0.5"><span className="text-faint">Alvo (Preço Bling)</span><span className="num text-faint">{brl(r.preco_bling)}</span></div>}
+            {r.tarifa != null && <div className="flex justify-between text-[11px] py-0.5"><span className="text-faint">Comissão real cobrada pelo ML{comPct != null ? ` (${typeof comPct === 'number' ? comPct.toFixed(1) : comPct}%)` : ''}</span><span className="num text-faint">−{brl(r.tarifa)}</span></div>}
           </div>
           <button onClick={verTarifa} className="text-[10.5px] mt-1.5 inline-flex items-center gap-1 text-dim hover:text-fg">
             <DollarSign size={11} /> {tarifaDet ? 'Ocultar' : 'Ver'} detalhamento de faturamento
