@@ -129,6 +129,11 @@ export const api = {
   mlPosvenda: (status = 'opened') => req(`/api/mercadolivre/posvenda?status=${status}`),
   mlPosvendaDetalhe: (claimId) => req(`/api/mercadolivre/posvenda/${claimId}`),
   mlTarifaDetalhe: (orderId) => req(`/api/mercadolivre/tarifa/${orderId}`),
+  mlMensagens: (packId) => req(`/api/mercadolivre/mensagens/${packId}`),
+  mlEnviarMensagem: (packId, buyerId, texto) => req(`/api/mercadolivre/mensagens/${packId}`, { method: 'POST', body: { buyer_id: buyerId, texto } }),
+  mlNaoLidas: () => req('/api/mercadolivre/mensagens-nao-lidas'),
+  mlNfeStatus: (orderIds = []) => req('/api/mercadolivre/nfe-status', { method: 'POST', body: { order_ids: orderIds } }),
+  mlDadosFiscais: (orderId) => req(`/api/mercadolivre/dados-fiscais/${orderId}`),
   mlEtiqueta: async (shipmentIds, formato = 'pdf') => {
     const headers = {}
     if (getToken()) headers.Authorization = `Bearer ${getToken()}`

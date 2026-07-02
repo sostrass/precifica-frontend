@@ -94,6 +94,12 @@ function moneyCor(liq, margem) {
   if (margem != null && margem < 15) return 'var(--warn)'
   return 'var(--ok)'
 }
+function nfeCor(n) {
+  const l = ((n && n.situacao_label) || '').toLowerCase()
+  if (l.includes('autoriz')) return 'var(--ok)'
+  if (l.includes('rejeit') || l.includes('deneg') || l.includes('cancel') || l.includes('inutiliz')) return 'var(--danger)'
+  return 'var(--warn)'
+}
 // Prazo de despacho → texto curto + tom (atrasado / hoje / data)
 function prazoInfo(iso) {
   if (!iso) return null
@@ -273,6 +279,8 @@ export default function Pedidos() {
   const [imprimindo, setImprimindo] = useState('')
   const [personalizar, setPersonalizar] = useState(false)
   const [sincronizando, setSincronizando] = useState(false)
+  const [naoLidas, setNaoLidas] = useState(null)
+  const [nfeMap, setNfeMap] = useState({})
   const rodadasRef = useRef(0)
 
   const checar = useCallback(() => {
@@ -298,7 +306,14 @@ export default function Pedidos() {
   }, [desdeISO, notify])
 
   useEffect(() => { if (conn?.conta) carregar() }, [conn?.conta, carregar])
+  useEffect(() => { if (conn?.conta) api.mlNaoLidas().then((d) => setNaoLidas(d && d.ok ? d.total : null)).catch(() => setNaoLidas(null)) }, [conn?.conta])
   useEffect(() => { rodadasRef.current = 0 }, [periodo])
+  useEffect(() => {
+    if (!pedidos || !pedidos.length) { setNfeMap({}); return }
+    let vivo = true
+    api.mlNfeStatus(pedidos.map((p) => String(p.id))).then((d) => { if (vivo) setNfeMap((d && d.mapa) || {}) }).catch(() => {})
+    return () => { vivo = false }
+  }, [pedidos])
   useEffect(() => { setPage(1) }, [busca, escopo, envioTab, pgto, flagFiscal, flagDevol])
 
   // Aquece o cache de envios progressivamente (sem travar a lista); webhooks fazem o resto.
@@ -532,6 +547,11 @@ export default function Pedidos() {
               style={flagDevol ? { background: 'rgba(224,162,60,.16)', color: 'var(--warn)', border: '1px solid var(--warn)' } : { border: '1px solid var(--glass-border)', color: nDevol ? 'var(--warn)' : 'var(--faint)' }} title="Devoluções / pós-venda">
               <Undo2 size={12} /> Devoluções <span className="num">{nDevol}</span>
             </button>
+            {naoLidas > 0 && (
+              <span className="text-[11px] font-semibold px-2.5 py-1 rounded-lg inline-flex items-center gap-1.5" style={{ background: 'rgba(214,0,127,.14)', color: 'var(--accent)' }} title="Conversas não lidas — abra um pedido para responder">
+                <Send size={12} /> {naoLidas} não lida(s)
+              </span>
+            )}
           </div>
         </div>
 
@@ -589,7 +609,7 @@ export default function Pedidos() {
                   {paginas > 1 && <div className="mb-3"><Paginacao page={pageSafe} total={paginas} onIr={setPage} /></div>}
                   <div className="space-y-2.5">
                     {paginaItens.map((p) => (
-                      <Card key={p.id} p={p} ativo={ativo === p.id} sel={sel.has(p.id)}
+                      <Card key={p.id} p={p} nfe={nfeMap[String(p.id)]} ativo={ativo === p.id} sel={sel.has(p.id)}
                         onOpen={() => abrir(p)} onToggleSel={() => toggleSel(p.id)} />
                     ))}
                   </div>
@@ -602,7 +622,7 @@ export default function Pedidos() {
 
                 {ativoPedido && (
                   <div className="xl:sticky xl:top-2">
-                    <Drawer p={ativoPedido} envio={ativoPedido.shipping_id ? envios[ativoPedido.shipping_id] : null}
+                    <Drawer p={ativoPedido} nfe={nfeMap[String(ativoPedido.id)]} envio={ativoPedido.shipping_id ? envios[ativoPedido.shipping_id] : null}
                       baixando={baixando === String(ativoPedido.shipping_id)} imprimindo={imprimindo === 'um'}
                       onEtiqueta={() => baixarEtiqueta(ativoPedido.shipping_id)} onImprimir={() => imprimirUm(ativoPedido)}
                       onClose={() => setAtivo(null)} />
@@ -684,7 +704,7 @@ function Cell({ label, valor, sub, cor, forte, dim, destaque }) {
   )
 }
 
-function Card({ p, ativo, onOpen, sel, onToggleSel }) {
+function Card({ p, nfe, ativo, onOpen, sel, onToggleSel }) {
   const [imgErro, setImgErro] = useState(false)
   const st = ST_PEDIDO[p.status] || { t: p.status, c: 'var(--dim)' }
   const env = p.envio || null
@@ -735,6 +755,7 @@ function Card({ p, ativo, onOpen, sel, onToggleSel }) {
             {env && env.tracking_number && p.balde === 'transito' && <span className="text-[10px] num px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'rgba(0,0,0,.2)', color: 'var(--dim)' }}><MapPinned size={10} /> {env.tracking_number}</span>}
             {env && env.fiscal_pendente && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'rgba(255,122,122,.16)', color: 'var(--danger)' }}><AlertTriangle size={10} /> Sem dados fiscais</span>}
             {env && env.devolucao && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'rgba(224,162,60,.16)', color: 'var(--warn)' }}><Undo2 size={10} /> Devolução</span>}
+            {nfe && nfe.numero && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'var(--glass-hover)', color: nfeCor(nfe) }} title={nfe.situacao_label || 'NF-e'}><FileText size={10} /> NF-e {nfe.numero}</span>}
             {!env && p.balde === 'sincronizando' && <span className="text-[10px] px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'var(--glass-hover)', color: 'var(--faint)' }}><Loader2 size={10} className="animate-spin" /> sincronizando</span>}
           </div>
         </button>
@@ -794,7 +815,7 @@ function Timeline({ orderStatus, shipStatus }) {
   )
 }
 
-function Drawer({ p, envio, baixando, imprimindo, onEtiqueta, onImprimir, onClose }) {
+function Drawer({ p, nfe, envio, baixando, imprimindo, onEtiqueta, onImprimir, onClose }) {
   const r = p.resumo || {}
   const st = ST_PEDIDO[p.status] || { t: p.status, c: 'var(--dim)' }
   const itens = p.itens || []
@@ -811,6 +832,34 @@ function Drawer({ p, envio, baixando, imprimindo, onEtiqueta, onImprimir, onClos
     if (tarifaDet) { setTarifaDet(null); return }
     setTarifaDet('loading')
     try { const d = await api.mlTarifaDetalhe(p.id); setTarifaDet(d) } catch { setTarifaDet('erro') }
+  }
+  const [fiscal, setFiscal] = useState(null)
+  const verFiscal = async () => {
+    if (fiscal) { setFiscal(null); return }
+    setFiscal('loading')
+    try { const d = await api.mlDadosFiscais(p.id); setFiscal(d) } catch { setFiscal('erro') }
+  }
+  const packId = p.pack_id || p.id
+  const [msgs, setMsgs] = useState(null)
+  const [msgTexto, setMsgTexto] = useState('')
+  const [msgEnviando, setMsgEnviando] = useState(false)
+  const [msgErro, setMsgErro] = useState('')
+  useEffect(() => {
+    let vivo = true
+    setMsgs(null); setMsgTexto(''); setMsgErro('')
+    if (packId) api.mlMensagens(packId).then((d) => { if (vivo) setMsgs(d) }).catch(() => { if (vivo) setMsgs('erro') })
+    return () => { vivo = false }
+  }, [packId])
+  const enviarMsg = async () => {
+    const t = msgTexto.trim()
+    if (!t) return
+    setMsgEnviando(true); setMsgErro('')
+    try {
+      const res = await api.mlEnviarMensagem(packId, p.buyer?.id, t)
+      if (res && res.ok) { setMsgTexto(''); const d = await api.mlMensagens(packId); setMsgs(d) }
+      else { setMsgErro((res && res.erro) || 'Não consegui enviar.') }
+    } catch (e) { setMsgErro(e.message || 'Não consegui enviar.') }
+    setMsgEnviando(false)
   }
   const sid = p.shipping_id
   const ec = p.envio || {}
@@ -920,6 +969,37 @@ function Drawer({ p, envio, baixando, imprimindo, onEtiqueta, onImprimir, onClos
         </div>
 
         <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--glass-border)' }}>
+          <div className="text-[9.5px] uppercase tracking-wide text-faint font-bold mb-2 flex items-center gap-1.5"><FileText size={12} /> Nota fiscal</div>
+          {nfe && nfe.numero ? (
+            <div className="rounded-xl p-2.5 text-[12px]" style={{ background: 'rgba(0,0,0,.2)' }}>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-bold" style={{ color: nfeCor(nfe) }}>NF-e nº {nfe.numero}{nfe.serie ? `/${nfe.serie}` : ''}</span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ background: 'var(--glass-hover)', color: nfeCor(nfe) }}>{nfe.situacao_label || '—'}</span>
+              </div>
+              <div className="text-[10.5px] text-faint num mt-1">{nfe.emissao ? `Emitida ${nfe.emissao}` : ''}{nfe.valor != null ? ` · ${brl(nfe.valor)}` : ''}</div>
+              {nfe.chave && <div className="text-[10px] text-faint num mt-0.5 break-all">Chave {nfe.chave}</div>}
+            </div>
+          ) : ec.fiscal_pendente ? (
+            <div className="text-[11.5px]" style={{ color: 'var(--danger)' }}><AlertTriangle size={12} className="inline mr-1" /> Sem dados fiscais — a NF-e não pode ser emitida até completar. Emita e gerencie na aba <b>Nota Fiscal</b>.</div>
+          ) : (
+            <div className="text-[11.5px] text-faint">NF-e ainda não localizada. A emissão acontece via Bling — gerencie na aba <b>Nota Fiscal</b>.</div>
+          )}
+          <button onClick={verFiscal} className="text-[10.5px] mt-1.5 inline-flex items-center gap-1 text-dim hover:text-fg"><User size={11} /> {fiscal ? 'Ocultar' : 'Ver'} dados fiscais do comprador</button>
+          {fiscal === 'loading' && <div className="text-[10.5px] text-faint mt-1 flex items-center gap-1.5"><Loader2 size={11} className="animate-spin" /> lendo…</div>}
+          {fiscal === 'erro' && <div className="text-[10.5px] text-faint mt-1">Não consegui ler os dados fiscais.</div>}
+          {fiscal && fiscal !== 'loading' && fiscal !== 'erro' && (
+            fiscal.ok === false ? <div className="text-[10.5px] text-faint mt-1">Dados fiscais indisponíveis para este pedido.</div> : (
+              <div className="rounded-lg p-2 mt-1 text-[11px]" style={{ background: 'rgba(0,0,0,.2)' }}>
+                <div className="font-medium">{fiscal.nome || '—'}</div>
+                {fiscal.doc_numero && <div className="text-dim num">{fiscal.doc_tipo || 'Doc'}: {fiscal.doc_numero}</div>}
+                {fiscal.endereco && <div className="text-dim">{fiscal.endereco}{fiscal.bairro ? `, ${fiscal.bairro}` : ''}</div>}
+                {(fiscal.cidade || fiscal.cep) && <div className="text-dim">{[fiscal.cidade, fiscal.estado].filter(Boolean).join(' · ')}{fiscal.cep ? ` · ${fiscal.cep}` : ''}</div>}
+              </div>
+            )
+          )}
+        </div>
+
+        <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--glass-border)' }}>
           <div className="text-[9.5px] uppercase tracking-wide text-faint font-bold mb-2 flex items-center gap-1.5"><MapPin size={12} /> Entrega <span className="text-[8px] px-1 py-0.5 rounded" style={{ background: 'rgba(242,194,0,.18)', color: ML }}>endereço real · ML</span></div>
           {!sid ? <div className="text-[11px] text-faint">Este pedido não tem envio associado.</div>
             : !dest && envio === 'loading' ? <div className="text-[11px] text-faint flex items-center gap-2"><Loader2 size={12} className="animate-spin" /> lendo endereço…</div>
@@ -940,6 +1020,47 @@ function Drawer({ p, envio, baixando, imprimindo, onEtiqueta, onImprimir, onClos
             <Timeline orderStatus={p.status} shipStatus={shipStatus} />
           </div>
         )}
+
+        <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--glass-border)' }}>
+          <div className="text-[9.5px] uppercase tracking-wide text-faint font-bold mb-2 flex items-center gap-1.5"><Send size={12} /> Mensagens com o comprador</div>
+          {msgs === null ? <div className="text-[11px] text-faint flex items-center gap-2"><Loader2 size={12} className="animate-spin" /> carregando conversa…</div>
+            : msgs === 'erro' ? <div className="text-[11px] text-faint">Não consegui carregar as mensagens deste pedido.</div>
+              : (
+                <>
+                  {(!msgs.mensagens || !msgs.mensagens.length)
+                    ? <div className="text-[11px] text-faint mb-2">Nenhuma mensagem ainda. Você pode iniciar o contato abaixo.</div>
+                    : (
+                      <div className="space-y-1.5 mb-2 max-h-64 overflow-auto pr-1">
+                        {msgs.mensagens.map((m, i) => (
+                          <div key={m.id || i} className={`flex ${m.de_vendedor ? 'justify-end' : 'justify-start'}`}>
+                            <div className="rounded-xl px-2.5 py-1.5 max-w-[85%]" style={{ background: m.de_vendedor ? 'rgba(214,0,127,.14)' : 'rgba(0,0,0,.25)', border: '1px solid var(--glass-border)' }}>
+                              <div className="text-[9px] font-bold mb-0.5" style={{ color: m.de_vendedor ? 'var(--accent)' : 'var(--faint)' }}>{m.de_vendedor ? 'Você' : (p.buyer?.nickname || 'Comprador')}</div>
+                              <div className="text-[11.5px] whitespace-pre-wrap break-words" style={{ color: 'var(--fg)' }}>{m.texto || '(sem texto)'}</div>
+                              {m.anexos && m.anexos.length > 0 && <div className="text-[9.5px] text-faint mt-0.5 flex items-center gap-1"><FileText size={9} /> {m.anexos.map((a) => a.nome).filter(Boolean).join(', ')}</div>}
+                              <div className="text-[9px] text-faint mt-0.5 num">{dataHora(m.data)}{m.moderacao && m.moderacao !== 'clean' ? ' · em moderação' : ''}</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  {msgs.conversa && msgs.conversa.pode_responder === false ? (
+                    <div className="text-[10.5px] text-faint">Esta conversa não aceita resposta agora{p.status === 'cancelled' ? ' (pedido cancelado)' : ''}.</div>
+                  ) : (
+                    <div>
+                      <textarea value={msgTexto} onChange={(e) => setMsgTexto(e.target.value.slice(0, 350))} rows={2}
+                        placeholder="Escreva para o comprador…" className="w-full bg-transparent rounded-lg px-2.5 py-2 text-[12px] text-fg outline-none resize-none" style={{ border: '1px solid var(--glass-border)' }} />
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-[9.5px] text-faint num">{msgTexto.length}/350</span>
+                        {msgErro && <span className="text-[9.5px]" style={{ color: 'var(--danger)' }}>{msgErro}</span>}
+                        <button onClick={enviarMsg} disabled={msgEnviando || !msgTexto.trim()} className="ml-auto text-[11.5px] font-semibold px-3 py-1.5 rounded-lg text-white inline-flex items-center gap-1.5 disabled:opacity-50" style={{ background: 'var(--accent)' }}>
+                          {msgEnviando ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />} Enviar
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+        </div>
       </div>
     </div>
   )
