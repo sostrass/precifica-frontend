@@ -135,6 +135,14 @@ export const api = {
   mlNfeStatus: (orderIds = []) => req('/api/mercadolivre/nfe-status', { method: 'POST', body: { order_ids: orderIds } }),
   mlDadosFiscais: (orderId) => req(`/api/mercadolivre/dados-fiscais/${orderId}`),
   mlColeta: () => req('/api/mercadolivre/coleta'),
+  mlEnvioExtra: (sid, orderId, logisticType, shipStatus) => req(`/api/mercadolivre/envio-extra/${sid}?order_id=${encodeURIComponent(orderId || '')}&logistic_type=${encodeURIComponent(logisticType || '')}&ship_status=${encodeURIComponent(shipStatus || '')}`),
+  mlMensagemAnexo: async (filename) => {
+    const res = await fetch(`${BASE}/api/mercadolivre/mensagem-anexo?filename=${encodeURIComponent(filename)}`, {
+      headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {},
+    })
+    if (!res.ok) throw new Error('anexo')
+    return URL.createObjectURL(await res.blob())
+  },
   mlEtiqueta: async (shipmentIds, formato = 'pdf') => {
     const headers = {}
     if (getToken()) headers.Authorization = `Bearer ${getToken()}`

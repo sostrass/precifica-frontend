@@ -5,7 +5,7 @@ import {
   ChevronDown, ChevronUp, ChevronLeft, ChevronRight, User, ExternalLink,
   CheckCircle2, Zap, Check, CheckCheck, AlertTriangle, TrendingUp, Printer,
   Wallet, DollarSign, Tag, Clock, X, SlidersHorizontal, ClipboardList, FileText, Percent, PieChart, ArrowUpRight, ArrowDownRight,
-  Send, RotateCcw, PackageCheck, CalendarClock, MapPinned, Undo2,
+  Send, RotateCcw, PackageCheck, CalendarClock, MapPinned, Undo2, Star,
 } from 'lucide-react'
 import { api } from './api.js'
 import { useToast } from './toast.jsx'
@@ -292,6 +292,7 @@ export default function Pedidos() {
   const [compacto, setCompacto] = useState(() => { try { return localStorage.getItem('ped_compacto') === '1' } catch { return false } })
   const [donut, setDonut] = useState(() => { try { return localStorage.getItem('ped_donut') !== '0' } catch { return true } })
   const rodadasRef = useRef(0)
+  const semTrabalhoRef = useRef(false)
 
   const checar = useCallback(() => {
     api.mlConta().then((d) => setConn(d?.conta ? d : { conta: false })).catch(() => setConn({ conta: false }))
@@ -335,7 +336,7 @@ export default function Pedidos() {
   useEffect(() => { if (conn?.conta) api.mlColeta().then((d) => setColeta(d && d.ok ? d : null)).catch(() => setColeta(null)) }, [conn?.conta])
   useEffect(() => { try { localStorage.setItem('ped_compacto', compacto ? '1' : '0') } catch (e) { /* noop */ } }, [compacto])
   useEffect(() => { try { localStorage.setItem('ped_donut', donut ? '1' : '0') } catch (e) { /* noop */ } }, [donut])
-  useEffect(() => { rodadasRef.current = 0 }, [periodo, custom])
+  useEffect(() => { rodadasRef.current = 0; semTrabalhoRef.current = false }, [periodo, custom])
   useEffect(() => {
     if (!pedidos || !pedidos.length) { setNfeMap({}); return }
     let vivo = true
@@ -346,13 +347,18 @@ export default function Pedidos() {
 
   // Aquece o cache de envios progressivamente (sem travar a lista); webhooks fazem o resto.
   const backfill = useCallback(async (auto) => {
-    const ids = (pedidos || []).filter((p) => !p.envio && p.shipping_id).map((p) => String(p.shipping_id))
-    if (!ids.length) return
+    const CAND = ['sincronizando', 'hoje', 'proximos', 'fiscal']
+    const ids = (pedidos || [])
+      .filter((p) => p.shipping_id && (!p.envio || CAND.includes(p.balde)))
+      .map((p) => String(p.shipping_id))
+    if (!ids.length) { semTrabalhoRef.current = true; return }
     if (auto) rodadasRef.current += 1
     setSincronizando(true)
     try {
-      const r = await api.mlEnviosSincronizar(ids.slice(0, 12), 12)
-      setSyncErro(r && (r.total || 0) > 0 && (r.buscados || 0) === 0 ? ((r.erros && r.erros[0]) || 'nao_leu') : '')
+      const r = await api.mlEnviosSincronizar(ids, 12)
+      const fez = (r && (r.buscados || 0)) || 0
+      if (fez === 0) semTrabalhoRef.current = true  // nada faltante nem desatualizado → parar
+      setSyncErro(r && (r.faltam || 0) > 0 && fez === 0 ? ((r.erros && r.erros[0]) || 'nao_leu') : '')
       await buscar()
     } catch (_) { setSyncErro('falhou') }
     setSincronizando(false)
@@ -360,8 +366,11 @@ export default function Pedidos() {
 
   useEffect(() => {
     if (!pedidos || !sstats) return
-    if ((sstats.sincronizando || 0) <= 0) return
-    if (rodadasRef.current >= 12 || sincronizando) return
+    if (semTrabalhoRef.current) return
+    const CAND = ['sincronizando', 'hoje', 'proximos', 'fiscal']
+    const temAlvo = (pedidos || []).some((p) => p.shipping_id && (!p.envio || CAND.includes(p.balde)))
+    if (!temAlvo) return
+    if (rodadasRef.current >= 20 || sincronizando) return
     const t = setTimeout(() => backfill(true), 200)
     return () => clearTimeout(t)
   }, [pedidos, sstats, sincronizando, backfill])
@@ -655,6 +664,7 @@ export default function Pedidos() {
                 <span className="text-[11px] font-bold inline-flex items-center gap-1.5" style={{ color: 'var(--accent)' }}><Truck size={13} /> Coleta de hoje</span>
                 {(coleta.principal.de || coleta.principal.ate) && <span className="text-[13px] num font-semibold" style={{ color: 'var(--fg)' }}>{coleta.principal.de || '—'}{coleta.principal.ate ? ` – ${coleta.principal.ate}` : ''}</span>}
                 {coleta.principal.corte && <span className="text-[11px] text-dim">corte às <b className="num" style={{ color: 'var(--warn)' }}>{coleta.principal.corte}</b></span>}
+                {coleta.principal.corte && <LiveCountdown tipo="hora" alvo={coleta.principal.corte} variante="conforto" />}
                 {coleta.principal.carrier && <span className="text-[11px] text-faint inline-flex items-center gap-1"><Truck size={11} /> {coleta.principal.carrier}</span>}
                 {coleta.codigo_autorizacao && <span className="text-[11px] text-dim ml-auto">Código de autorização: <b className="num" style={{ color: 'var(--accent)' }}>{coleta.codigo_autorizacao}</b></span>}
               </div>
@@ -668,7 +678,7 @@ export default function Pedidos() {
                   <span className="text-[12px] text-dim flex-1">Sincronizando o estado de envio de <b className="num">{nSync}</b> pedido(s) com o Mercado Livre. As abas se ajustam conforme carrega — em tempo real depois disso.</span>
                 )}
                 {!sincronizando && (
-                  <button onClick={() => { rodadasRef.current = 0; setSyncErro(''); backfill(false) }} className="text-[11px] font-semibold px-2.5 py-1 rounded-lg" style={{ background: ML, color: '#3a2c00' }}>Tentar sincronizar</button>
+                  <button onClick={() => { rodadasRef.current = 0; semTrabalhoRef.current = false; setSyncErro(''); backfill(false) }} className="text-[11px] font-semibold px-2.5 py-1 rounded-lg" style={{ background: ML, color: '#3a2c00' }}>Tentar sincronizar</button>
                 )}
               </div>
             )}
@@ -901,6 +911,20 @@ function MiniKpi({ icon, label, valor, sub, cor, destaque }) {
   )
 }
 
+function LiveCountdown({ tipo, alvo, variante }) {
+  const [, setTick] = useState(0)
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => (t + 1) % 1000000), 30000)
+    return () => clearInterval(id)
+  }, [tipo, alvo])
+  const cd = tipo === 'hora' ? contagemAteHora(alvo) : contagemDespacho(alvo)
+  if (!cd) return null
+  if (variante === 'compacto') {
+    return <span className="text-[10px] font-bold px-2 py-0.5 rounded-full num shrink-0" style={{ background: cd.urgente ? 'rgba(255,122,122,.14)' : 'rgba(0,0,0,.2)', color: cd.tom }}>{cd.texto}</span>
+  }
+  return <span className="text-[10.5px] font-bold inline-flex items-center gap-1 px-2 py-1 rounded-lg" style={{ background: cd.urgente ? 'rgba(255,122,122,.14)' : 'rgba(0,0,0,.2)', color: cd.tom }}><Clock size={10} /> {cd.texto}</span>
+}
+
 function Donut({ pct, cor, size = 44 }) {
   const p = Math.max(0, Math.min(100, pct == null ? 0 : pct))
   const r = (size - 6) / 2
@@ -940,8 +964,8 @@ function Card({ p, nfe, corteHoje, compacto, donut, ativo, onOpen, sel, onToggle
   const es = estadoEnvioCard(p)
   const EnvIcon = es.icon
   const prazoRef = env ? (p.balde === 'proximos' && env.buffering_date ? env.buffering_date : (env.handling_limit || env.buffering_date)) : null
-  const cd = (p.balde === 'hoje' && corteHoje) ? contagemAteHora(corteHoje)
-    : (['hoje', 'proximos', 'fiscal'].includes(p.balde) ? contagemDespacho(prazoRef) : null)
+  const cdTipo = (p.balde === 'hoje' && corteHoje) ? 'hora' : (['hoje', 'proximos', 'fiscal'].includes(p.balde) ? 'prazo' : null)
+  const cdAlvo = cdTipo === 'hora' ? corteHoje : prazoRef
   const estornado = p.status === 'cancelled' || (r && r.estornado)
 
   if (compacto) {
@@ -957,7 +981,7 @@ function Card({ p, nfe, corteHoje, compacto, donut, ativo, onOpen, sel, onToggle
             <div className="text-[10px] text-faint num truncate">#{p.id} · {p.buyer?.nickname || 'comprador'}</div>
           </button>
           <span className="text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1 shrink-0" style={{ background: 'var(--glass-hover)', color: es.tom }}><EnvIcon size={10} className={es.spin ? 'animate-spin' : ''} /> {es.texto}</span>
-          {cd && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full num shrink-0" style={{ background: cd.urgente ? 'rgba(255,122,122,.14)' : 'rgba(0,0,0,.2)', color: cd.tom }}>{cd.texto}</span>}
+          {cdTipo && <LiveCountdown tipo={cdTipo} alvo={cdAlvo} variante="compacto" />}
           <span className="text-[10px] num shrink-0 hidden md:inline" style={{ color: 'var(--faint)' }}>Taxas <b style={{ color: 'var(--warn)' }}>−{brl0(taxasCfg != null ? taxasCfg : r.tarifa)}</b></span>
           <span className="text-[10px] num shrink-0" style={{ color: cor }}>Sobra <b>{r.liquido != null ? brl0(r.liquido) : '—'}</b>{r.margem != null ? ` · ${r.margem.toFixed(0)}%` : ''}</span>
           <div className="num font-bold text-right shrink-0" style={{ fontSize: 14, minWidth: 66 }}>{brl(r.receita != null ? r.receita : p.total)}</div>
@@ -1002,7 +1026,7 @@ function Card({ p, nfe, corteHoje, compacto, donut, ativo, onOpen, sel, onToggle
         <span className="text-[11px] font-semibold inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg" style={{ background: 'var(--glass-hover)', color: es.tom }}>
           <EnvIcon size={12} className={es.spin ? 'animate-spin' : ''} /> {es.texto}
         </span>
-        {cd && <span className="text-[10.5px] font-bold inline-flex items-center gap-1 px-2 py-1 rounded-lg" style={{ background: cd.urgente ? 'rgba(255,122,122,.14)' : 'rgba(0,0,0,.2)', color: cd.tom }}><Clock size={10} /> {cd.texto}</span>}
+        {cdTipo && <LiveCountdown tipo={cdTipo} alvo={cdAlvo} variante="conforto" />}
         <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: 'rgba(0,0,0,.2)', color: st.c }}>{st.t}</span>
         {nfe && nfe.numero && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'rgba(0,0,0,.2)', color: nfeCor(nfe) }} title={nfe.situacao_label || 'NF-e'}><FileText size={10} /> NF {nfe.numero}</span>}
       </div>
@@ -1023,6 +1047,17 @@ function Card({ p, nfe, corteHoje, compacto, donut, ativo, onOpen, sel, onToggle
       </div>
     </div>
   )
+}
+
+const SLA_INFO = {
+  on_time: { t: 'No prazo', c: 'var(--ok)' },
+  delayed: { t: 'Atrasado', c: 'var(--danger)' },
+  early: { t: 'Adiantado', c: 'var(--ok)' },
+}
+const RATING_INFO = {
+  positive: { t: 'Positiva', c: 'var(--ok)', n: 3 },
+  neutral: { t: 'Neutra', c: 'var(--warn)', n: 2 },
+  negative: { t: 'Negativa', c: 'var(--danger)', n: 1 },
 }
 
 function Timeline({ orderStatus, shipStatus, env }) {
@@ -1065,6 +1100,32 @@ function Timeline({ orderStatus, shipStatus, env }) {
   )
 }
 
+function MsgAnexo({ anexo }) {
+  const [url, setUrl] = useState(null)
+  const [erro, setErro] = useState(false)
+  const tipo = (anexo.tipo || '').toLowerCase()
+  const nome = anexo.nome || ''
+  const ehImg = tipo.includes('image') || /\.(jpe?g|png|gif|webp|bmp)$/i.test(nome)
+  const ehVid = tipo.includes('video') || /\.(mp4|mov|webm|3gp|m4v)$/i.test(nome)
+  useEffect(() => {
+    if (!anexo.filename || (!ehImg && !ehVid)) return
+    let vivo = true
+    let u = null
+    api.mlMensagemAnexo(anexo.filename).then((r) => { if (vivo) { u = r; setUrl(r) } else { URL.revokeObjectURL(r) } }).catch(() => { if (vivo) setErro(true) })
+    return () => { vivo = false; if (u) URL.revokeObjectURL(u) }
+  }, [anexo.filename, ehImg, ehVid])
+  if ((ehImg || ehVid) && url && !erro) {
+    return ehImg
+      ? <a href={url} target="_blank" rel="noreferrer"><img src={url} alt={nome || 'anexo'} className="rounded-lg" style={{ maxWidth: '100%', maxHeight: 200, objectFit: 'cover' }} /></a>
+      : <video src={url} controls className="rounded-lg" style={{ maxWidth: '100%', maxHeight: 220 }} />
+  }
+  if ((ehImg || ehVid) && !erro) {
+    return <div className="text-[9.5px] text-faint flex items-center gap-1"><Loader2 size={9} className="animate-spin" /> carregando {ehImg ? 'imagem' : 'vídeo'}…</div>
+  }
+  const rotulo = ehImg ? 'Imagem' : ehVid ? 'Vídeo' : 'Arquivo'
+  return <div className="text-[9.5px] text-faint flex items-center gap-1"><FileText size={9} /> {rotulo}: {nome || 'anexo'}{erro ? ' · abra no Mercado Livre' : ''}</div>
+}
+
 function Drawer({ p, nfe, envio, baixando, imprimindo, onEtiqueta, onImprimir, onClose }) {
   const r = p.resumo || {}
   const st = ST_PEDIDO[p.status] || { t: p.status, c: 'var(--dim)' }
@@ -1094,6 +1155,15 @@ function Drawer({ p, nfe, envio, baixando, imprimindo, onEtiqueta, onImprimir, o
   const [msgTexto, setMsgTexto] = useState('')
   const [msgEnviando, setMsgEnviando] = useState(false)
   const [msgErro, setMsgErro] = useState('')
+  const [extra, setExtra] = useState(null)
+  useEffect(() => {
+    let vivo = true
+    setExtra(null)
+    const sidX = p.shipping_id
+    if (sidX) api.mlEnvioExtra(sidX, p.id, p.logistic_type || (p.envio || {}).logistic_type, (p.envio || {}).status)
+      .then((d) => { if (vivo) setExtra(d || {}) }).catch(() => { if (vivo) setExtra({}) })
+    return () => { vivo = false }
+  }, [p.shipping_id, p.id])
   useEffect(() => {
     let vivo = true
     setMsgs(null); setMsgTexto(''); setMsgErro('')
@@ -1157,7 +1227,7 @@ function Drawer({ p, nfe, envio, baixando, imprimindo, onEtiqueta, onImprimir, o
         <div className="text-[11.5px] space-y-0.5">
           <div className="flex justify-between py-0.5"><span className="text-dim flex items-center gap-1.5"><Clock size={12} /> Criado</span><span className="num font-medium">{dataHora(p.date_created)}</span></div>
           {p.pago_em && <div className="flex justify-between py-0.5"><span className="text-dim flex items-center gap-1.5"><CheckCircle2 size={12} /> Pago</span><span className="num font-medium">{dataHora(p.pago_em)}</span></div>}
-          {prazo && <div className="flex justify-between py-0.5"><span className="text-dim flex items-center gap-1.5"><CalendarClock size={12} /> Despachar até</span><span className="num font-medium" style={{ color: prazo.tom }}>{prazo.texto === 'atrasado' ? 'atrasado' : dataHora(ec.handling_limit)}</span></div>}
+          {prazo && <div className="flex justify-between items-center py-0.5"><span className="text-dim flex items-center gap-1.5"><CalendarClock size={12} /> Despachar até</span><span className="flex items-center gap-2">{ec.handling_limit && <span className="num font-medium" style={{ color: 'var(--dim)' }}>{dataHora(ec.handling_limit)}</span>}<LiveCountdown tipo="prazo" alvo={ec.handling_limit} variante="conforto" /></span></div>}
           {modo && <div className="flex justify-between py-0.5"><span className="text-dim flex items-center gap-1.5"><Boxes size={12} /> Envio</span><span className="font-medium">{modo}</span></div>}
           {subLabel && <div className="flex justify-between py-0.5"><span className="text-dim flex items-center gap-1.5"><Truck size={12} /> Situação</span><span className="font-medium">{subLabel}</span></div>}
           {ec.buffering_date && <div className="flex justify-between py-0.5"><span className="text-dim flex items-center gap-1.5"><Clock size={12} /> Etiqueta disponível</span><span className="num font-medium" style={{ color: 'var(--warn)' }}>{dataHora(ec.buffering_date)}</span></div>}
@@ -1289,8 +1359,48 @@ function Drawer({ p, nfe, envio, baixando, imprimindo, onEtiqueta, onImprimir, o
 
         {sid && (
           <div className="mt-3 rounded-xl p-3" style={{ background: 'linear-gradient(158deg,rgba(255,255,255,.05),rgba(0,0,0,.20))', border: '1px solid var(--glass-border)' }}>
-            <div className="text-[9.5px] uppercase tracking-wide text-faint font-bold mb-2.5 flex items-center gap-1.5"><Truck size={12} /> Logística</div>
+            <div className="text-[9.5px] uppercase tracking-wide text-faint font-bold mb-2.5 flex items-center gap-1.5">
+              <Truck size={12} /> Logística
+              {extra && extra.sla && extra.sla.status && SLA_INFO[extra.sla.status] && (
+                <span className="ml-auto text-[9px] font-extrabold px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'rgba(0,0,0,.25)', color: SLA_INFO[extra.sla.status].c }}>
+                  <Clock size={9} /> SLA · {SLA_INFO[extra.sla.status].t}
+                </span>
+              )}
+            </div>
             <Timeline orderStatus={p.status} shipStatus={shipStatus} env={ec} />
+            {extra && extra.carrier && extra.carrier.url && (
+              <a href={extra.carrier.url} target="_blank" rel="noreferrer" className="mt-2.5 inline-flex items-center gap-1.5 text-[11px] font-semibold" style={{ color: 'var(--accent)' }}>
+                <MapPinned size={12} /> Rastrear{extra.carrier.name ? ` · ${extra.carrier.name}` : ''} <ExternalLink size={11} />
+              </a>
+            )}
+            {extra && Array.isArray(extra.historico) && extra.historico.length > 0 && (
+              <details className="mt-2.5">
+                <summary className="text-[10px] font-bold cursor-pointer select-none" style={{ color: 'var(--dim)' }}>Histórico completo ({extra.historico.length})</summary>
+                <div className="mt-2 space-y-1 pl-1" style={{ borderLeft: '2px solid var(--glass-border)' }}>
+                  {extra.historico.slice().reverse().map((h, i) => (
+                    <div key={i} className="flex items-start gap-2 text-[10.5px] pl-2">
+                      <span className="num text-faint shrink-0" style={{ minWidth: 96 }}>{h.date ? dataHora(h.date) : '—'}</span>
+                      <span className="text-dim">{(h.substatus && (SUBSTATUS_LABEL[h.substatus] || h.substatus)) || (ST_ENVIO[h.status] ? ST_ENVIO[h.status].t : (h.status || '—'))}</span>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
+          </div>
+        )}
+
+        {extra && extra.feedback && extra.feedback.comprador && extra.feedback.comprador.rating && RATING_INFO[extra.feedback.comprador.rating] && (
+          <div className="mt-3 rounded-xl p-3" style={{ background: 'linear-gradient(158deg,rgba(255,255,255,.05),rgba(0,0,0,.20))', border: '1px solid var(--glass-border)' }}>
+            <div className="text-[9.5px] uppercase tracking-wide text-faint font-bold mb-2 flex items-center gap-1.5"><Star size={12} /> Avaliação do comprador</div>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-0.5">
+                {[1, 2, 3].map((n) => (
+                  <Star key={n} size={15} style={{ color: RATING_INFO[extra.feedback.comprador.rating].c, fill: n <= RATING_INFO[extra.feedback.comprador.rating].n ? RATING_INFO[extra.feedback.comprador.rating].c : 'transparent' }} />
+                ))}
+              </div>
+              <span className="text-[12px] font-bold" style={{ color: RATING_INFO[extra.feedback.comprador.rating].c }}>{RATING_INFO[extra.feedback.comprador.rating].t}</span>
+            </div>
+            {extra.feedback.comprador.message && <div className="text-[11px] text-dim mt-1.5 italic">“{extra.feedback.comprador.message}”</div>}
           </div>
         )}
 
@@ -1310,13 +1420,8 @@ function Drawer({ p, nfe, envio, baixando, imprimindo, onEtiqueta, onImprimir, o
                               <div className="text-[9px] font-bold mb-0.5" style={{ color: m.de_vendedor ? 'var(--accent)' : 'var(--faint)' }}>{m.de_vendedor ? 'Você' : (p.buyer?.nickname || 'Comprador')}</div>
                               <div className="text-[11.5px] whitespace-pre-wrap break-words" style={{ color: 'var(--fg)' }}>{m.texto || '(sem texto)'}</div>
                               {m.anexos && m.anexos.length > 0 && (
-                                <div className="mt-1 space-y-0.5">
-                                  {m.anexos.map((a, k) => {
-                                    const tp = (a.tipo || '').toLowerCase()
-                                    const rotulo = tp.includes('image') ? 'Imagem' : tp.includes('video') ? 'Vídeo' : 'Arquivo'
-                                    return (<div key={k} className="text-[9.5px] text-faint flex items-center gap-1"><FileText size={9} /> {rotulo}: {a.nome || 'anexo'}</div>)
-                                  })}
-                                  <div className="text-[9px] text-faint">Imagem/vídeo abrem no Mercado Livre.</div>
+                                <div className="mt-1 space-y-1">
+                                  {m.anexos.map((a, k) => <MsgAnexo key={k} anexo={a} />)}
                                 </div>
                               )}
                               <div className="text-[9px] text-faint mt-0.5 num">{dataHora(m.data)}{m.moderacao && m.moderacao !== 'clean' ? ' · em moderação' : ''}</div>
