@@ -262,6 +262,8 @@ export default function Pedidos() {
   const notify = useToast()
   const [conn, setConn] = useState(null)
   const [periodo, setPeriodo] = useState(15)
+  const [custom, setCustom] = useState(null)
+  const [ordem, setOrdem] = useState('recentes')
   const [envioTab, setEnvioTab] = useState('hoje')
   const [pgto, setPgto] = useState('todos')
   const [flagFiscal, setFlagFiscal] = useState(false)
@@ -281,6 +283,7 @@ export default function Pedidos() {
   const [sincronizando, setSincronizando] = useState(false)
   const [naoLidas, setNaoLidas] = useState(null)
   const [nfeMap, setNfeMap] = useState({})
+  const [calAberto, setCalAberto] = useState(false)
   const rodadasRef = useRef(0)
 
   const checar = useCallback(() => {
@@ -288,43 +291,50 @@ export default function Pedidos() {
   }, [])
   useEffect(() => { checar() }, [checar])
 
-  const desdeISO = useCallback(() => { const d = new Date(); d.setDate(d.getDate() - periodo); return d.toISOString() }, [periodo])
+  const desdeISO = useCallback(() => {
+    if (custom && custom.de) return new Date(custom.de + 'T00:00:00').toISOString()
+    const d = new Date(); d.setDate(d.getDate() - periodo); d.setHours(0, 0, 0, 0); return d.toISOString()
+  }, [periodo, custom])
+  const ateISO = useCallback(() => {
+    if (custom && custom.ate) return new Date(custom.ate + 'T23:59:59').toISOString()
+    return ''
+  }, [custom])
 
-  // Busca TODOS os pedidos do período (status=''); baldes/estado do envio vêm
-  // prontos do backend (cache alimentado por webhooks + backfill).
+  // Busca silenciosa: atualiza a lista SEM voltar pro estado de "carregando"
+  // (usada pelo refresh em segundo plano da sincronização, sem piscar a tela).
+  const buscar = useCallback(async () => {
+    const d = await api.mlPedidosEnriquecido('', 0, 500, desdeISO(), ateISO())
+    const arr = d.pedidos || []
+    setPedidos(arr)
+    setSstats(d.stats || null)
+    setPaging(d.paging || { total: arr.length, carregados: arr.length })
+  }, [desdeISO, ateISO])
+
   const carregar = useCallback(async () => {
     setPedidos(null); setSel(new Set()); setAtivo(null); setPage(1)
-    try {
-      const d = await api.mlPedidosEnriquecido('', 0, 500, desdeISO())
-      const arr = d.pedidos || []
-      setPedidos(arr)
-      setSstats(d.stats || null)
-      setPaging(d.paging || { total: arr.length, carregados: arr.length })
-    } catch (e) {
-      notify(e.message, 'danger'); setPedidos([]); setSstats(null)
-    }
-  }, [desdeISO, notify])
+    try { await buscar() } catch (e) { notify(e.message, 'danger'); setPedidos([]); setSstats(null) }
+  }, [buscar, notify])
 
   useEffect(() => { if (conn?.conta) carregar() }, [conn?.conta, carregar])
   useEffect(() => { if (conn?.conta) api.mlNaoLidas().then((d) => setNaoLidas(d && d.ok ? d.total : null)).catch(() => setNaoLidas(null)) }, [conn?.conta])
-  useEffect(() => { rodadasRef.current = 0 }, [periodo])
+  useEffect(() => { rodadasRef.current = 0 }, [periodo, custom])
   useEffect(() => {
     if (!pedidos || !pedidos.length) { setNfeMap({}); return }
     let vivo = true
     api.mlNfeStatus(pedidos.map((p) => String(p.id))).then((d) => { if (vivo) setNfeMap((d && d.mapa) || {}) }).catch(() => {})
     return () => { vivo = false }
   }, [pedidos])
-  useEffect(() => { setPage(1) }, [busca, escopo, envioTab, pgto, flagFiscal, flagDevol])
+  useEffect(() => { setPage(1) }, [busca, escopo, envioTab, pgto, flagFiscal, flagDevol, ordem])
 
   // Aquece o cache de envios progressivamente (sem travar a lista); webhooks fazem o resto.
   const backfill = useCallback(async (auto) => {
     const ids = (pedidos || []).filter((p) => !p.envio && p.shipping_id).map((p) => String(p.shipping_id))
     if (!ids.length) return
     setSincronizando(true)
-    try { await api.mlEnviosSincronizar(ids.slice(0, 60), 60); if (auto) rodadasRef.current += 1; await carregar() }
+    try { await api.mlEnviosSincronizar(ids.slice(0, 60), 60); if (auto) rodadasRef.current += 1; await buscar() }
     catch (_) { /* silencioso */ }
     setSincronizando(false)
-  }, [pedidos, carregar])
+  }, [pedidos, buscar])
 
   useEffect(() => {
     if (!pedidos || !sstats) return
@@ -385,9 +395,19 @@ export default function Pedidos() {
     return id.includes(t) || comp.includes(t) || prod.includes(t) || trk.includes(t)
   }), [naAba, pgto, flagFiscal, flagDevol, busca, escopo])
 
-  const paginas = Math.max(1, Math.ceil(filtrada.length / PAGE_SIZE))
+  const ordenada = useMemo(() => {
+    const arr = [...filtrada]
+    const dt = (p) => new Date(p.date_created || 0).getTime() || 0
+    const hl = (p) => { const d = p.envio && p.envio.handling_limit ? new Date(p.envio.handling_limit).getTime() : NaN; return isNaN(d) ? Infinity : d }
+    if (ordem === 'antigos') arr.sort((a, b) => dt(a) - dt(b))
+    else if (ordem === 'despacho') arr.sort((a, b) => (hl(a) - hl(b)) || (dt(b) - dt(a)))
+    else arr.sort((a, b) => dt(b) - dt(a))
+    return arr
+  }, [filtrada, ordem])
+
+  const paginas = Math.max(1, Math.ceil(ordenada.length / PAGE_SIZE))
   const pageSafe = Math.min(page, paginas)
-  const paginaItens = useMemo(() => filtrada.slice((pageSafe - 1) * PAGE_SIZE, pageSafe * PAGE_SIZE), [filtrada, pageSafe])
+  const paginaItens = useMemo(() => ordenada.slice((pageSafe - 1) * PAGE_SIZE, pageSafe * PAGE_SIZE), [ordenada, pageSafe])
 
   const selecionaveis = useMemo(() => filtrada.filter((p) => p.shipping_id), [filtrada])
   const todosSel = selecionaveis.length > 0 && selecionaveis.every((p) => sel.has(p.id))
@@ -519,11 +539,29 @@ export default function Pedidos() {
                 )
               })}
             </div>
-            <div className="ml-auto inline-flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--glass-border)' }}>
-              {PERIODOS.map((p) => (
-                <button key={p.id} onClick={() => setPeriodo(p.id)} className="text-[11px] font-bold px-3 py-1.5"
-                  style={periodo === p.id ? { background: 'var(--accent)', color: '#fff' } : { background: 'transparent', color: 'var(--faint)' }}>{p.label}</button>
-              ))}
+            <div className="ml-auto flex items-center gap-2 relative">
+              {custom && (
+                <span className="text-[11px] font-semibold px-2.5 py-1 rounded-lg inline-flex items-center gap-1.5" style={{ background: 'rgba(214,0,127,.14)', color: 'var(--accent)' }}>
+                  <CalendarClock size={12} /> {dataBR(custom.de)} → {dataBR(custom.ate)}
+                  <button onClick={() => setCustom(null)} className="ml-0.5" aria-label="Limpar intervalo"><X size={11} /></button>
+                </span>
+              )}
+              <div className="inline-flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--glass-border)' }}>
+                {PERIODOS.map((p) => (
+                  <button key={p.id} onClick={() => { setCustom(null); setPeriodo(p.id) }} className="text-[11px] font-bold px-3 py-1.5"
+                    style={(!custom && periodo === p.id) ? { background: 'var(--accent)', color: '#fff' } : { background: 'transparent', color: 'var(--faint)' }}>{p.label}</button>
+                ))}
+                <button onClick={() => setCalAberto((v) => !v)} className="text-[11px] font-bold px-2.5 py-1.5 inline-flex items-center gap-1" title="Intervalo personalizado"
+                  style={custom ? { background: 'var(--accent)', color: '#fff' } : { background: 'transparent', color: 'var(--faint)' }}>
+                  <CalendarClock size={13} />
+                </button>
+              </div>
+              {calAberto && (
+                <div className="absolute right-0 top-full mt-2 z-30">
+                  <CalendarioRange de={custom && custom.de} ate={custom && custom.ate} onClose={() => setCalAberto(false)}
+                    onAplicar={(d, a) => { setCustom({ de: d, ate: a }); setCalAberto(false) }} />
+                </div>
+              )}
             </div>
           </div>
 
@@ -562,7 +600,7 @@ export default function Pedidos() {
             {nSync > 0 && (
               <div className="rounded-xl px-3 py-2 flex items-center gap-3 flex-wrap mt-3 mb-1" style={{ background: 'rgba(242,194,0,.08)', border: '1px solid rgba(242,194,0,.3)' }}>
                 {sincronizando ? <Loader2 size={14} className="animate-spin" style={{ color: ML }} /> : <RotateCcw size={14} style={{ color: ML }} />}
-                <span className="text-[12px] text-dim flex-1">Sincronizando o estado de envio de <b className="num">{nSync}</b> pedido(s) com o Mercado Livre. Os baldes se ajustam conforme carrega — em tempo real depois disso.</span>
+                <span className="text-[12px] text-dim flex-1">Sincronizando o estado de envio de <b className="num">{nSync}</b> pedido(s) com o Mercado Livre. As abas se ajustam conforme carrega — em tempo real depois disso.</span>
                 {rodadasRef.current >= 6 && !sincronizando && (
                   <button onClick={() => { rodadasRef.current = 0; backfill(false) }} className="text-[11px] font-semibold px-2.5 py-1 rounded-lg" style={{ background: ML, color: '#3a2c00' }}>Sincronizar mais</button>
                 )}
@@ -582,6 +620,12 @@ export default function Pedidos() {
               {ESCOPOS.map((e) => (
                 <button key={e.id} onClick={() => setEscopo(e.id)} className="text-[11px] font-medium px-2.5 py-1 rounded-lg"
                   style={escopo === e.id ? { background: 'rgba(214,0,127,.14)', color: 'var(--accent)' } : { background: 'rgba(255,255,255,.04)', color: 'var(--dim)' }}>{e.label}</button>
+              ))}
+              <span className="text-[10px] uppercase tracking-wide text-faint font-bold ml-auto">Ordenar</span>
+              {[{ id: 'recentes', l: 'Recentes' }, { id: 'antigos', l: 'Antigos' }, { id: 'despacho', l: 'Prioridade' }].map((o) => (
+                <button key={o.id} onClick={() => setOrdem(o.id)} className="text-[11px] font-medium px-2 py-1 rounded-lg"
+                  style={ordem === o.id ? { background: 'rgba(214,0,127,.14)', color: 'var(--accent)' } : { background: 'rgba(255,255,255,.04)', color: 'var(--dim)' }}
+                  title={o.id === 'despacho' ? 'Prioridade de despacho: prazo de coleta mais próximo primeiro' : (o.id === 'antigos' ? 'Vendas menos recentes' : 'Vendas mais recentes')}>{o.l}</button>
               ))}
               <button onClick={carregar} className="text-dim hover:text-fg ml-1" title="Atualizar"><RefreshCw size={15} /></button>
             </div>
@@ -615,7 +659,7 @@ export default function Pedidos() {
                   </div>
                   {paginas > 1 && <div className="mt-4"><Paginacao page={pageSafe} total={paginas} onIr={setPage} /></div>}
                   <div className="text-[11px] text-faint text-center mt-3">
-                    {(pageSafe - 1) * PAGE_SIZE + 1}–{Math.min(pageSafe * PAGE_SIZE, filtrada.length)} de {filtrada.length} em «{abaAtual}» · período de {periodo}d, {paging.carregados ?? (pedidos || []).length} pedidos carregados
+                    {(pageSafe - 1) * PAGE_SIZE + 1}–{Math.min(pageSafe * PAGE_SIZE, ordenada.length)} de {ordenada.length} em «{abaAtual}» · {custom ? `${dataBR(custom.de)} a ${dataBR(custom.ate)}` : `últimos ${periodo} dias`}, {paging.carregados ?? (pedidos || []).length} pedidos carregados
                     {(paging.total ?? 0) > (paging.carregados ?? 0) ? ` (de ${paging.total} — mais recentes)` : ''}
                   </div>
                 </div>
@@ -632,7 +676,7 @@ export default function Pedidos() {
             )}
 
             <div className="text-[10.5px] text-faint mt-4 leading-relaxed border-t pt-3" style={{ borderColor: 'var(--glass-border)' }}>
-              Os baldes seguem o <b>estado real do envio</b> (substatus e prazo de coleta), como na tela Vendas do ML — mantidos vivos pelos webhooks. "A despachar hoje" = coleta hoje/atrasada; "Próximos dias" = coleta agendada à frente. Tarifa, custo e margem por venda; endereço real e etiqueta oficial do ML. NF-e via Bling entra em seguida. Etiqueta de pedido <b>Full</b> é emitida pelo próprio Mercado Livre.
+              As abas seguem o <b>estado real do envio</b> (situação e prazo de coleta), como na tela de Vendas do ML, mantidas vivas pelos webhooks. "A despachar hoje" = coleta hoje ou atrasada; "Próximos dias" = coleta agendada à frente. Tarifa, custo e margem por venda; endereço real e etiqueta oficial do ML. NF-e via Bling entra em seguida. Etiqueta de pedido <b>Full</b> é emitida pelo próprio Mercado Livre.
             </div>
             </>
             )}
@@ -1213,6 +1257,74 @@ function PosVenda({ onFechar }) {
           })}
         </div>
       )}
+    </div>
+  )
+}
+
+/* =========================================================================== */
+const MES_LONGO = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro']
+const DIA_SEMANA = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S']
+function ymd(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
+
+function CalendarioRange({ de, ate, onAplicar, onClose }) {
+  const hoje = new Date(); hoje.setHours(23, 59, 59, 999)
+  const inicial = de ? new Date(de + 'T12:00:00') : new Date()
+  const [mes, setMes] = useState(new Date(inicial.getFullYear(), inicial.getMonth(), 1))
+  const [selDe, setSelDe] = useState(de || null)
+  const [selAte, setSelAte] = useState(ate || null)
+
+  const clicar = (dstr) => {
+    if (!selDe || (selDe && selAte)) { setSelDe(dstr); setSelAte(null) }
+    else if (dstr < selDe) { setSelAte(selDe); setSelDe(dstr) }
+    else setSelAte(dstr)
+  }
+  const dias = useMemo(() => {
+    const ano = mes.getFullYear(), m = mes.getMonth()
+    const offset = new Date(ano, m, 1).getDay()
+    const qtd = new Date(ano, m + 1, 0).getDate()
+    const cells = []
+    for (let i = 0; i < offset; i++) cells.push(null)
+    for (let d = 1; d <= qtd; d++) cells.push(new Date(ano, m, d))
+    return cells
+  }, [mes])
+  const naFaixa = (dstr) => selDe && selAte && dstr > selDe && dstr < selAte
+  const nav = (delta) => setMes((x) => new Date(x.getFullYear(), x.getMonth() + delta, 1))
+  const atalho = (dias) => { const a = new Date(); const d = new Date(); d.setDate(d.getDate() - dias); setSelDe(ymd(d)); setSelAte(ymd(a)); setMes(new Date(d.getFullYear(), d.getMonth(), 1)) }
+
+  return (
+    <div className="rounded-2xl p-3 w-[300px]" style={{ background: 'var(--surface)', border: '1px solid var(--glass-border)', boxShadow: '0 20px 60px rgba(0,0,0,.5)' }}>
+      <div className="flex items-center justify-between mb-2">
+        <button onClick={() => nav(-1)} className="text-dim hover:text-fg p-1" aria-label="Mês anterior"><ChevronLeft size={16} /></button>
+        <span className="text-sm font-semibold">{MES_LONGO[mes.getMonth()]} {mes.getFullYear()}</span>
+        <button onClick={() => nav(1)} className="text-dim hover:text-fg p-1" aria-label="Próximo mês"><ChevronRight size={16} /></button>
+      </div>
+      <div className="grid grid-cols-7 gap-1 text-center mb-1">
+        {DIA_SEMANA.map((d, i) => <span key={i} className="text-[9px] text-faint font-bold">{d}</span>)}
+      </div>
+      <div className="grid grid-cols-7 gap-1">
+        {dias.map((d, i) => {
+          if (!d) return <span key={i} />
+          const dstr = ymd(d)
+          const futuro = d > hoje
+          const sel = dstr === selDe || dstr === selAte
+          return (
+            <button key={i} disabled={futuro} onClick={() => clicar(dstr)} className="h-8 rounded-lg text-[11px] num disabled:opacity-25 disabled:cursor-default"
+              style={sel ? { background: 'var(--accent)', color: '#fff', fontWeight: 700 } : naFaixa(dstr) ? { background: 'rgba(214,0,127,.16)', color: 'var(--accent)' } : { color: 'var(--dim)' }}>
+              {d.getDate()}
+            </button>
+          )
+        })}
+      </div>
+      <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+        {[{ l: '60d', d: 60 }, { l: '90d', d: 90 }, { l: '6m', d: 182 }].map((a) => (
+          <button key={a.l} onClick={() => atalho(a.d)} className="text-[10px] px-2 py-0.5 rounded-lg" style={{ background: 'rgba(255,255,255,.04)', color: 'var(--dim)' }}>{a.l}</button>
+        ))}
+      </div>
+      <div className="flex items-center gap-2 mt-2 pt-2" style={{ borderTop: '1px solid var(--glass-border)' }}>
+        <span className="text-[10.5px] text-faint flex-1">{selDe ? (selAte ? `${dataBR(selDe)} → ${dataBR(selAte)}` : `${dataBR(selDe)} → …`) : 'Escolha início e fim'}</span>
+        <button onClick={onClose} className="text-[11px] px-2 py-1 rounded-lg glass text-dim hover:text-fg">Cancelar</button>
+        <button onClick={() => onAplicar(selDe, selAte || selDe)} disabled={!selDe} className="text-[11px] font-semibold px-3 py-1 rounded-lg text-white disabled:opacity-40" style={{ background: 'var(--accent)' }}>Aplicar</button>
+      </div>
     </div>
   )
 }
