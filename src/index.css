@@ -93,6 +93,8 @@ body::after  { width: 520px; height: 520px; background: radial-gradient(circle, 
 }
 
 .num { font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.lift { transition: transform .15s ease, box-shadow .15s ease; }
+.lift:hover { transform: translateY(-2px); }
 
 /* Marca animada do login: degradê + "farolete" branco varrendo o texto */
 .brand-precifica {

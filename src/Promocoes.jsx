@@ -184,7 +184,7 @@ function Kpi({ icon: Ic, label, valor, sub, subcor, hero, prof }) {
     : prof ? 'linear-gradient(135deg, rgba(160,107,232,.3), rgba(160,107,232,.1))'
     : 'rgba(255,255,255,.06)'
   return (
-    <div className="rounded-2xl p-3" style={{ background: bg, border: `1px solid ${bd}` }}>
+    <div className="rounded-2xl p-3 lift" style={{ background: bg, border: `1px solid ${bd}` }}>
       <div className="text-[9.5px] uppercase tracking-wide text-faint font-bold flex items-center gap-1.5">
         <span className="w-[22px] h-[22px] rounded-lg grid place-items-center" style={{ background: ig, color: hero ? 'var(--ok)' : prof ? PURPLE : 'var(--dim)' }}><Ic size={12} /></span> {label}
       </div>
@@ -225,7 +225,7 @@ function Donut({ pct, cor, label, valor }) {
       <div className="relative" style={{ width: 52, height: 52 }}>
         <svg width="52" height="52" viewBox="0 0 52 52" style={{ transform: 'rotate(-90deg)' }}>
           <circle cx="26" cy="26" r="21" fill="none" stroke="rgba(255,255,255,.08)" strokeWidth="4" />
-          <circle cx="26" cy="26" r="21" fill="none" stroke={cor} strokeWidth="4" strokeLinecap="round" strokeDasharray={C} strokeDashoffset={off} />
+          <circle cx="26" cy="26" r="21" fill="none" stroke={cor} strokeWidth="4" strokeLinecap="round" strokeDasharray={C} strokeDashoffset={off} style={{ filter: `drop-shadow(0 0 3px ${cor}88)` }} />
         </svg>
         <div className="absolute inset-0 grid place-items-center text-[11px] font-extrabold num" style={{ color: cor }}>{valor}</div>
       </div>
@@ -270,7 +270,7 @@ function ConviteCard({ p, onAderir }) {
   const cofin = ben.type === 'REBATE' ? `ML ${ben.meli_percent ?? '—'}% + você ${ben.seller_percent ?? '—'}%` : null
   const ddl = dcurta(p.deadline_date); const dd = diasAte(p.deadline_date)
   return (
-    <div className="rounded-2xl p-3.5 relative overflow-hidden" style={{ background: `linear-gradient(160deg, ${m.cor}14, rgba(0,0,0,.14))`, border: `1px solid ${m.cor}33` }}>
+    <div className="rounded-2xl p-3.5 relative overflow-hidden lift" style={{ background: `linear-gradient(160deg, ${m.cor}14, rgba(0,0,0,.14))`, border: `1px solid ${m.cor}33` }}>
       <div className="absolute top-0 left-0 right-0 h-[3px]" style={{ background: `linear-gradient(90deg, ${m.cor}, transparent)` }} />
       <div className="flex items-center gap-2">
         <div className="w-8 h-8 rounded-lg grid place-items-center flex-none" style={{ background: `${m.cor}22`, color: m.cor }}><Ic size={16} /></div>
@@ -306,7 +306,7 @@ function CampanhaCard({ p, onAcao }) {
   const tempo = (p.start_date && p.finish_date) ? Math.round(pctTempo(p.start_date, p.finish_date)) : null
   const restam = diasAte(p.finish_date)
   return (
-    <div className="rounded-2xl p-3.5 mb-3 glass" style={{ boxShadow: `inset 3px 0 0 ${barCor}` }}>
+    <div className="rounded-2xl p-3.5 mb-3 glass lift" style={{ boxShadow: `inset 3px 0 0 ${barCor}` }}>
       <div className="flex items-start gap-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
@@ -373,7 +373,7 @@ function SecCupons({ cupons, onAcao, full }) {
 function CupomCard({ p, onAcao }) {
   const st = stInfo(p.status); const ini = dcurta(p.start_date), fim = dcurta(p.finish_date)
   return (
-    <div className="rounded-2xl p-3.5 mb-3 glass" style={{ boxShadow: 'inset 3px 0 0 #F2C200' }}>
+    <div className="rounded-2xl p-3.5 mb-3 glass lift" style={{ boxShadow: 'inset 3px 0 0 #F2C200' }}>
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-[14px] font-bold">{p.name || 'Cupom'}</span>
         <Chip cor={ML}><Ticket size={10} /> Cupom (MLB)</Chip>
@@ -431,6 +431,14 @@ function Simulador({ notify }) {
         <button onClick={() => simular()} disabled={busy || !itemId.trim()} className="text-[12px] font-semibold px-4 py-2 rounded-xl text-white inline-flex items-center gap-1.5 disabled:opacity-40" style={{ background: 'linear-gradient(135deg, var(--accent), #a80063)' }}>{busy ? <Loader2 size={14} className="animate-spin" /> : <Gauge size={14} />} Simular</button>
       </div>
 
+      <div className="flex items-center gap-2 flex-wrap mb-3">
+        <span className="text-[9.5px] text-faint font-extrabold uppercase tracking-wide">Desconto rápido</span>
+        {[10, 15, 20, 25, 30].map((d) => (
+          <button key={d} onClick={() => { setDesc(d); if (itemId.trim()) simular(d) }} className="text-[11px] font-bold px-2.5 py-1 rounded-full num transition-colors"
+            style={desc === d ? { background: 'var(--accent)', color: '#fff', boxShadow: '0 3px 10px rgba(214,0,127,.35)' } : { background: 'rgba(255,255,255,.06)', color: 'var(--dim)', border: '1px solid var(--glass-border)' }}>{d}%</button>
+        ))}
+      </div>
+
       {!res && <div className="text-[11.5px] text-faint py-3 flex items-center gap-2"><Info size={14} /> Informe o ID de um anúncio e o desconto para ver o <b style={{ color: 'var(--dim)' }}>líquido real</b>, o <b style={{ color: 'var(--dim)' }}>lucro</b> e se fica <b style={{ color: 'var(--dim)' }}>acima do piso</b> (Preço Bling).</div>}
 
       {res && (
@@ -481,6 +489,24 @@ function Simulador({ notify }) {
                   : <span className="text-[10px] font-extrabold px-2 py-1 rounded-full inline-flex items-center gap-1.5" style={{ background: 'rgba(255,122,122,.14)', color: 'var(--danger)' }}><Ban size={11} /> Abaixo do piso · fura a margem</span>}
               {res.piso_preco != null && <span className="text-[10px] text-faint num">piso {brl(res.piso_preco)}</span>}
             </div>
+            {res.deal_price > 0 && (() => {
+              const dp = res.deal_price
+              const podeDecompor = res.custo != null && res.lucro != null && res.lucro >= 0 && res.liquido != null
+              const segs = podeDecompor
+                ? [{ l: 'Custo', v: res.custo, c: 'rgba(255,255,255,.30)' }, { l: 'Lucro', v: res.lucro, c: PURPLE }, { l: 'Taxas ML', v: res.taxas, c: 'var(--warn)' }]
+                : [{ l: 'Líquido', v: res.liquido, c: 'var(--ok)' }, { l: 'Taxas ML', v: res.taxas, c: 'var(--warn)' }]
+              return (
+                <div className="mt-2.5">
+                  <div className="text-[9px] uppercase tracking-wide text-faint font-extrabold mb-1">Onde vai cada real do preço</div>
+                  <div className="flex h-4 rounded-md overflow-hidden" style={{ background: 'rgba(0,0,0,.3)' }}>
+                    {segs.map((s, i) => (s.v || 0) > 0 && <div key={i} title={`${s.l}: ${brl(s.v)}`} style={{ width: `${(s.v / dp) * 100}%`, background: s.c }} />)}
+                  </div>
+                  <div className="flex gap-3 mt-1 flex-wrap">
+                    {segs.map((s, i) => <span key={i} className="text-[9px] text-dim inline-flex items-center gap-1"><span className="w-2 h-2 rounded-sm" style={{ background: s.c }} /> {s.l} <b className="num">{brl(s.v)}</b></span>)}
+                  </div>
+                </div>
+              )
+            })()}
             <button onClick={() => notify('Aplicar desconto: chega na Etapa 3.', 'warn')} disabled={res.acima_do_piso === false} className="mt-2 text-[11px] font-bold px-3 py-2 rounded-xl text-white inline-flex items-center justify-center gap-1.5 disabled:opacity-40" style={{ background: 'linear-gradient(135deg, var(--accent), #a80063)' }}><Percent size={13} /> Aplicar este desconto</button>
           </div>
         </div>
@@ -522,7 +548,7 @@ function Calendario({ minhas, cupons, convites }) {
   return (
     <>
       <Secao icon={Calendar} cor="var(--accent)" titulo="Calendário de campanhas" pill="próximos 30 dias · agendamento" pillCor={BLUE} />
-      <div className="rounded-2xl p-4 glass">
+      <div className="rounded-2xl p-4 glass lift">
         {linhas.length === 0
           ? <div className="text-[11.5px] text-faint flex items-center gap-2"><Info size={14} /> Sem campanhas com data no período. Campanhas agendadas aparecem aqui numa linha do tempo.</div>
           : <div className="flex flex-col gap-2">
@@ -558,7 +584,7 @@ function Inteligencia() {
     <div className="mt-4">
       <Secao icon={Activity} cor={PURPLE} titulo="Inteligência" pill="prévia · dados reais na Etapa 3" pillCor={PURPLE} />
       <div className="grid gap-3" style={{ gridTemplateColumns: '1.2fr 1fr' }}>
-        <div className="rounded-2xl p-4 glass">
+        <div className="rounded-2xl p-4 glass lift">
           <div className="text-[10px] uppercase tracking-wide text-faint font-extrabold flex items-center gap-2 mb-3"><Activity size={13} /> Elasticidade por SKU — desconto que maximiza lucro</div>
           <div className="grid gap-2 text-[9px] uppercase tracking-wide text-faint font-extrabold pb-1" style={{ gridTemplateColumns: '1.6fr .7fr .7fr 1fr' }}><span>SKU</span><span>Δ preço</span><span>Δ unid.</span><span>ótimo</span></div>
           {elast.map((e, i) => (
@@ -571,7 +597,7 @@ function Inteligencia() {
           ))}
           <div className="text-[9.5px] text-faint mt-2 flex items-center gap-1.5"><Info size={12} /> Cruza unidades antes/depois (cache de pedidos) × Δpreço. Alimenta os agentes.</div>
         </div>
-        <div className="rounded-2xl p-4 glass">
+        <div className="rounded-2xl p-4 glass lift">
           <div className="text-[10px] uppercase tracking-wide text-faint font-extrabold flex items-center gap-2 mb-3"><Target size={13} /> Buybox — preço p/ recuperar (respeitando piso)</div>
           {bb.map((b, i) => (
             <div key={i} className="flex items-center gap-2.5 py-2.5" style={{ borderTop: i ? '1px solid var(--glass-border)' : 'none' }}>
@@ -606,7 +632,7 @@ function Automacao() {
         {AGENTES.map((a, i) => {
           const Ic = a.icon
           return (
-            <div key={i} className="rounded-2xl p-3.5" style={{ background: 'linear-gradient(158deg, rgba(255,255,255,.05), rgba(0,0,0,.18))', border: '1px solid var(--glass-border)' }}>
+            <div key={i} className="rounded-2xl p-3.5 lift" style={{ background: 'linear-gradient(158deg, rgba(255,255,255,.05), rgba(0,0,0,.18))', border: '1px solid var(--glass-border)' }}>
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-lg grid place-items-center flex-none" style={{ background: `${a.cor}22`, color: a.cor }}><Ic size={16} /></div>
                 <div className="flex-1 min-w-0"><div className="text-[12.5px] font-bold">{a.nm}</div><div className="text-[8.5px] font-extrabold uppercase tracking-wide text-faint">{a.tg}</div></div>
