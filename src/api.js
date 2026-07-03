@@ -136,6 +136,7 @@ export const api = {
   mlPromoMetricas: (id, tipo, inicio, fim) => req(`/api/mercadolivre/promocoes/promocao/${encodeURIComponent(id)}/metricas?${new URLSearchParams(Object.entries({ promotion_type: tipo, inicio: inicio || '', fim: fim || '' }).filter(([, v]) => v !== '')).toString()}`),
   mlPedidosBackfill: (dias = 90) => req(`/api/mercadolivre/pedidos/cache/backfill?dias=${dias}`, { method: 'POST' }),
   mlPedidosCacheStatus: () => req('/api/mercadolivre/pedidos/cache/status'),
+  mlPedidosParados: (dias = 30, limit = 20) => req(`/api/mercadolivre/pedidos/parados?dias=${dias}&limit=${limit}`),
   mlPromocoesItem: (item_id) => req(`/api/mercadolivre/promocoes/${item_id}`),
   mlPromoAplicar: (b) => req('/api/mercadolivre/promocoes/aplicar', { method: 'POST', body: b }),
   mlPromoRemover: (item_id) => req('/api/mercadolivre/promocoes/remover', { method: 'POST', body: { item_id } }),

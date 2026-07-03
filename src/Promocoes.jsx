@@ -185,12 +185,12 @@ export default function Promocoes() {
               <Distribuicao convites={convites.length} minhas={minhas.length} cupons={cupons.length} />
               <Simulador notify={notify} recarregar={carregar} />
               <SecConvites convites={convites} onAderir={abrirAderir} />
-              <SecMinhas minhas={minhas} onAcao={emBreve} onEncerrar={encerrarCampanha} onAddItens={abrirAddItens} onSincronizar={sincronizarPedidos} />
+              <SecMinhas minhas={minhas} onAcao={emBreve} onEncerrar={encerrarCampanha} onAddItens={abrirAddItens} onSincronizar={sincronizarPedidos} notify={notify} />
               <SecCupons cupons={cupons} onAcao={emBreve} onEncerrar={encerrarCampanha} />
               <Calendario minhas={minhas} cupons={cupons} convites={convites} />
             </>
           )}
-          {aba === 'minhas' && <SecMinhas minhas={minhas} onAcao={emBreve} onEncerrar={encerrarCampanha} onAddItens={abrirAddItens} onSincronizar={sincronizarPedidos} full />}
+          {aba === 'minhas' && <SecMinhas minhas={minhas} onAcao={emBreve} onEncerrar={encerrarCampanha} onAddItens={abrirAddItens} onSincronizar={sincronizarPedidos} notify={notify} full />}
           {aba === 'convites' && <SecConvites convites={convites} onAderir={abrirAderir} full />}
           {aba === 'cupons' && <SecCupons cupons={cupons} onAcao={emBreve} onEncerrar={encerrarCampanha} full />}
         </>
@@ -334,13 +334,13 @@ function ConviteCard({ p, onAderir, idx = 0 }) {
 }
 
 /* ================= MINHAS CAMPANHAS ================= */
-function SecMinhas({ minhas, onAcao, onEncerrar, onAddItens, onSincronizar, full }) {
+function SecMinhas({ minhas, onAcao, onEncerrar, onAddItens, onSincronizar, notify, full }) {
   return (
     <>
       <Secao icon={Tag} cor="var(--accent)" titulo="Minhas campanhas" pill="você cria" pillCor="var(--accent)" />
       {minhas.length === 0
         ? <Vazio texto="Você ainda não tem campanhas próprias. Crie uma Campanha de %, um Desconto individual ou um Desconto por quantidade — sempre com a trava de margem no Preço Bling." />
-        : minhas.map((m, i) => <CampanhaCard key={m.id} p={m} onAcao={onAcao} onEncerrar={onEncerrar} onAddItens={onAddItens} onSincronizar={onSincronizar} idx={i} />)}
+        : minhas.map((m, i) => <CampanhaCard key={m.id} p={m} onAcao={onAcao} onEncerrar={onEncerrar} onAddItens={onAddItens} onSincronizar={onSincronizar} notify={notify} idx={i} />)}
     </>
   )
 }
@@ -357,7 +357,7 @@ const INS = {
   info: { c: 'var(--dim)', Icon: Info },
 }
 
-function CampanhaCard({ p, onAcao, onEncerrar, onAddItens, onSincronizar, idx = 0 }) {
+function CampanhaCard({ p, onAcao, onEncerrar, onAddItens, onSincronizar, notify, idx = 0 }) {
   const m = meta(p.type); const Ic = m.icon
   const st = stInfo(p.status)
   const ini = dcurta(p.start_date), fim = dcurta(p.finish_date)
@@ -384,7 +384,7 @@ function CampanhaCard({ p, onAcao, onEncerrar, onAddItens, onSincronizar, idx = 
   const tileV = (v) => carrMet ? '…' : (v == null ? '—' : v)
 
   return (
-    <div className="rounded-2xl p-3.5 mb-3 glass lift card-in" style={{ boxShadow: `inset 3px 0 0 ${barCor}`, animationDelay: `${idx * 45}ms` }}>
+    <div onClick={() => setDrawer(true)} className="rounded-2xl p-3.5 mb-3 glass lift card-in cursor-pointer" style={{ boxShadow: `inset 3px 0 0 ${barCor}`, animationDelay: `${idx * 45}ms` }}>
       <div className="flex items-start gap-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
@@ -415,13 +415,13 @@ function CampanhaCard({ p, onAcao, onEncerrar, onAddItens, onSincronizar, idx = 
           <ChevronRight size={13} className="flex-none" style={{ color: it.c }} />
         </button>
       ) })()}
-      <div className="flex gap-2 mt-3 flex-wrap">
+      <div className="flex gap-2 mt-3 flex-wrap" onClick={(e) => e.stopPropagation()}>
         <Act icon={Plus} onClick={() => onAddItens && onAddItens(p)}>Adicionar itens</Act>
         <Act icon={BarChart3} onClick={() => setDrawer(true)}>Desempenho{nIns ? ` (${nIns})` : ''}</Act>
         <Act icon={Gauge} onClick={() => onAcao('Simular')}>Simular</Act>
         <Act icon={Trash2} danger onClick={() => onEncerrar && onEncerrar(p)}>Encerrar</Act>
       </div>
-      {drawer && <DesempenhoDrawer met={met} carregando={carrMet} p={p} onClose={() => setDrawer(false)} onSincronizar={onSincronizar} />}
+      {drawer && <DesempenhoDrawer met={met} carregando={carrMet} p={p} onClose={() => setDrawer(false)} onSincronizar={onSincronizar} notify={notify} />}
     </div>
   )
 }
@@ -871,14 +871,35 @@ function Sparkline({ serie }) {
   )
 }
 
-function DesempenhoDrawer({ met, carregando, p, onClose, onSincronizar }) {
+function DesempenhoDrawer({ met, carregando, p, onClose, onSincronizar, notify }) {
   const m = meta(p.type); const Ic = m.icon
   const sd = met ? (SAUDE[met.saude] || SAUDE.atencao) : null
   const bom = met ? Math.max(0, (met.itens || 0) - (met.abaixo_piso || 0)) : 0
   const ruim = met ? (met.abaixo_piso || 0) : 0
   const det = (met && met.itens_detalhe) || []
+  const CRIA = ['SELLER_CAMPAIGN', 'PRICE_DISCOUNT', 'SELLER_COUPON_CAMPAIGN', 'VOLUME']
+  const isCria = CRIA.includes(p.type)
+  const [parados, setParados] = useState(null)
+  const [addingId, setAddingId] = useState(null)
+  useEffect(() => {
+    let vivo = true
+    api.mlPedidosParados(30, 12).then((r) => { if (vivo) setParados(r) }).catch(() => { if (vivo) setParados(null) })
+    return () => { vivo = false }
+  }, [])
+  const addParado = async (it) => {
+    if (it.folga_desconto_pct <= 0) return
+    setAddingId(it.item_id)
+    try {
+      let deal = Math.round(it.preco * 0.9 * 100) / 100
+      if (it.piso != null && deal < it.piso) deal = it.piso
+      await api.mlPromoAderir(it.item_id, { promotion_id: p.id, promotion_type: p.type, deal_price: deal })
+      notify && notify(`${it.titulo || it.item_id} adicionado à campanha.`, 'ok')
+      setParados((prev) => (prev ? { ...prev, itens: prev.itens.filter((x) => x.item_id !== it.item_id) } : prev))
+    } catch (e) { notify && notify(traduzErroML(e.message), 'danger') }
+    finally { setAddingId(null) }
+  }
   return createPortal(
-    <div className="fixed inset-0 z-[80] flex justify-end" style={{ background: 'rgba(0,0,0,.55)' }} onClick={onClose}>
+    <div className="fixed inset-0 z-[80] flex justify-end" style={{ background: 'rgba(0,0,0,.55)' }} onClick={(e) => { e.stopPropagation(); onClose() }}>
       <div onClick={(e) => e.stopPropagation()} className="h-full w-full card-in flex flex-col" style={{ maxWidth: 560, background: 'var(--surface)', borderLeft: '1px solid var(--glass-border)', boxShadow: '-20px 0 60px rgba(0,0,0,.5)' }}>
         {/* header */}
         <div className="flex items-center gap-2 px-4 py-3 flex-none" style={{ borderBottom: '1px solid var(--glass-border)' }}>
@@ -953,6 +974,25 @@ function DesempenhoDrawer({ met, carregando, p, onClose, onSincronizar }) {
                 </div>
               )}
 
+              {/* projeção */}
+              {met.projecao && (
+                <div className="mt-5">
+                  <div className="text-[11px] uppercase tracking-wide text-faint font-extrabold mb-2 flex items-center gap-1.5"><TrendingUp size={12} style={{ color: 'var(--ok)' }} /> Projeção da campanha</div>
+                  {met.projecao.cache_vazio ? (
+                    <div className="rounded-xl p-3 text-[11px] text-dim flex items-center gap-2" style={{ background: 'rgba(91,141,239,.1)', border: '1px solid rgba(91,141,239,.25)' }}><RefreshCw size={14} style={{ color: BLUE, flexShrink: 0 }} /> Sincronize os pedidos para projetar vendas.<button onClick={() => onSincronizar && onSincronizar()} className="ml-auto text-[11px] font-bold px-2.5 py-1 rounded-lg text-white flex-none" style={{ background: BLUE }}>Sincronizar</button></div>
+                  ) : (
+                    <div className="rounded-2xl p-3.5" style={{ background: 'linear-gradient(150deg, rgba(47,217,141,.14), rgba(47,217,141,.02))', border: '1px solid rgba(47,217,141,.3)' }}>
+                      <div className="text-[11px] text-dim">Se rodar <b style={{ color: 'var(--fg)' }}>{met.projecao.dias_campanha} dias</b>, no ritmo dos últimos {met.projecao.base_dias} dias:</div>
+                      <div className="flex items-end gap-6 mt-2">
+                        <div><div className="text-[9px] uppercase text-faint font-extrabold">Vendas estimadas</div><div className="text-[22px] font-extrabold num" style={{ color: 'var(--ok)' }}>~{met.projecao.unidades_estimadas}</div></div>
+                        <div><div className="text-[9px] uppercase text-faint font-extrabold">Receita estimada</div><div className="text-[22px] font-extrabold num" style={{ color: 'var(--ok)' }}>~{brl(met.projecao.receita_estimada)}</div></div>
+                      </div>
+                      <div className="text-[9.5px] text-faint mt-2 leading-snug">Base: {met.projecao.base_unidades} un em {met.projecao.base_dias} dias (~{met.projecao.rate_dia}/dia). Projeção conservadora no ritmo atual — um bom desconto tende a aumentar as vendas.</div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* insights */}
               {met.insights && met.insights.length > 0 && (
                 <div className="mt-5">
@@ -967,6 +1007,27 @@ function DesempenhoDrawer({ met, carregando, p, onClose, onSincronizar }) {
                         </div>
                       </div>
                     ) })}
+                  </div>
+                </div>
+              )}
+
+              {/* produtos parados — sugestões */}
+              {parados && parados.itens && parados.itens.length > 0 && (
+                <div className="mt-5">
+                  <div className="text-[11px] uppercase tracking-wide text-faint font-extrabold mb-1 flex items-center gap-1.5"><Boxes size={12} style={{ color: 'var(--warn)' }} /> Produtos parados — candidatos a esta campanha</div>
+                  <div className="text-[10px] text-faint mb-2">Sem venda há mais de {parados.dias} dias. {isCria ? 'Adicione com um clique (desconto seguro, acima do piso).' : 'Só é possível adicionar em campanhas que você cria; aqui é referência.'}</div>
+                  <div className="flex flex-col gap-1.5">
+                    {parados.itens.map((it) => (
+                      <div key={it.item_id} className="flex items-center gap-2.5 rounded-xl px-2.5 py-2" style={{ background: 'rgba(0,0,0,.22)', border: '1px solid var(--glass-border)' }}>
+                        {it.imagem ? <img src={it.imagem} alt="" className="w-9 h-9 rounded-lg object-cover flex-none" /> : <div className="w-9 h-9 rounded-lg grid place-items-center flex-none" style={{ background: 'rgba(255,255,255,.05)' }}><Boxes size={15} className="text-faint" /></div>}
+                        <div className="min-w-0 flex-1">
+                          <div className="text-[11.5px] font-semibold truncate">{it.titulo || it.item_id}</div>
+                          <div className="text-[9.5px] text-faint num truncate">{it.dias_sem_venda != null ? `${it.dias_sem_venda}d sem vender` : 'sem venda registrada'}{it.estoque != null ? ` · ${it.estoque} un` : ''}{it.folga_desconto_pct > 0 ? ` · folga ${it.folga_desconto_pct}%` : ' · sem folga de margem'}</div>
+                        </div>
+                        <div className="text-right flex-none"><div className="text-[11px] font-extrabold num">{brl(it.preco)}</div></div>
+                        {isCria && <button onClick={() => addParado(it)} disabled={it.folga_desconto_pct <= 0 || addingId === it.item_id} title={it.folga_desconto_pct <= 0 ? 'Sem folga de margem para descontar' : 'Adicionar a esta campanha'} className="text-[10px] font-bold px-2.5 py-1 rounded-lg flex-none inline-flex items-center gap-1 disabled:opacity-40" style={{ background: it.folga_desconto_pct > 0 ? 'rgba(214,0,127,.16)' : 'transparent', color: 'var(--accent)', border: '1px solid rgba(214,0,127,.3)' }}>{addingId === it.item_id ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />} adicionar</button>}
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
