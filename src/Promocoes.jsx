@@ -1017,6 +1017,7 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, onClose, on
   const [temMais, setTemMais] = useState(false)
   const [carregandoMais, setCarregandoMais] = useState(false)
   const [meta, setMeta] = useState(null)
+  const [permitirAbaixo, setPermitirAbaixo] = useState(false)
 
   const carregar = useCallback(async (busca = '') => {
     setCarregando(true); setErro(''); setSel(new Set())
@@ -1050,13 +1051,14 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, onClose, on
     const base = (modo === 'convite' ? (it.original_price || it.preco) : it.preco) || 0
     let dp = base * (1 - pct / 100)
     if (modo === 'convite') {
-      if (it.max_discounted_price != null) dp = Math.max(dp, it.max_discounted_price)
-      if (it.min_discounted_price != null) dp = Math.min(dp, it.min_discounted_price)
+      // banda do ML: min_discounted_price = PISO (maior desconto permitido) · max_discounted_price = TETO (menor desconto)
+      if (it.min_discounted_price != null) dp = Math.max(dp, it.min_discounted_price)
+      if (it.max_discounted_price != null) dp = Math.min(dp, it.max_discounted_price)
     }
     return Math.round(dp * 100) / 100
   }
   const furaPiso = (it) => it.piso_preco != null && dealDe(it) < it.piso_preco - 0.005
-  const podeSel = (it) => !furaPiso(it)
+  const podeSel = (it) => permitirAbaixo || !furaPiso(it)
   const toggle = (it) => { if (!podeSel(it)) return; setSel((s) => { const n = new Set(s); n.has(it.item_id) ? n.delete(it.item_id) : n.add(it.item_id); return n }) }
   const lista = itens || []
   const ql = q.trim().toLowerCase()
@@ -1064,20 +1066,24 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, onClose, on
     ? lista.filter((it) => (`${it.titulo || ''} ${it.item_id || ''} ${it.sku || ''}`).toLowerCase().includes(ql))
     : lista
   const semBling = lista.filter((i) => i.piso_preco == null).length
+  const abaixoTotal = lista.filter(furaPiso).length
   const elegiveisVis = listaExibida.filter(podeSel)
   const elegiveis = lista.filter(podeSel)
-  const ignorados = lista.filter(furaPiso).length
+  const ignorados = permitirAbaixo ? 0 : abaixoTotal
   const nSel = lista.filter((i) => sel.has(i.item_id) && podeSel(i)).length
 
   const aplicar = async () => {
-    const alvos = lista.filter((i) => sel.has(i.item_id) && !furaPiso(i))
-    if (!alvos.length) { notify('Selecione ao menos um item acima do piso.', 'warn'); return }
+    const alvos = lista.filter((i) => sel.has(i.item_id) && podeSel(i))
+    if (!alvos.length) { notify('Selecione ao menos um item.', 'warn'); return }
+    const nAbaixo = alvos.filter(furaPiso).length
+    if (nAbaixo > 0 && !window.confirm(`${nAbaixo} ${nAbaixo === 1 ? 'item está' : 'itens estão'} ABAIXO do Preço Bling — isso vende abaixo da sua meta de margem. Aderir mesmo assim?`)) return
     setAplicando(true); setProg({ feito: 0, total: alvos.length, falhas: [] })
     const falhas = []
     for (let k = 0; k < alvos.length; k++) {
       const it = alvos[k]
       try {
         const body = { promotion_id: promotionId, promotion_type: promotionType, deal_price: dealDe(it) }
+        if (furaPiso(it)) body.permitir_abaixo_piso = true
         if (promotionType === 'LIGHTNING') {
           let st = it.estoque != null ? it.estoque : (it.stock_min != null ? it.stock_min : 1)
           if (it.stock_min != null) st = Math.max(st, it.stock_min)
@@ -1122,6 +1128,18 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, onClose, on
           </div>
           {modo === 'convite' && <div className="text-[10px] text-faint mt-1.5 flex items-start gap-1.5"><Info size={12} className="flex-none mt-0.5" /> Preço de cada item é ajustado para caber na banda do convite (mín–máx do ML) e nunca abaixo do piso.</div>}
           {semBling > 0 && <div className="text-[10px] mt-1.5 flex items-start gap-1.5" style={{ color: 'var(--warn)' }}><AlertTriangle size={12} className="flex-none mt-0.5" /> {semBling} {semBling === 1 ? 'item sem' : 'itens sem'} Preço Bling — sem trava de margem. Cadastre o custo/Preço Bling no Bling para proteger a margem.</div>}
+          {abaixoTotal > 0 && (
+            <div className="mt-2 rounded-xl p-2.5" style={{ background: permitirAbaixo ? 'rgba(255,122,122,.12)' : 'rgba(224,162,60,.1)', border: `1px solid ${permitirAbaixo ? 'rgba(255,122,122,.35)' : 'rgba(224,162,60,.3)'}` }}>
+              <div className="flex items-center gap-2">
+                <AlertTriangle size={14} style={{ color: permitirAbaixo ? 'var(--danger)' : 'var(--warn)', flexShrink: 0 }} />
+                <div className="text-[10.5px] flex-1" style={{ color: permitirAbaixo ? 'var(--danger)' : 'var(--warn)' }}>
+                  {abaixoTotal} de {lista.length} {abaixoTotal === 1 ? 'item ficaria' : 'itens ficariam'} <b>abaixo do Preço Bling</b> nesta promoção{elegiveis.length === 0 && !permitirAbaixo ? ' — por isso nada fica selecionável (a trava protege sua margem).' : '.'}
+                </div>
+                <button onClick={() => { setPermitirAbaixo((v) => !v); setSel(new Set()) }} className="text-[10px] font-bold px-2.5 py-1 rounded-full whitespace-nowrap" style={permitirAbaixo ? { background: 'var(--danger)', color: '#fff', flexShrink: 0 } : { background: 'transparent', color: 'var(--warn)', border: '1px solid rgba(224,162,60,.5)', flexShrink: 0 }}>{permitirAbaixo ? 'Trava desativada' : 'Permitir abaixo do piso'}</button>
+              </div>
+              {permitirAbaixo && <div className="text-[9.5px] mt-1.5 leading-snug" style={{ color: 'var(--danger)' }}>Você assume vender abaixo da meta de margem. Use só como ação estratégica consciente (giro de estoque parado, visibilidade). A automação dos agentes nunca faz isso.</div>}
+            </div>
+          )}
         </div>
 
         {/* lista */}
@@ -1139,7 +1157,7 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, onClose, on
             const folga = it.piso_preco != null ? dp - it.piso_preco : null
             const on = sel.has(it.item_id)
             return (
-              <div key={it.item_id} onClick={() => toggle(it)} className="flex items-center gap-3 px-3 py-2 rounded-xl mb-1 cursor-pointer" style={{ background: on ? 'rgba(214,0,127,.08)' : 'transparent', border: '1px solid ' + (on ? 'rgba(214,0,127,.3)' : 'transparent'), opacity: fura ? 0.55 : 1 }}>
+              <div key={it.item_id} onClick={() => toggle(it)} className="flex items-center gap-3 px-3 py-2 rounded-xl mb-1 cursor-pointer" style={{ background: on ? 'rgba(214,0,127,.08)' : 'transparent', border: '1px solid ' + (on ? 'rgba(214,0,127,.3)' : 'transparent'), opacity: (fura && !permitirAbaixo) ? 0.55 : 1 }}>
                 <div className="w-5 h-5 rounded-md grid place-items-center flex-none" style={{ border: '1.5px solid ' + (on ? 'var(--accent)' : 'var(--glass-border)'), background: on ? 'var(--accent)' : 'transparent' }}>{on && <Check size={13} color="#fff" />}</div>
                 {it.imagem ? <img src={it.imagem} alt="" className="w-10 h-10 rounded-lg object-cover flex-none" style={{ border: '1px solid var(--glass-border)' }} /> : <div className="w-10 h-10 rounded-lg grid place-items-center flex-none" style={{ background: 'rgba(255,255,255,.05)' }}><Boxes size={16} className="text-faint" /></div>}
                 <div className="min-w-0 flex-1">
@@ -1154,7 +1172,7 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, onClose, on
                   {sb ? <span className="text-[9px] text-faint">sem Preço Bling</span>
                     : fura ? <span className="text-[9px] font-extrabold" style={{ color: 'var(--danger)' }}>fura o piso {brl(it.piso_preco)}</span>
                       : <span className="text-[9px] font-extrabold" style={{ color: 'var(--ok)' }}>folga {brl(folga)}</span>}
-                  {modo === 'convite' && it.max_discounted_price != null && it.min_discounted_price != null && <div className="text-[8.5px] text-faint num">faixa {brl(it.max_discounted_price)}–{brl(it.min_discounted_price)}</div>}
+                  {modo === 'convite' && it.min_discounted_price != null && <div className="text-[8.5px] text-faint num">faixa {brl(it.min_discounted_price)}–{brl(it.max_discounted_price != null ? it.max_discounted_price : it.original_price)}</div>}
                   {modo === 'convite' && it.suggested_discounted_price != null && <div className="text-[8.5px] num" style={{ color: '#F2C200' }}>sugerido {brl(it.suggested_discounted_price)}</div>}
                 </div>
               </div>
@@ -1176,7 +1194,7 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, onClose, on
             <button onClick={() => setSel((prev) => new Set([...prev, ...elegiveisVis.map((i) => i.item_id)]))} disabled={aplicando || !elegiveisVis.length} className="text-[10.5px] px-2.5 py-1 rounded-lg glass text-dim hover:text-fg disabled:opacity-40">Selecionar todos ({elegiveisVis.length})</button>
             {(() => { const cm = listaExibida.filter((i) => i.preco_bling != null && !furaPiso(i)); return cm.length > 0 && cm.length !== elegiveisVis.length ? <button onClick={() => setSel((prev) => new Set([...prev, ...cm.map((i) => i.item_id)]))} disabled={aplicando} className="text-[10.5px] px-2.5 py-1 rounded-lg hover:opacity-90" style={{ background: 'rgba(47,217,141,.12)', border: '1px solid rgba(47,217,141,.3)', color: 'var(--ok)' }}>Só com margem ({cm.length})</button> : null })()}
             {sel.size > 0 && <button onClick={() => setSel(new Set())} disabled={aplicando} className="text-[10.5px] px-2.5 py-1 rounded-lg glass text-dim hover:text-fg">Limpar</button>}
-            <div className="text-[10.5px] text-dim ml-1"><b className="num" style={{ color: 'var(--fg)' }}>{nSel}</b> selecionado{nSel === 1 ? '' : 's'}{ignorados > 0 && <span className="text-faint"> · {ignorados} abaixo do piso ignorado{ignorados === 1 ? '' : 's'}</span>}</div>
+            <div className="text-[10.5px] text-dim ml-1"><b className="num" style={{ color: 'var(--fg)' }}>{nSel}</b> selecionado{nSel === 1 ? '' : 's'}{ignorados > 0 && <span className="text-faint"> · {ignorados} abaixo do piso ignorado{ignorados === 1 ? '' : 's'}</span>}{permitirAbaixo && abaixoTotal > 0 && <span style={{ color: 'var(--danger)' }}> · {abaixoTotal} liberado{abaixoTotal === 1 ? '' : 's'} abaixo do piso</span>}</div>
             <button onClick={aplicar} disabled={aplicando || nSel === 0} className="ml-auto text-[12px] font-bold px-4 py-2 rounded-xl text-white inline-flex items-center gap-1.5 disabled:opacity-40" style={{ background: 'linear-gradient(135deg, var(--accent), #a80063)' }}>{aplicando ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} {modo === 'convite' ? 'Aderir' : 'Adicionar'} {nSel > 0 ? `(${nSel})` : ''}</button>
           </div>
         </div>
