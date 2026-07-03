@@ -528,7 +528,7 @@ function Simulador({ notify, recarregar }) {
       await api.mlPromoDesconto(res.item_id, { deal_price: res.deal_price, fim: isoDe(dur, '23:59:59') })
       notify(`Desconto de ${res.desconto_pct}% aplicado por ${dur} dias (${brl(res.deal_price)}).`, 'ok')
       recarregar && recarregar()
-    } catch (e) { notify(e.message || 'Falha ao aplicar o desconto', 'danger') }
+    } catch (e) { notify(traduzErroML(e.message) || 'Falha ao aplicar o desconto', 'danger') }
     finally { setAplicando(false) }
   }
   const sugPct = res && res.sugestao_pct != null ? res.sugestao_pct : null
@@ -1004,6 +1004,17 @@ function DesempenhoDrawer({ met, carregando, p, onClose, onSincronizar }) {
     </div>, document.body)
 }
 
+/* ================= tradução de erros do ML ================= */
+function traduzErroML(msg) {
+  const m = String(msg || '')
+  if (/ERROR_CREDIBILITY|not credible/i.test(m)) return 'ML recusou: "preço com desconto não crível" — regra do próprio ML que compara o preço ofertado com a banda do convite e o histórico do anúncio. Se o preço base mudou há pouco, aguarde; senão, tente outro percentual dentro da faixa exigida.'
+  const st = m.match(/Stock must be greater than (\d+) and less than (\d+)/i)
+  if (st) return `ML exige estoque reservado entre ${Number(st[1]) + 1} e ${Number(st[2]) - 1} unidade(s) para este item.`
+  if (/No candidates found/i.test(m)) return 'O ML não considera este item candidato deste convite (saiu da seleção — os candidatos mudam diariamente).'
+  if (/already/i.test(m)) return 'Este item já participa de uma promoção conflitante.'
+  return m.replace(/^Mercado Livre:\s*/, '').slice(0, 220)
+}
+
 /* ================= seletor de itens (campanha / convite) ================= */
 function SeletorItens({ modo, promotionId, promotionType, promoNome, onClose, onOk, notify }) {
   const [q, setQ] = useState('')
@@ -1051,9 +1062,10 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, onClose, on
     const base = (modo === 'convite' ? (it.original_price || it.preco) : it.preco) || 0
     let dp = base * (1 - pct / 100)
     if (modo === 'convite') {
-      // banda do ML: min_discounted_price = PISO (maior desconto permitido) · max_discounted_price = TETO (menor desconto)
-      if (it.min_discounted_price != null) dp = Math.max(dp, it.min_discounted_price)
-      if (it.max_discounted_price != null) dp = Math.min(dp, it.max_discounted_price)
+      // Semântica OFICIAL do ML (docs): max_discounted_price = MENOR preço permitido (maior desconto)
+      // e min_discounted_price = MAIOR preço permitido (menor desconto). A barra trabalha dentro dessa banda.
+      if (it.max_discounted_price != null) dp = Math.max(dp, it.max_discounted_price)
+      if (it.min_discounted_price != null) dp = Math.min(dp, it.min_discounted_price)
     }
     return Math.round(dp * 100) / 100
   }
@@ -1085,13 +1097,16 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, onClose, on
         const body = { promotion_id: promotionId, promotion_type: promotionType, deal_price: dealDe(it) }
         if (furaPiso(it)) body.permitir_abaixo_piso = true
         if (promotionType === 'LIGHTNING') {
-          let st = it.estoque != null ? it.estoque : (it.stock_min != null ? it.stock_min : 1)
-          if (it.stock_min != null) st = Math.max(st, it.stock_min)
-          if (it.stock_max != null) st = Math.min(st, it.stock_max)
+          // limites do ML são EXCLUSIVOS: "greater than min and less than max"
+          const lo = it.stock_min != null ? it.stock_min + 1 : 1
+          const hi = it.stock_max != null ? it.stock_max - 1 : null
+          let st = it.estoque != null ? it.estoque : lo
+          st = Math.max(st, lo)
+          if (hi != null) st = Math.min(st, Math.max(hi, lo))
           body.stock = Math.max(1, Math.round(st))
         }
         await api.mlPromoAderir(it.item_id, body)
-      } catch (e) { falhas.push({ id: it.item_id, msg: (e.message || 'erro').replace(/^Mercado Livre:\s*/, '').slice(0, 220) }) }
+      } catch (e) { falhas.push({ id: it.item_id, msg: traduzErroML(e.message) }) }
       setProg({ feito: k + 1, total: alvos.length, falhas: [...falhas] })
     }
     setAplicando(false)
@@ -1172,7 +1187,7 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, onClose, on
                   {sb ? <span className="text-[9px] text-faint">sem Preço Bling</span>
                     : fura ? <span className="text-[9px] font-extrabold" style={{ color: 'var(--danger)' }}>fura o piso {brl(it.piso_preco)}</span>
                       : <span className="text-[9px] font-extrabold" style={{ color: 'var(--ok)' }}>folga {brl(folga)}</span>}
-                  {modo === 'convite' && it.min_discounted_price != null && <div className="text-[8.5px] text-faint num">faixa {brl(it.min_discounted_price)}–{brl(it.max_discounted_price != null ? it.max_discounted_price : it.original_price)}</div>}
+                  {modo === 'convite' && it.min_discounted_price != null && <div className="text-[8.5px] text-faint num">ML exige {it.max_discounted_price != null ? `${brl(it.max_discounted_price)}–` : 'até '}{brl(it.min_discounted_price)}</div>}
                   {modo === 'convite' && it.suggested_discounted_price != null && <div className="text-[8.5px] num" style={{ color: '#F2C200' }}>sugerido {brl(it.suggested_discounted_price)}</div>}
                 </div>
               </div>
