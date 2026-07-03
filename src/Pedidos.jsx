@@ -45,6 +45,7 @@ const ST_PEDIDO = {
   cancelled: { t: 'Cancelado', c: 'var(--danger)' },
   invalid: { t: 'Inválido', c: 'var(--danger)' },
 }
+const SUB_COLETADO = ['picked_up', 'dropped_off', 'authorized_by_carrier', 'in_hub', 'in_transit', 'out_for_delivery', 'receiver_absent', 'in_warehouse', 'at_the_door', 'soon_deliver']
 const ST_ENVIO = {
   pending: { t: 'Pendente', c: 'var(--warn)' },
   handling: { t: 'Preparando', c: 'var(--warn)' },
@@ -665,8 +666,11 @@ export default function Pedidos() {
                 {(coleta.principal.de || coleta.principal.ate) && <span className="text-[13px] num font-semibold" style={{ color: 'var(--fg)' }}>{coleta.principal.de || '—'}{coleta.principal.ate ? ` – ${coleta.principal.ate}` : ''}</span>}
                 {coleta.principal.corte && <span className="text-[11px] text-dim">corte às <b className="num" style={{ color: 'var(--warn)' }}>{coleta.principal.corte}</b></span>}
                 {coleta.principal.corte && <LiveCountdown tipo="hora" alvo={coleta.principal.corte} variante="conforto" />}
-                {coleta.principal.carrier && <span className="text-[11px] text-faint inline-flex items-center gap-1"><Truck size={11} /> {coleta.principal.carrier}</span>}
-                {coleta.codigo_autorizacao && <span className="text-[11px] text-dim ml-auto">Código de autorização: <b className="num" style={{ color: 'var(--accent)' }}>{coleta.codigo_autorizacao}</b></span>}
+                <div className="ml-auto flex items-center gap-3 flex-wrap">
+                  {coleta.principal.carrier && <span className="text-[11px] text-faint inline-flex items-center gap-1"><Truck size={11} /> {coleta.principal.carrier}</span>}
+                  {coleta.principal.motorista && <span className="text-[11px] text-faint inline-flex items-center gap-1"><User size={11} /> {coleta.principal.motorista}</span>}
+                  {coleta.principal.veiculo && <span className="text-[11px] text-faint num">{coleta.principal.veiculo}</span>}
+                </div>
               </div>
             )}
             {nSync > 0 && (
@@ -857,8 +861,16 @@ function estadoEnvioCard(p) {
   const st = env.status, sub = env.substatus || ''
   if (st === 'delivered') return { texto: `Entregue${env.date_delivered ? ' · ' + dataBR(env.date_delivered) : ''}`, tom: 'var(--ok)', icon: PackageCheck }
   if (env.devolucao || st === 'returned') return { texto: 'Em devolução', tom: 'var(--warn)', icon: Undo2 }
-  if (st === 'shipped' || ['in_hub', 'in_transit', 'out_for_delivery', 'receiver_absent'].includes(sub))
-    return { texto: `Em trânsito${env.tracking_number ? ' · ' + env.tracking_number : ''}`, tom: 'var(--accent)', icon: Truck }
+  const COLETADO = SUB_COLETADO
+  if (st === 'shipped' || COLETADO.includes(sub)) {
+    const txt = sub === 'picked_up' ? 'Coletado · a caminho'
+      : sub === 'dropped_off' ? 'Postado · a caminho'
+      : sub === 'in_hub' ? 'No centro de distribuição'
+      : sub === 'out_for_delivery' ? 'Saiu para entrega'
+      : sub === 'receiver_absent' ? 'Tentativa de entrega'
+      : 'Em trânsito'
+    return { texto: `${txt}${env.tracking_number ? ' · ' + env.tracking_number : ''}`, tom: 'var(--accent)', icon: Truck }
+  }
   if ((sub === 'buffered' || env.buffering_date) && st !== 'ready_to_ship')
     return { texto: `Etiqueta disponível ${env.buffering_date ? dataBR(env.buffering_date) : 'em breve'}`, tom: 'var(--warn)', icon: Clock }
   const pronto = SUB_PRONTO.includes(sub) || (st === 'ready_to_ship' && sub !== 'invoice_pending')
@@ -1187,7 +1199,11 @@ function Drawer({ p, nfe, envio, baixando, imprimindo, onEtiqueta, onImprimir, o
   const dest = full ? extrairDestino(full)
     : (ec.receiver_nome ? { nome: ec.receiver_nome, linha: ec.receiver_endereco, cidade: ec.receiver_cidade, estado: ec.receiver_estado, cep: ec.receiver_cep } : null)
   const shipStatus = ec.status || (full ? full.status : null)
-  const stEnv = shipStatus ? (ST_ENVIO[shipStatus] || { t: shipStatus, c: 'var(--dim)' }) : null
+  let stEnv = shipStatus ? (ST_ENVIO[shipStatus] || { t: shipStatus, c: 'var(--dim)' }) : null
+  if (stEnv && shipStatus === 'ready_to_ship' && SUB_COLETADO.includes(ec.substatus || '')) {
+    const s = ec.substatus
+    stEnv = { t: s === 'in_hub' ? 'No CD' : s === 'picked_up' ? 'Coletado' : s === 'dropped_off' ? 'Postado' : s === 'out_for_delivery' ? 'Saiu p/ entrega' : 'Em trânsito', c: 'var(--accent)' }
+  }
   const subLabel = ec.substatus ? (SUBSTATUS_LABEL[ec.substatus] || ec.substatus) : null
   const prazo = prazoInfo(ec.handling_limit)
   const modo = modoEnvio(ec.logistic_type ? ec : full)
