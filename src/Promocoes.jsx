@@ -74,8 +74,8 @@ export default function Promocoes() {
   const [modal, setModal] = useState(null) // 'campanha' | 'cupom' | null
   const [busyExcl, setBusyExcl] = useState(false)
   const [picker, setPicker] = useState(null)
-  const abrirAddItens = (p) => setPicker({ modo: 'campanha', promotionId: p.id, promotionType: p.type, promoNome: p.name || p.type })
-  const abrirAderir = (p) => setPicker({ modo: 'convite', promotionId: p.id, promotionType: p.type, promoNome: p.name || p.type })
+  const abrirAddItens = (p) => setPicker({ modo: 'campanha', promotionId: p.id, promotionType: p.type, promoNome: p.name || p.type, inicio: p.start_date, fim: p.finish_date })
+  const abrirAderir = (p) => setPicker({ modo: 'convite', promotionId: p.id, promotionType: p.type, promoNome: p.name || p.type, inicio: p.start_date, fim: p.finish_date })
 
   const toggleExclusaoSeller = async () => {
     setBusyExcl(true)
@@ -196,13 +196,13 @@ export default function Promocoes() {
         </>
       )}
 
-      {aba === 'inteligencia' && <Inteligencia minhas={minhas} cupons={cupons} convites={convites} />}
-      {aba === 'automacao' && <Automacao />}
+      {aba === 'inteligencia' && <Inteligencia notify={notify} />}
+      {aba === 'automacao' && <Automacao notify={notify} />}
       {aba === 'ads' && <Ads />}
 
       {modal === 'campanha' && <NovaCampanhaModal onClose={() => setModal(null)} onOk={() => { setModal(null); carregar() }} notify={notify} />}
       {modal === 'cupom' && <NovoCupomModal onClose={() => setModal(null)} onOk={() => { setModal(null); carregar() }} notify={notify} />}
-      {picker && <SeletorItens modo={picker.modo} promotionId={picker.promotionId} promotionType={picker.promotionType} promoNome={picker.promoNome} onClose={() => setPicker(null)} onOk={() => { setPicker(null); carregar() }} notify={notify} />}
+      {picker && <SeletorItens modo={picker.modo} promotionId={picker.promotionId} promotionType={picker.promotionType} promoNome={picker.promoNome} inicio={picker.inicio} fim={picker.fim} onClose={() => setPicker(null)} onOk={() => { setPicker(null); carregar() }} notify={notify} />}
     </div>
   )
 }
@@ -315,6 +315,7 @@ function ConviteCard({ p, onAderir, idx = 0 }) {
   const ben = p.benefits || {}
   const cofin = ben.type === 'REBATE' ? `ML ${ben.meli_percent ?? '—'}% + você ${ben.seller_percent ?? '—'}%` : null
   const ddl = dcurta(p.deadline_date); const dd = diasAte(p.deadline_date)
+  const vi = dcurta(p.start_date), vf = dcurta(p.finish_date)
   return (
     <div className="rounded-2xl p-3.5 relative overflow-hidden lift card-in" style={{ background: `linear-gradient(160deg, ${m.cor}14, rgba(0,0,0,.14))`, border: `1px solid ${m.cor}33`, animationDelay: `${idx * 45}ms` }}>
       <div className="absolute top-0 left-0 right-0 h-[3px]" style={{ background: `linear-gradient(90deg, ${m.cor}, transparent)` }} />
@@ -325,6 +326,7 @@ function ConviteCard({ p, onAderir, idx = 0 }) {
       <div className="text-[13px] font-bold mt-2">{p.name || m.label}</div>
       <div className="text-[10px] text-dim mt-1 min-h-[26px]">{m.desc}</div>
       {cofin && <div className="inline-flex items-center gap-1.5 text-[9.5px] font-extrabold px-2 py-0.5 rounded-full mt-1" style={{ background: 'rgba(91,141,239,.16)', color: BLUE }}><Gift size={11} /> {cofin}</div>}
+      {(vi || vf) && <div className="text-[9px] text-faint mt-1.5 flex items-center gap-1"><Calendar size={10} /> vale {vi || '—'} → {vf || '—'}</div>}
       <div className="flex items-center gap-2 mt-3">
         {ddl && <span className="text-[9.5px] font-extrabold px-2 py-1 rounded-lg inline-flex items-center gap-1.5" style={{ background: 'rgba(224,162,60,.14)', color: 'var(--warn)' }}><Clock size={11} /> {dd != null && dd >= 0 ? `${dd}d` : ddl}</span>}
         <button onClick={() => onAderir(p)} className="ml-auto text-[10.5px] font-bold px-3 py-1.5 rounded-lg inline-flex items-center gap-1" style={{ background: 'linear-gradient(135deg, #F2C200, #d9a400)', color: '#3a2c00' }}>Aderir <ChevronRight size={12} /></button>
@@ -747,75 +749,204 @@ function Calendario({ minhas, cupons, convites }) {
 }
 
 /* ================= INTELIGÊNCIA (prévia — Etapa 3) ================= */
-function Inteligencia() {
+function Inteligencia({ notify }) {
   const elast = [
-    { sku: 'Fio Nylon 0.50mm', dp: '−15%', du: '+62%', pull: 82, ot: '18% · máx lucro', cor: 'var(--ok)' },
-    { sku: 'Alicate Inox 6 em 1', dp: '−22%', du: '+34%', pull: 54, ot: '12% · máx lucro', cor: 'var(--ok)' },
-    { sku: 'Caixa Organizadora 30', dp: '−10%', du: '+8%', pull: 16, ot: 'pouco elástico', cor: 'var(--warn)' },
-    { sku: 'Kit Cristal 6mm Azul', dp: '−25%', du: '+90%', pull: 96, ot: '30% · máx lucro', cor: 'var(--ok)' },
-  ]
-  const bb = [
-    { nm: 'Alicate Inox 6 em 1', s: 'perdeu destaque há 2h', st: 'perdeu', preco: 'R$ 47,90', ok: true },
-    { nm: 'Fio Couro Sintético', s: 'vencendo o destaque', st: 'vencendo', preco: 'R$ 82,36', ok: null },
-    { nm: 'Miçanga Vidro 1000un', s: 'recuperar fura o piso', st: 'bloqueado', preco: 'bloqueado', ok: false },
+    { sku: 'Fio Nylon 0.50mm', dp: '−15%', du: '+62%', ot: '18% · máx lucro', cor: 'var(--ok)' },
+    { sku: 'Alicate Inox 6 em 1', dp: '−22%', du: '+34%', ot: '12% · máx lucro', cor: 'var(--ok)' },
+    { sku: 'Caixa Organizadora 30', dp: '−10%', du: '+8%', ot: 'pouco elástico', cor: 'var(--warn)' },
+    { sku: 'Kit Cristal 6mm Azul', dp: '−25%', du: '+90%', ot: '30% · máx lucro', cor: 'var(--ok)' },
   ]
   return (
     <div className="mt-4">
-      <Secao icon={Activity} cor={PURPLE} titulo="Inteligência" pill="prévia · dados reais na Etapa 3" pillCor={PURPLE} />
-      <div className="grid gap-3" style={{ gridTemplateColumns: '1.2fr 1fr' }}>
-        <div className="rounded-2xl p-4 glass lift">
-          <div className="text-[10px] uppercase tracking-wide text-faint font-extrabold flex items-center gap-2 mb-3"><Activity size={13} /> Elasticidade por SKU — desconto que maximiza lucro</div>
-          <div className="grid gap-2 text-[9px] uppercase tracking-wide text-faint font-extrabold pb-1" style={{ gridTemplateColumns: '1.6fr .7fr .7fr 1fr' }}><span>SKU</span><span>Δ preço</span><span>Δ unid.</span><span>ótimo</span></div>
-          {elast.map((e, i) => (
-            <div key={i} className="grid items-center gap-2 py-2 text-[11px]" style={{ gridTemplateColumns: '1.6fr .7fr .7fr 1fr', borderTop: '1px solid var(--glass-border)' }}>
-              <span className="font-semibold truncate">{e.sku}</span>
-              <span className="num">{e.dp}</span>
-              <span className="num" style={{ color: e.cor }}>{e.du}</span>
-              <span className="text-[10px] font-extrabold" style={{ color: e.cor }}>{e.ot}</span>
-            </div>
-          ))}
-          <div className="text-[9.5px] text-faint mt-2 flex items-center gap-1.5"><Info size={12} /> Cruza unidades antes/depois (cache de pedidos) × Δpreço. Alimenta os agentes.</div>
-        </div>
-        <div className="rounded-2xl p-4 glass lift">
-          <div className="text-[10px] uppercase tracking-wide text-faint font-extrabold flex items-center gap-2 mb-3"><Target size={13} /> Buybox — preço p/ recuperar (respeitando piso)</div>
-          {bb.map((b, i) => (
-            <div key={i} className="flex items-center gap-2.5 py-2.5" style={{ borderTop: i ? '1px solid var(--glass-border)' : 'none' }}>
-              <div className="w-8 h-8 rounded-lg flex-none" style={{ background: 'var(--surface-2)' }} />
-              <div className="flex-1 min-w-0"><div className="text-[11px] font-semibold truncate">{b.nm}</div><div className="text-[9px] text-faint">{b.s}</div></div>
-              <span className="text-[9px] font-extrabold px-2 py-0.5 rounded-full" style={{ background: b.st === 'vencendo' ? 'rgba(47,217,141,.14)' : 'rgba(255,122,122,.14)', color: b.st === 'vencendo' ? 'var(--ok)' : 'var(--danger)' }}>{b.st}</span>
-              <div className="text-right"><div className="num text-[12px] font-extrabold" style={{ color: b.ok === false ? 'var(--danger)' : b.ok ? 'var(--ok)' : 'var(--dim)' }}>{b.preco}</div><div className="text-[8px] text-faint">{b.ok === false ? 'abaixo do piso' : b.ok ? 'p/ recuperar ✓' : 'mantém'}</div></div>
-            </div>
-          ))}
-          <div className="text-[9.5px] text-faint mt-2 flex items-center gap-1.5"><Info size={12} /> Webhook best_price_eligible + price_to_win. O agente só age acima do piso.</div>
+      <Secao icon={Activity} cor={PURPLE} titulo="Inteligência" pill="buybox real · elasticidade em breve" pillCor={PURPLE} />
+      <BuyboxTracker notify={notify} />
+      <div className="rounded-2xl p-4 glass lift mt-3">
+        <div className="text-[10px] uppercase tracking-wide text-faint font-extrabold flex items-center gap-2 mb-3"><Activity size={13} /> Elasticidade por SKU — desconto que maximiza lucro <span className="ml-1 text-[8.5px] px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(160,107,232,.16)', color: PURPLE }}>prévia</span></div>
+        <div className="grid gap-2 text-[9px] uppercase tracking-wide text-faint font-extrabold pb-1" style={{ gridTemplateColumns: '1.6fr .7fr .7fr 1fr' }}><span>SKU</span><span>Δ preço</span><span>Δ unid.</span><span>ótimo</span></div>
+        {elast.map((e, i) => (
+          <div key={i} className="grid items-center gap-2 py-2 text-[11px]" style={{ gridTemplateColumns: '1.6fr .7fr .7fr 1fr', borderTop: '1px solid var(--glass-border)' }}>
+            <span className="font-semibold truncate">{e.sku}</span>
+            <span className="num">{e.dp}</span>
+            <span className="num" style={{ color: e.cor }}>{e.du}</span>
+            <span className="text-[10px] font-extrabold" style={{ color: e.cor }}>{e.ot}</span>
+          </div>
+        ))}
+        <div className="text-[9.5px] text-faint mt-2 flex items-center gap-1.5"><Info size={12} /> Cruza unidades antes/depois (cache de pedidos) × Δpreço. Alimenta os agentes.</div>
+      </div>
+    </div>
+  )
+}
+
+const BB_ST = {
+  ganhando: { c: 'var(--ok)', t: 'no topo' },
+  perdendo: { c: 'var(--danger)', t: 'perdendo' },
+  compartilhando: { c: 'var(--warn)', t: 'dividindo' },
+}
+
+function BbKpi({ l, v, c, sub }) {
+  return (
+    <div className="rounded-xl px-2.5 py-2" style={{ background: `${c}12`, border: `1px solid ${c}2e` }}>
+      <div className="text-[8px] uppercase tracking-wide text-faint font-extrabold">{l}</div>
+      <div className="text-[18px] font-extrabold num" style={{ color: c }}>{v}</div>
+      {sub && <div className="text-[8px] text-faint">{sub}</div>}
+    </div>
+  )
+}
+
+function BuyboxTracker({ notify }) {
+  const [dados, setDados] = useState(null)
+  const [carregando, setCarregando] = useState(false)
+  const [carregandoMais, setCarregandoMais] = useState(false)
+  const [soPerdendo, setSoPerdendo] = useState(true)
+  const [ajustandoId, setAjustandoId] = useState(null)
+
+  const verificar = async (reset = true) => {
+    reset ? setCarregando(true) : setCarregandoMais(true)
+    try {
+      const off = reset ? 0 : (dados?.offset || 0) + (dados?.limit || 20)
+      const r = await api.mlBuybox(20, off, soPerdendo)
+      setDados((prev) => {
+        if (reset || !prev) return { ...r, verificados_total: r.verificados }
+        const soma = { ...prev.resumo }
+        for (const k in r.resumo) soma[k] = (soma[k] || 0) + r.resumo[k]
+        return { ...r, itens: [...prev.itens, ...r.itens], resumo: soma, verificados_total: (prev.verificados_total || 0) + r.verificados }
+      })
+    } catch (e) { notify && notify(traduzErroML(e.message), 'danger') }
+    finally { setCarregando(false); setCarregandoMais(false) }
+  }
+
+  const ajustar = async (it) => {
+    if (!it.recuperavel || it.preco_para_ganhar == null) return
+    setAjustandoId(it.item_id)
+    try {
+      await api.mlBuyboxAjustar(it.item_id, it.preco_para_ganhar)
+      notify && notify(`${it.titulo || it.item_id}: preço ajustado para ${brl(it.preco_para_ganhar)} — recuperando o topo.`, 'ok')
+      setDados((prev) => (prev ? { ...prev, itens: prev.itens.map((x) => (x.item_id === it.item_id ? { ...x, status: 'ganhando', meu_preco: it.preco_para_ganhar } : x)) } : prev))
+    } catch (e) { notify && notify(traduzErroML(e.message), 'danger') }
+    finally { setAjustandoId(null) }
+  }
+
+  const rs = dados?.resumo || {}
+  return (
+    <div className="rounded-2xl p-4 glass lift">
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
+        <div className="text-[10px] uppercase tracking-wide text-faint font-extrabold flex items-center gap-2"><Target size={13} style={{ color: BLUE }} /> Rastreio de buybox — concorrência de catálogo</div>
+        <span className="text-[8.5px] px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(47,217,141,.16)', color: 'var(--ok)' }}>dados reais</span>
+        <div className="ml-auto flex items-center gap-2">
+          <button onClick={() => setSoPerdendo((v) => !v)} className="text-[10px] font-bold px-2.5 py-1 rounded-full" style={soPerdendo ? { background: 'rgba(255,122,122,.14)', color: 'var(--danger)', border: '1px solid rgba(255,122,122,.3)' } : { background: 'rgba(255,255,255,.06)', color: 'var(--dim)', border: '1px solid var(--glass-border)' }}>{soPerdendo ? 'só perdendo' : 'todos'}</button>
+          <button onClick={() => verificar(true)} disabled={carregando} className="text-[11px] font-bold px-3 py-1.5 rounded-lg text-white inline-flex items-center gap-1.5 disabled:opacity-50" style={{ background: 'linear-gradient(135deg, var(--accent), #a80063)' }}>{carregando ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Verificar concorrência</button>
         </div>
       </div>
+
+      {!dados && !carregando && (
+        <div className="text-[11px] text-faint p-6 text-center leading-relaxed">
+          Consulta o <b>price_to_win</b> do ML anúncio por anúncio para achar onde você <b>perde o topo do catálogo</b> e por qual preço — cruzando com o piso para sugerir só o que recupera <b>sem furar a margem</b>. Clique em “Verificar concorrência”.
+        </div>
+      )}
+
+      {carregando && !dados && <div className="p-1">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="skel mb-2" style={{ height: 48, borderRadius: 12 }} />)}</div>}
+
+      {dados && (
+        <>
+          <div className="grid grid-cols-4 gap-2.5 mb-3">
+            <BbKpi l="Perdendo" v={rs.perdendo || 0} c="var(--danger)" />
+            <BbKpi l="Recuperável" v={rs.recuperavel || 0} c="var(--ok)" sub="acima do piso" />
+            <BbKpi l="Dividindo" v={rs.compartilhando || 0} c="var(--warn)" />
+            <BbKpi l="No topo" v={rs.ganhando || 0} c="var(--ok)" />
+          </div>
+          <div className="text-[9.5px] text-faint mb-2">Verificados {dados.verificados_total || dados.verificados} de {dados.total_catalogo} anúncios ativos (dos mais caros aos mais baratos).</div>
+          {dados.itens.length === 0 ? (
+            <div className="text-[11px] text-faint p-4 text-center">Nenhum item {soPerdendo ? 'perdendo o buybox' : 'em concorrência'} nesta faixa. {dados.tem_mais ? 'Verifique mais abaixo.' : ''}</div>
+          ) : (
+            <div className="flex flex-col gap-1.5">
+              {dados.itens.map((it) => { const si = BB_ST[it.status] || BB_ST.perdendo; return (
+                <div key={it.item_id} className="flex items-center gap-2.5 rounded-xl px-2.5 py-2" style={{ background: 'rgba(0,0,0,.22)', border: '1px solid var(--glass-border)' }}>
+                  {it.imagem ? <img src={it.imagem} alt="" className="w-9 h-9 rounded-lg object-cover flex-none" /> : <div className="w-9 h-9 rounded-lg grid place-items-center flex-none" style={{ background: 'rgba(255,255,255,.05)' }}><Boxes size={15} className="text-faint" /></div>}
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[11.5px] font-semibold truncate">{it.titulo || it.item_id}</div>
+                    <div className="text-[9.5px] num truncate"><span className="text-faint">seu </span><span>{brl(it.meu_preco)}</span>{it.preco_vencedor != null && <><span className="text-faint"> · concorrente </span><span style={{ color: 'var(--warn)' }}>{brl(it.preco_vencedor)}</span></>}{it.piso != null && <><span className="text-faint"> · piso </span><span>{brl(it.piso)}</span></>}</div>
+                  </div>
+                  <span className="text-[8.5px] font-extrabold px-2 py-0.5 rounded-full flex-none" style={{ background: `${si.c}1f`, color: si.c }}>{si.t}</span>
+                  {it.status !== 'ganhando' && it.preco_para_ganhar != null && (
+                    it.recuperavel
+                      ? <button onClick={() => ajustar(it)} disabled={ajustandoId === it.item_id} className="text-[10px] font-bold px-2.5 py-1 rounded-lg flex-none inline-flex items-center gap-1 disabled:opacity-50" style={{ background: 'rgba(47,217,141,.14)', color: 'var(--ok)', border: '1px solid rgba(47,217,141,.35)' }}>{ajustandoId === it.item_id ? <Loader2 size={11} className="animate-spin" /> : <Target size={11} />} p/ {brl(it.preco_para_ganhar)}</button>
+                      : <span className="text-[8.5px] font-extrabold flex-none text-right" style={{ color: 'var(--danger)', maxWidth: 92 }}>recuperar fura o piso</span>
+                  )}
+                </div>
+              ) })}
+            </div>
+          )}
+          {dados.tem_mais && <button onClick={() => verificar(false)} disabled={carregandoMais} className="w-full text-[11px] text-dim py-2 mt-2 rounded-lg glass hover:text-fg disabled:opacity-50">{carregandoMais ? 'Verificando…' : 'Verificar mais 20'}</button>}
+          <div className="text-[9.5px] text-faint mt-2 flex items-start gap-1.5"><Info size={12} className="flex-none mt-0.5" /> “Ajustar” muda o preço padrão do anúncio para o preço que recupera o topo — sempre acima do piso (a trava bloqueia o que furaria a margem).</div>
+        </>
+      )}
     </div>
   )
 }
 
 /* ================= AUTOMAÇÃO — 6 agentes (prévia — Etapa 4) ================= */
 const AGENTES = [
-  { nm: 'Agente Margem', tg: 'margem folgada', icon: Wallet, cor: 'var(--ok)', trig: 'margem > piso + 8 pts', acao: 'desconto até (margem − piso)', chip: 'ótimo médio 14%' },
-  { nm: 'Agente Curva ABC', tg: 'exposição × liquidação', icon: Layers, cor: BLUE, trig: 'item A (alta receita)', acao: 'coparticipação / visibilidade', chip: 'A:60 · B:210 · C:890' },
-  { nm: 'Agente Giro', tg: 'queda de vendas', icon: TrendingDown, cor: 'var(--warn)', trig: 'giro caindo 30% em 14d', acao: 'PRICE_DISCOUNT ótimo · 7d', chip: 'começa na sugestão ML' },
-  { nm: 'Agente Estoque Parado', tg: '> 90 dias', icon: Boxes, cor: 'var(--danger)', trig: 'parado > 90 dias', acao: 'progressivo 10→20→30% ou cupom', chip: 'liquidação' },
-  { nm: 'Agente Menor Estoque', tg: 'urgência × proteção', icon: Gauge, cor: 'var(--accent)', trig: 'estoque baixo', acao: 'Relâmpago pequeno · crítico bloqueia', chip: 'anti-ruptura' },
-  { nm: 'Agente Posição / Buybox', tg: 'perda de destaque', icon: Target, cor: BLUE, trig: 'perdeu buybox', acao: 'preço p/ recuperar (price_to_win)', chip: 'respeita piso' },
+  { key: 'margem', nm: 'Agente Margem', tg: 'margem folgada', icon: Wallet, cor: 'var(--ok)', trig: 'margem > piso + 8 pts', acao: 'desconto até (margem − piso)', chip: 'ótimo médio 14%' },
+  { key: 'abc', nm: 'Agente Curva ABC', tg: 'exposição × liquidação', icon: Layers, cor: BLUE, trig: 'item A (alta receita)', acao: 'coparticipação / visibilidade', chip: 'classificação' },
+  { key: 'giro', nm: 'Agente Giro', tg: 'queda de vendas', icon: TrendingDown, cor: 'var(--warn)', trig: 'giro caindo 40% em 30d', acao: 'PRICE_DISCOUNT · 7d', chip: 'do cache de pedidos' },
+  { key: 'parado', nm: 'Agente Estoque Parado', tg: 'sem venda 30d+', icon: Boxes, cor: 'var(--danger)', trig: 'parado > 30 dias', acao: 'desconto seguro (folga)', chip: 'liquidação' },
+  { key: 'estoque_baixo', nm: 'Agente Menor Estoque', tg: 'urgência × proteção', icon: Gauge, cor: 'var(--accent)', trig: 'estoque baixo + vendendo', acao: 'Relâmpago pequeno', chip: 'anti-ruptura' },
+  { key: 'buybox', nm: 'Agente Posição / Buybox', tg: 'perda de destaque', icon: Target, cor: BLUE, trig: 'perdeu buybox', acao: 'preço p/ recuperar (price_to_win)', chip: 'na aba Inteligência' },
 ]
-function Automacao() {
-  const [ligado, setLigado] = useState({})
+function Automacao({ notify }) {
+  const [ligado, setLigado] = useState(() => { try { return JSON.parse(localStorage.getItem('promo_agentes') || '{}') } catch { return {} } })
+  const [sugs, setSugs] = useState(null)
+  const [carregando, setCarregando] = useState(true)
+  const [aplicandoId, setAplicandoId] = useState(null)
+  const [dispensados, setDispensados] = useState(() => { try { return new Set(JSON.parse(localStorage.getItem('promo_dispensados') || '[]')) } catch { return new Set() } })
+
+  const on = (k) => ligado[k] !== false // default ligado
+  const toggle = (k) => { const n = { ...ligado, [k]: !on(k) }; setLigado(n); localStorage.setItem('promo_agentes', JSON.stringify(n)) }
+
+  useEffect(() => {
+    let vivo = true
+    api.mlAgentesSugestoes(60).then((r) => { if (vivo) setSugs(r) }).catch(() => { if (vivo) setSugs(null) }).finally(() => { if (vivo) setCarregando(false) })
+    return () => { vivo = false }
+  }, [])
+
+  const dispensar = (id) => { const n = new Set(dispensados); n.add(id); setDispensados(n); localStorage.setItem('promo_dispensados', JSON.stringify([...n])) }
+  const aplicar = async (s) => {
+    if (s.deal_price_sugerido == null) return
+    setAplicandoId(s.item_id)
+    try {
+      await api.mlPromoDesconto(s.item_id, { deal_price: s.deal_price_sugerido, fim: isoDe(7, '23:59:59') })
+      notify && notify(`${s.titulo || s.item_id}: desconto aplicado (${brl(s.deal_price_sugerido)}, 7 dias).`, 'ok')
+      dispensar(s.item_id)
+    } catch (e) { notify && notify(traduzErroML(e.message), 'danger') }
+    finally { setAplicandoId(null) }
+  }
+
+  const lista = (sugs?.sugestoes || []).filter((s) => on(s.agente) && !dispensados.has(s.item_id))
+  const porAgente = sugs?.por_agente || {}
+
   return (
     <div className="mt-4">
-      <Secao icon={Cpu} cor="var(--accent)" titulo="Automação — 6 agentes" pill="gatilho → ação · trava de margem · liga na Etapa 4" pillCor="var(--ok)" />
+      <Secao icon={Cpu} cor="var(--accent)" titulo="Automação — 6 agentes" pill="modo sugestivo · trava de margem" pillCor="var(--ok)" />
+
+      {/* modos */}
+      <div className="rounded-2xl p-3 glass mb-3 flex items-center gap-2 flex-wrap">
+        <span className="text-[10px] uppercase tracking-wide text-faint font-extrabold">Modos</span>
+        <span className="text-[10px] font-extrabold px-2.5 py-1 rounded-full inline-flex items-center gap-1" style={{ background: 'rgba(47,217,141,.14)', color: 'var(--ok)' }}><Check size={11} /> Sugestivo (ativo)</span>
+        <span className="text-[10px] font-bold px-2.5 py-1 rounded-full" style={{ background: 'rgba(255,255,255,.06)', color: 'var(--faint)', border: '1px solid var(--glass-border)' }}>Manual (em breve)</span>
+        <span className="text-[10px] font-bold px-2.5 py-1 rounded-full" style={{ background: 'rgba(255,255,255,.06)', color: 'var(--faint)', border: '1px solid var(--glass-border)' }}>Automático (em breve)</span>
+        <span className="ml-auto text-[9.5px] text-faint flex items-center gap-1.5"><Shield size={12} /> No sugestivo, nada é aplicado sem o seu clique — e sempre acima do piso.</span>
+      </div>
+
+      {/* cards dos agentes (toggles reais filtram o feed) */}
       <div className="grid grid-cols-3 gap-3">
         {AGENTES.map((a, i) => {
-          const Ic = a.icon
+          const Ic = a.icon; const n = porAgente[a.key]
           return (
-            <div key={i} className="rounded-2xl p-3.5 lift card-in" style={{ background: 'linear-gradient(158deg, rgba(255,255,255,.05), rgba(0,0,0,.18))', border: '1px solid var(--glass-border)', animationDelay: `${i * 45}ms` }}>
+            <div key={i} className="rounded-2xl p-3.5 lift card-in" style={{ background: 'linear-gradient(158deg, rgba(255,255,255,.05), rgba(0,0,0,.18))', border: '1px solid var(--glass-border)', opacity: on(a.key) ? 1 : 0.55, animationDelay: `${i * 45}ms` }}>
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-lg grid place-items-center flex-none" style={{ background: `${a.cor}22`, color: a.cor }}><Ic size={16} /></div>
-                <div className="flex-1 min-w-0"><div className="text-[12.5px] font-bold">{a.nm}</div><div className="text-[8.5px] font-extrabold uppercase tracking-wide text-faint">{a.tg}</div></div>
-                <SwitchLabel on={ligado[i]} onClick={() => setLigado({ ...ligado, [i]: !ligado[i] })} />
+                <div className="flex-1 min-w-0"><div className="text-[12.5px] font-bold truncate">{a.nm}</div><div className="text-[8.5px] font-extrabold uppercase tracking-wide text-faint">{a.tg}</div></div>
+                <SwitchLabel on={on(a.key)} onClick={() => toggle(a.key)} />
               </div>
               <div className="flex items-center gap-2 mt-2.5 rounded-xl px-2.5 py-2" style={{ background: 'rgba(0,0,0,.22)' }}>
                 <span className="text-[10px] text-dim flex-1">{a.trig}</span>
@@ -824,11 +955,65 @@ function Automacao() {
               </div>
               <div className="flex items-center gap-2 mt-2.5">
                 <span className="text-[9px] font-extrabold px-2 py-0.5 rounded-full" style={{ background: 'rgba(47,217,141,.12)', color: 'var(--ok)' }}>{a.chip}</span>
-                <span className="ml-auto text-[9.5px] font-extrabold" style={{ color: 'var(--accent)' }}>Ver regra ↗</span>
+                {n != null && n > 0
+                  ? <span className="ml-auto text-[9.5px] font-extrabold" style={{ color: a.cor }}>{n} {n === 1 ? 'sugestão' : 'sugestões'}</span>
+                  : (a.key === 'buybox' || a.key === 'abc') ? <span className="ml-auto text-[9px] text-faint">{a.key === 'buybox' ? 'ver Inteligência' : 'classificação'}</span>
+                    : <span className="ml-auto text-[9px] text-faint">sem sugestões</span>}
               </div>
             </div>
           )
         })}
+      </div>
+
+      {/* feed de sugestões reais */}
+      <div className="mt-4">
+        <div className="flex items-center gap-2 mb-2">
+          <div className="text-[11px] uppercase tracking-wide text-faint font-extrabold flex items-center gap-1.5"><Sparkles size={12} style={{ color: 'var(--accent)' }} /> Sugestões dos agentes</div>
+          {lista.length > 0 && <span className="text-[9.5px] font-extrabold px-2 py-0.5 rounded-full num" style={{ background: 'rgba(214,0,127,.14)', color: 'var(--accent)' }}>{lista.length}</span>}
+        </div>
+        {sugs && sugs.resumo_impacto && !carregando && lista.length > 0 && (
+          <div className="grid grid-cols-4 gap-2.5 mb-3">
+            <BbKpi l="Oportunidades" v={lista.length} c="var(--accent)" />
+            <BbKpi l="Capital parado" v={brl(sugs.resumo_impacto.capital_parado)} c="var(--danger)" sub="estoque sem giro" />
+            <BbKpi l="Giro em queda" v={sugs.resumo_impacto.n_giro} c="var(--warn)" sub="vendas caindo" />
+            <BbKpi l="Margem folgada" v={sugs.resumo_impacto.n_margem} c="var(--ok)" sub="pode acelerar" />
+          </div>
+        )}
+        {carregando ? (
+          <div>{Array.from({ length: 3 }).map((_, i) => <div key={i} className="skel mb-2" style={{ height: 64, borderRadius: 16 }} />)}</div>
+        ) : sugs?.cache_vazio ? (
+          <div className="rounded-2xl p-4 glass text-[11px] text-dim flex items-center gap-2"><RefreshCw size={14} style={{ color: BLUE, flexShrink: 0 }} /> Sincronize os pedidos para os agentes analisarem giro, parados e margem com dados reais.</div>
+        ) : lista.length === 0 ? (
+          <div className="rounded-2xl p-6 glass text-[11px] text-faint text-center">Nenhuma sugestão ativa. Os agentes analisam o catálogo e o histórico — quando houver oportunidade (parado, queda de giro, margem folgada), aparece aqui.</div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {lista.map((s) => {
+              const ag = AGENTES.find((a) => a.key === s.agente) || {}; const Ic = ag.icon || Cpu
+              const podeAplicar = s.desconto_pct != null && s.deal_price_sugerido != null
+              return (
+                <div key={s.item_id} className="rounded-2xl p-3 glass lift flex items-center gap-3 card-in">
+                  <div className="w-9 h-9 rounded-lg grid place-items-center flex-none" style={{ background: `${ag.cor || 'var(--accent)'}22`, color: ag.cor || 'var(--accent)' }}><Ic size={16} /></div>
+                  {s.imagem ? <img src={s.imagem} alt="" className="w-10 h-10 rounded-lg object-cover flex-none" style={{ border: '1px solid var(--glass-border)' }} /> : <div className="w-10 h-10 rounded-lg grid place-items-center flex-none" style={{ background: 'rgba(255,255,255,.05)' }}><Boxes size={16} className="text-faint" /></div>}
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[12px] font-semibold truncate">{s.titulo || s.item_id}</div>
+                    <div className="text-[10px] text-dim truncate">{s.motivo}</div>
+                    <div className="text-[9px] text-faint num truncate">{(ag.nm || s.agente).replace('Agente ', '')}{s.piso != null ? ` · piso ${brl(s.piso)}` : ''}{s.agente === 'parado' && s.capital ? ` · ${brl(s.capital)} parado` : ''}{s.vendas_30d ? ` · ${s.vendas_30d} vend/30d` : ''}</div>
+                  </div>
+                  <div className="text-right flex-none">
+                    <div className="text-[11px] font-bold" style={{ color: 'var(--accent)' }}>{s.acao}</div>
+                    {podeAplicar && <div className="text-[10px] num" style={{ color: 'var(--ok)' }}>{brl(s.preco)} → {brl(s.deal_price_sugerido)}</div>}
+                  </div>
+                  <div className="flex flex-col gap-1 flex-none items-stretch" style={{ width: 92 }}>
+                    {podeAplicar
+                      ? <button onClick={() => aplicar(s)} disabled={aplicandoId === s.item_id} className="text-[10px] font-bold px-3 py-1.5 rounded-lg text-white inline-flex items-center justify-center gap-1 disabled:opacity-50" style={{ background: 'linear-gradient(135deg, var(--accent), #a80063)' }}>{aplicandoId === s.item_id ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />} Aplicar</button>
+                      : <span className="text-[8.5px] text-faint text-center leading-tight">requer convite Relâmpago</span>}
+                    <button onClick={() => dispensar(s.item_id)} className="text-[9.5px] text-faint hover:text-fg">dispensar</button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -1077,7 +1262,7 @@ function traduzErroML(msg) {
 }
 
 /* ================= seletor de itens (campanha / convite) ================= */
-function SeletorItens({ modo, promotionId, promotionType, promoNome, onClose, onOk, notify }) {
+function SeletorItens({ modo, promotionId, promotionType, promoNome, inicio, fim, onClose, onOk, notify }) {
   const [q, setQ] = useState('')
   const [itens, setItens] = useState(null)
   const [carregando, setCarregando] = useState(true)
@@ -1120,14 +1305,16 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, onClose, on
   useEffect(() => { carregar('') }, [carregar])
 
   const dealDe = (it) => {
-    const base = (modo === 'convite' ? (it.original_price || it.preco) : it.preco) || 0
-    let dp = base * (1 - pct / 100)
     if (modo === 'convite') {
-      // Semântica OFICIAL do ML (docs): max_discounted_price = MENOR preço permitido (maior desconto)
-      // e min_discounted_price = MAIOR preço permitido (menor desconto). A barra trabalha dentro dessa banda.
-      if (it.max_discounted_price != null) dp = Math.max(dp, it.max_discounted_price)
-      if (it.min_discounted_price != null) dp = Math.min(dp, it.min_discounted_price)
+      // O ML dita a faixa do convite. Usamos a sugestão do ML (ou o menor desconto permitido = maior preço),
+      // sem barra manual — em convite não somos nós que definimos a margem.
+      const dp = (it.suggested_discounted_price != null ? it.suggested_discounted_price
+        : it.min_discounted_price != null ? it.min_discounted_price
+          : it.max_discounted_price != null ? it.max_discounted_price
+            : it.original_price) || 0
+      return Math.round(dp * 100) / 100
     }
+    const dp = (it.preco || 0) * (1 - pct / 100)
     return Math.round(dp * 100) / 100
   }
   const furaPiso = (it) => it.piso_preco != null && dealDe(it) < it.piso_preco - 0.005
@@ -1156,6 +1343,7 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, onClose, on
       const it = alvos[k]
       try {
         const body = { promotion_id: promotionId, promotion_type: promotionType, deal_price: dealDe(it) }
+        if (it.offer_id) body.offer_id = it.offer_id
         if (furaPiso(it)) body.permitir_abaixo_piso = true
         if (promotionType === 'LIGHTNING') {
           // limites do ML são EXCLUSIVOS: "greater than min and less than max"
@@ -1183,7 +1371,7 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, onClose, on
           <div className="w-7 h-7 rounded-lg grid place-items-center flex-none" style={{ background: 'rgba(214,0,127,.16)', color: 'var(--accent)' }}><Layers size={15} /></div>
           <div className="min-w-0">
             <div className="text-[14px] font-bold truncate" style={{ fontFamily: 'Fraunces, Georgia, serif' }}>{modo === 'convite' ? 'Aderir com itens' : 'Adicionar itens'}</div>
-            <div className="text-[10.5px] text-faint truncate">{promoNome || promotionId}{modo === 'convite' && meta ? ` · ${meta.total} ${meta.total === 1 ? 'candidato' : 'candidatos'}${meta.truncado ? '+' : ''}` : ''}</div>
+            <div className="text-[10.5px] text-faint truncate">{promoNome || promotionId}{modo === 'convite' && meta ? ` · ${meta.total} ${meta.total === 1 ? 'candidato' : 'candidatos'}${meta.truncado ? '+' : ''}` : ''}{(inicio || fim) ? ` · vale ${dcurta(inicio) || '—'} → ${dcurta(fim) || '—'}` : ''}</div>
           </div>
           <button onClick={onClose} disabled={aplicando} className="ml-auto text-faint hover:text-fg disabled:opacity-40"><X size={18} /></button>
         </div>
@@ -1194,14 +1382,16 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, onClose, on
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
             <input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && modo !== 'convite' && carregar(q)} placeholder={modo === 'convite' ? 'Filtrar itens do convite…' : 'Buscar por título, SKU ou ID… (Enter)'} className="w-full text-[12px] pl-9 pr-3 py-2 rounded-xl bg-transparent text-fg placeholder:text-faint" style={{ border: '1px solid var(--glass-border)' }} />
           </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-[9.5px] text-faint font-extrabold uppercase tracking-wide">Desconto</span>
-            {[10, 15, 20, 25, 30].map((d) => (
-              <button key={d} onClick={() => setPct(d)} className="text-[11px] font-bold px-2.5 py-1 rounded-full num transition-colors" style={pct === d ? { background: 'var(--accent)', color: '#fff' } : { background: 'rgba(255,255,255,.06)', color: 'var(--dim)', border: '1px solid var(--glass-border)' }}>{d}%</button>
-            ))}
-            <input type="range" min={5} max={40} step={1} value={pct} onChange={(e) => setPct(Number(e.target.value))} className="flex-1 min-w-[120px]" style={{ accentColor: '#d6007f' }} />
-            <span className="text-[11px] font-extrabold num" style={{ color: 'var(--accent)' }}>{pct}%</span>
-          </div>
+          {modo !== 'convite' && (
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-[9.5px] text-faint font-extrabold uppercase tracking-wide">Desconto</span>
+              {[10, 15, 20, 25, 30].map((d) => (
+                <button key={d} onClick={() => setPct(d)} className="text-[11px] font-bold px-2.5 py-1 rounded-full num transition-colors" style={pct === d ? { background: 'var(--accent)', color: '#fff' } : { background: 'rgba(255,255,255,.06)', color: 'var(--dim)', border: '1px solid var(--glass-border)' }}>{d}%</button>
+              ))}
+              <input type="range" min={5} max={40} step={1} value={pct} onChange={(e) => setPct(Number(e.target.value))} className="flex-1 min-w-[120px]" style={{ accentColor: '#d6007f' }} />
+              <span className="text-[11px] font-extrabold num" style={{ color: 'var(--accent)' }}>{pct}%</span>
+            </div>
+          )}
           {modo === 'convite' && <div className="text-[10px] text-faint mt-1.5 flex items-start gap-1.5"><Info size={12} className="flex-none mt-0.5" /> Preço de cada item é ajustado para caber na banda do convite (mín–máx do ML) e nunca abaixo do piso.</div>}
           {semBling > 0 && <div className="text-[10px] mt-1.5 flex items-start gap-1.5" style={{ color: 'var(--warn)' }}><AlertTriangle size={12} className="flex-none mt-0.5" /> {semBling} {semBling === 1 ? 'item sem' : 'itens sem'} Preço Bling — sem trava de margem. Cadastre o custo/Preço Bling no Bling para proteger a margem.</div>}
           {abaixoTotal > 0 && (
