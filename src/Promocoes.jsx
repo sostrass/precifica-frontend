@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import {
   Tag, Percent, Ticket, Boxes, Flame, Sparkles, Zap, Cpu, Scale, Target,
   Landmark, Gauge, Wallet, Shield, Power, Ban, TrendingUp, TrendingDown, Layers,
   Calendar, Clock, Plus, ChevronRight, Crown, Activity, Loader2, RefreshCw, Plug,
-  Info, Gift, ArrowRight, SlidersHorizontal, Search, CircleDollarSign, BarChart3,
+  Info, Gift, ArrowRight, SlidersHorizontal, Search, CircleDollarSign, BarChart3, X, Check, Trash2, AlertTriangle,
 } from 'lucide-react'
 import { api } from './api'
 import { useToast } from './toast.jsx'
@@ -41,6 +42,11 @@ const stInfo = (s) => ST[s] || { t: s || '—', c: 'var(--dim)' }
 const brl = (v) => v == null ? '—' : v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const dcurta = (s) => { if (!s) return null; try { return new Date(s).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }) } catch { return null } }
 const diasAte = (s) => { if (!s) return null; try { return Math.ceil((new Date(s) - new Date()) / 86400000) } catch { return null } }
+const isoDe = (offsetDias, hora = '00:00:00') => {
+  const d = new Date(); d.setDate(d.getDate() + offsetDias)
+  const p = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${hora}`
+}
 const pctTempo = (ini, fim) => {
   try { const a = new Date(ini), b = new Date(fim), n = new Date(); if (b <= a) return 0
     return Math.max(0, Math.min(100, ((n - a) / (b - a)) * 100)) } catch { return 0 }
@@ -64,7 +70,42 @@ export default function Promocoes() {
   useEffect(() => { carregar() }, [carregar])
 
   const setGovK = (k) => { const n = { ...gov, [k]: !gov[k] }; setGov(n); localStorage.setItem('promo_gov', JSON.stringify(n)) }
-  const emBreve = (o) => notify(`${o}: chega na próxima etapa (ações de escrita).`, 'warn')
+  const emBreve = (o) => notify(`${o}: chega na próxima etapa.`, 'warn')
+  const [modal, setModal] = useState(null) // 'campanha' | 'cupom' | null
+  const [busyExcl, setBusyExcl] = useState(false)
+  const [picker, setPicker] = useState(null)
+  const abrirAddItens = (p) => setPicker({ modo: 'campanha', promotionId: p.id, promotionType: p.type, promoNome: p.name || p.type })
+  const abrirAderir = (p) => setPicker({ modo: 'convite', promotionId: p.id, promotionType: p.type, promoNome: p.name || p.type })
+
+  const toggleExclusaoSeller = async () => {
+    setBusyExcl(true)
+    try {
+      const novo = !(painel?.exclusao_ativa)
+      await api.mlPromoExclusaoSeller(novo)
+      notify(novo ? 'Exclusão do seller ativada — o ML não inclui seus itens automaticamente.' : 'Exclusão do seller desativada.', 'ok')
+      carregar()
+    } catch (e) { notify(e.message || 'Falha ao alterar a exclusão', 'danger') }
+    finally { setBusyExcl(false) }
+  }
+
+  const encerrarCampanha = async (p) => {
+    if (!window.confirm(`Encerrar "${p.name || p.type}"? Esta ação remove a campanha no Mercado Livre.`)) return
+    try {
+      await api.mlPromoExcluirCampanha(p.id, p.type)
+      notify('Campanha encerrada.', 'ok')
+      carregar()
+    } catch (e) { notify(e.message || 'Falha ao encerrar', 'danger') }
+  }
+  const [busySync, setBusySync] = useState(false)
+  const sincronizarPedidos = async () => {
+    setBusySync(true)
+    try {
+      const r = await api.mlPedidosBackfill(90)
+      notify(`Sincronizados ${r.pedidos_gravados} pedidos dos últimos ${r.dias} dias.`, 'ok')
+      carregar()
+    } catch (e) { notify(e.message || 'Falha ao sincronizar pedidos', 'danger') }
+    finally { setBusySync(false) }
+  }
 
   const convites = painel?.convites || []
   const minhas = (painel?.minhas || []).filter((m) => m.type !== 'SELLER_COUPON_CAMPAIGN')
@@ -89,8 +130,9 @@ export default function Promocoes() {
         <div className="ml-auto flex items-center gap-2 flex-wrap">
           <button onClick={carregar} className="text-xs px-2.5 py-2 rounded-lg glass text-dim hover:text-fg inline-flex items-center gap-1.5"><RefreshCw size={14} className={estado === 'carregando' ? 'animate-spin' : ''} /> Atualizar</button>
           <button onClick={() => setAba('inteligencia')} className="text-xs px-3 py-2 rounded-lg glass text-dim hover:text-fg inline-flex items-center gap-1.5"><Calendar size={14} /> Calendário</button>
-          <button onClick={() => emBreve('Novo cupom')} className="text-xs px-3 py-2 rounded-lg glass text-dim hover:text-fg inline-flex items-center gap-1.5"><Ticket size={14} /> Novo cupom</button>
-          <button onClick={() => emBreve('Nova campanha')} className="text-xs px-3 py-2 rounded-lg inline-flex items-center gap-1.5 text-white font-semibold" style={{ background: 'linear-gradient(135deg, var(--accent), #a80063)' }}><Plus size={14} /> Nova campanha</button>
+          <button onClick={sincronizarPedidos} disabled={busySync} title="Buscar pedidos no ML para liberar a análise de vendas por campanha" className="text-xs px-3 py-2 rounded-lg glass text-dim hover:text-fg inline-flex items-center gap-1.5 disabled:opacity-50">{busySync ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Sincronizar pedidos</button>
+          <button onClick={() => setModal('cupom')} className="text-xs px-3 py-2 rounded-lg glass text-dim hover:text-fg inline-flex items-center gap-1.5"><Ticket size={14} /> Novo cupom</button>
+          <button onClick={() => setModal('campanha')} className="text-xs px-3 py-2 rounded-lg inline-flex items-center gap-1.5 text-white font-semibold" style={{ background: 'linear-gradient(135deg, var(--accent), #a80063)' }}><Plus size={14} /> Nova campanha</button>
         </div>
       </div>
       <div className="h-px my-3" style={{ background: 'linear-gradient(90deg, var(--accent), transparent 60%)' }} />
@@ -118,7 +160,7 @@ export default function Promocoes() {
       <div className="flex items-center gap-3.5 flex-wrap rounded-2xl px-4 py-3 mt-3.5" style={{ background: 'linear-gradient(158deg, rgba(47,217,141,.08), rgba(0,0,0,.15))', border: '1px solid rgba(47,217,141,.28)' }}>
         <span className="text-[11px] font-extrabold inline-flex items-center gap-1.5" style={{ color: 'var(--ok)' }}><Shield size={13} /> Governança &amp; margem</span>
         <span className="text-[11px] text-dim">Nunca abaixo do <b style={{ color: 'var(--text)' }}>Preço Bling</b> (líquido-alvo)</span>
-        <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full inline-flex items-center gap-1.5" style={{ background: painel?.exclusao_ativa ? 'rgba(255,122,122,.12)' : 'rgba(255,255,255,.06)', color: painel?.exclusao_ativa ? 'var(--danger)' : 'var(--faint)' }}><Ban size={11} /> Lista de exclusão {painel?.exclusao_ativa == null ? '—' : painel?.exclusao_ativa ? 'ativa' : 'inativa'}</span>
+        <button onClick={toggleExclusaoSeller} disabled={busyExcl} title="Ligar/desligar a inclusão automática do ML" className="text-[10px] font-extrabold px-2 py-0.5 rounded-full inline-flex items-center gap-1.5 disabled:opacity-50" style={{ background: painel?.exclusao_ativa ? 'rgba(255,122,122,.12)' : 'rgba(255,255,255,.06)', color: painel?.exclusao_ativa ? 'var(--danger)' : 'var(--faint)', border: '1px solid ' + (painel?.exclusao_ativa ? 'rgba(255,122,122,.3)' : 'var(--glass-border)') }}>{busyExcl ? <Loader2 size={11} className="animate-spin" /> : <Ban size={11} />} Exclusão do seller {painel?.exclusao_ativa == null ? '—' : painel?.exclusao_ativa ? 'ativa' : 'inativa'}</button>
         <div className="ml-auto flex items-center gap-3.5 flex-wrap">
           <SwitchLabel on={gov.kill} onClick={() => setGovK('kill')} icon={Power} label="Kill switch global" />
           <SwitchLabel on={gov.cont} onClick={() => setGovK('cont')} label="Auto-continuar" />
@@ -126,7 +168,7 @@ export default function Promocoes() {
         </div>
       </div>
 
-      {estado === 'carregando' && !painel && <div className="text-dim text-sm flex items-center gap-2 p-6"><Loader2 size={16} className="animate-spin" /> Carregando promoções…</div>}
+      {estado === 'carregando' && !painel && <SkeletonPromocoes />}
 
       {painel && (aba === 'visao' || aba === 'minhas' || aba === 'convites' || aba === 'cupons') && (
         <>
@@ -141,22 +183,26 @@ export default function Promocoes() {
                 <Kpi icon={Shield} label="Governança" valor={painel.exclusao_ativa == null ? '—' : painel.exclusao_ativa ? 'ON' : 'OFF'} sub="exclusão do ML" />
               </div>
               <Distribuicao convites={convites.length} minhas={minhas.length} cupons={cupons.length} />
-              <Simulador notify={notify} />
-              <SecConvites convites={convites} onAderir={() => emBreve('Aderir ao convite')} />
-              <SecMinhas minhas={minhas} onAcao={emBreve} />
-              <SecCupons cupons={cupons} onAcao={emBreve} />
+              <Simulador notify={notify} recarregar={carregar} />
+              <SecConvites convites={convites} onAderir={abrirAderir} />
+              <SecMinhas minhas={minhas} onAcao={emBreve} onEncerrar={encerrarCampanha} onAddItens={abrirAddItens} onSincronizar={sincronizarPedidos} />
+              <SecCupons cupons={cupons} onAcao={emBreve} onEncerrar={encerrarCampanha} />
               <Calendario minhas={minhas} cupons={cupons} convites={convites} />
             </>
           )}
-          {aba === 'minhas' && <SecMinhas minhas={minhas} onAcao={emBreve} full />}
-          {aba === 'convites' && <SecConvites convites={convites} onAderir={() => emBreve('Aderir ao convite')} full />}
-          {aba === 'cupons' && <SecCupons cupons={cupons} onAcao={emBreve} full />}
+          {aba === 'minhas' && <SecMinhas minhas={minhas} onAcao={emBreve} onEncerrar={encerrarCampanha} onAddItens={abrirAddItens} onSincronizar={sincronizarPedidos} full />}
+          {aba === 'convites' && <SecConvites convites={convites} onAderir={abrirAderir} full />}
+          {aba === 'cupons' && <SecCupons cupons={cupons} onAcao={emBreve} onEncerrar={encerrarCampanha} full />}
         </>
       )}
 
       {aba === 'inteligencia' && <Inteligencia minhas={minhas} cupons={cupons} convites={convites} />}
       {aba === 'automacao' && <Automacao />}
       {aba === 'ads' && <Ads />}
+
+      {modal === 'campanha' && <NovaCampanhaModal onClose={() => setModal(null)} onOk={() => { setModal(null); carregar() }} notify={notify} />}
+      {modal === 'cupom' && <NovoCupomModal onClose={() => setModal(null)} onOk={() => { setModal(null); carregar() }} notify={notify} />}
+      {picker && <SeletorItens modo={picker.modo} promotionId={picker.promotionId} promotionType={picker.promotionType} promoNome={picker.promoNome} onClose={() => setPicker(null)} onOk={() => { setPicker(null); carregar() }} notify={notify} />}
     </div>
   )
 }
@@ -184,7 +230,7 @@ function Kpi({ icon: Ic, label, valor, sub, subcor, hero, prof }) {
     : prof ? 'linear-gradient(135deg, rgba(160,107,232,.3), rgba(160,107,232,.1))'
     : 'rgba(255,255,255,.06)'
   return (
-    <div className="rounded-2xl p-3 lift" style={{ background: bg, border: `1px solid ${bd}` }}>
+    <div className="rounded-2xl p-3 lift card-in" style={{ background: bg, border: `1px solid ${bd}` }}>
       <div className="text-[9.5px] uppercase tracking-wide text-faint font-bold flex items-center gap-1.5">
         <span className="w-[22px] h-[22px] rounded-lg grid place-items-center" style={{ background: ig, color: hero ? 'var(--ok)' : prof ? PURPLE : 'var(--dim)' }}><Ic size={12} /></span> {label}
       </div>
@@ -260,17 +306,17 @@ function SecConvites({ convites, onAderir, full }) {
       <Secao icon={Zap} cor={ML} titulo="Convites do Mercado Livre" pill="você adere · 1 clique" pillCor={ML} />
       {convites.length === 0
         ? <Vazio texto="Nenhum convite do ML no momento. Eles aparecem aqui quando o Mercado Livre te convida — Oferta Relâmpago, Oferta do Dia, coparticipação, Price Matching, PIX, etc." />
-        : <div className="grid grid-cols-3 gap-3">{convites.map((c) => <ConviteCard key={c.id} p={c} onAderir={onAderir} />)}</div>}
+        : <div className="grid grid-cols-3 gap-3">{convites.map((c, i) => <ConviteCard key={c.id} p={c} onAderir={onAderir} idx={i} />)}</div>}
     </>
   )
 }
-function ConviteCard({ p, onAderir }) {
+function ConviteCard({ p, onAderir, idx = 0 }) {
   const m = meta(p.type); const Ic = m.icon
   const ben = p.benefits || {}
   const cofin = ben.type === 'REBATE' ? `ML ${ben.meli_percent ?? '—'}% + você ${ben.seller_percent ?? '—'}%` : null
   const ddl = dcurta(p.deadline_date); const dd = diasAte(p.deadline_date)
   return (
-    <div className="rounded-2xl p-3.5 relative overflow-hidden lift" style={{ background: `linear-gradient(160deg, ${m.cor}14, rgba(0,0,0,.14))`, border: `1px solid ${m.cor}33` }}>
+    <div className="rounded-2xl p-3.5 relative overflow-hidden lift card-in" style={{ background: `linear-gradient(160deg, ${m.cor}14, rgba(0,0,0,.14))`, border: `1px solid ${m.cor}33`, animationDelay: `${idx * 45}ms` }}>
       <div className="absolute top-0 left-0 right-0 h-[3px]" style={{ background: `linear-gradient(90deg, ${m.cor}, transparent)` }} />
       <div className="flex items-center gap-2">
         <div className="w-8 h-8 rounded-lg grid place-items-center flex-none" style={{ background: `${m.cor}22`, color: m.cor }}><Ic size={16} /></div>
@@ -281,32 +327,64 @@ function ConviteCard({ p, onAderir }) {
       {cofin && <div className="inline-flex items-center gap-1.5 text-[9.5px] font-extrabold px-2 py-0.5 rounded-full mt-1" style={{ background: 'rgba(91,141,239,.16)', color: BLUE }}><Gift size={11} /> {cofin}</div>}
       <div className="flex items-center gap-2 mt-3">
         {ddl && <span className="text-[9.5px] font-extrabold px-2 py-1 rounded-lg inline-flex items-center gap-1.5" style={{ background: 'rgba(224,162,60,.14)', color: 'var(--warn)' }}><Clock size={11} /> {dd != null && dd >= 0 ? `${dd}d` : ddl}</span>}
-        <button onClick={onAderir} className="ml-auto text-[10.5px] font-bold px-3 py-1.5 rounded-lg inline-flex items-center gap-1" style={{ background: 'linear-gradient(135deg, #F2C200, #d9a400)', color: '#3a2c00' }}>Aderir <ChevronRight size={12} /></button>
+        <button onClick={() => onAderir(p)} className="ml-auto text-[10.5px] font-bold px-3 py-1.5 rounded-lg inline-flex items-center gap-1" style={{ background: 'linear-gradient(135deg, #F2C200, #d9a400)', color: '#3a2c00' }}>Aderir <ChevronRight size={12} /></button>
       </div>
     </div>
   )
 }
 
 /* ================= MINHAS CAMPANHAS ================= */
-function SecMinhas({ minhas, onAcao, full }) {
+function SecMinhas({ minhas, onAcao, onEncerrar, onAddItens, onSincronizar, full }) {
   return (
     <>
       <Secao icon={Tag} cor="var(--accent)" titulo="Minhas campanhas" pill="você cria" pillCor="var(--accent)" />
       {minhas.length === 0
         ? <Vazio texto="Você ainda não tem campanhas próprias. Crie uma Campanha de %, um Desconto individual ou um Desconto por quantidade — sempre com a trava de margem no Preço Bling." />
-        : minhas.map((m) => <CampanhaCard key={m.id} p={m} onAcao={onAcao} />)}
+        : minhas.map((m, i) => <CampanhaCard key={m.id} p={m} onAcao={onAcao} onEncerrar={onEncerrar} onAddItens={onAddItens} onSincronizar={onSincronizar} idx={i} />)}
     </>
   )
 }
-function CampanhaCard({ p, onAcao }) {
+const SAUDE = {
+  saudavel: { c: 'var(--ok)', t: 'Saudável', Icon: Check },
+  atencao: { c: 'var(--warn)', t: 'Atenção', Icon: AlertTriangle },
+  risco: { c: 'var(--danger)', t: 'Risco', Icon: AlertTriangle },
+}
+const INS = {
+  risco: { c: 'var(--danger)', Icon: AlertTriangle },
+  oportunidade: { c: 'var(--warn)', Icon: TrendingUp },
+  acao: { c: 'var(--accent)', Icon: Zap },
+  positivo: { c: 'var(--ok)', Icon: Check },
+  info: { c: 'var(--dim)', Icon: Info },
+}
+
+function CampanhaCard({ p, onAcao, onEncerrar, onAddItens, onSincronizar, idx = 0 }) {
   const m = meta(p.type); const Ic = m.icon
   const st = stInfo(p.status)
   const ini = dcurta(p.start_date), fim = dcurta(p.finish_date)
   const barCor = /started|active/.test(p.status || '') ? 'var(--ok)' : p.status === 'pending' ? BLUE : 'var(--faint)'
   const tempo = (p.start_date && p.finish_date) ? Math.round(pctTempo(p.start_date, p.finish_date)) : null
   const restam = diasAte(p.finish_date)
+  const [met, setMet] = useState(null)
+  const [carrMet, setCarrMet] = useState(true)
+  const [drawer, setDrawer] = useState(false)
+
+  useEffect(() => {
+    let vivo = true
+    setCarrMet(true)
+    api.mlPromoMetricas(p.id, p.type, p.start_date, p.finish_date)
+      .then((r) => { if (vivo) setMet(r) })
+      .catch(() => { if (vivo) setMet(null) })
+      .finally(() => { if (vivo) setCarrMet(false) })
+    return () => { vivo = false }
+  }, [p.id, p.type, p.start_date, p.finish_date])
+
+  const sd = met ? (SAUDE[met.saude] || SAUDE.atencao) : null
+  const topIns = met && met.insights && met.insights.length ? met.insights[0] : null
+  const nIns = met && met.insights ? met.insights.length : 0
+  const tileV = (v) => carrMet ? '…' : (v == null ? '—' : v)
+
   return (
-    <div className="rounded-2xl p-3.5 mb-3 glass lift" style={{ boxShadow: `inset 3px 0 0 ${barCor}` }}>
+    <div className="rounded-2xl p-3.5 mb-3 glass lift card-in" style={{ boxShadow: `inset 3px 0 0 ${barCor}`, animationDelay: `${idx * 45}ms` }}>
       <div className="flex items-start gap-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
@@ -314,35 +392,48 @@ function CampanhaCard({ p, onAcao }) {
             <Chip cor={m.cor}><Ic size={10} />{m.label}</Chip>
             {p.sub_type === 'FLEXIBLE_PERCENTAGE' && <Chip cor={PURPLE}>flexível</Chip>}
             <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full" style={{ background: `${st.c}22`, color: st.c }}>{st.t}</span>
+            {sd && met.itens > 0 && <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: `${sd.c}1f`, color: sd.c }}><sd.Icon size={10} /> {sd.t}</span>}
           </div>
           <div className="text-[11px] text-faint mt-1">{p.id} {ini && `· ${ini} → ${fim}`} {restam != null && restam >= 0 && `· termina em ${restam}d`}</div>
         </div>
         {tempo != null && <Donut pct={tempo} cor={barCor} valor={`${tempo}%`} label="tempo" />}
       </div>
       <div className="grid gap-2.5 mt-3" style={{ gridTemplateColumns: 'repeat(6,1fr)' }}>
-        <Mini l="Tipo" v={m.fam === 'cria' ? 'Você cria' : 'Você adere'} s={m.label} />
-        <Mini l="Início" v={ini || '—'} s="programado" />
-        <Mini l="Fim" v={fim || '—'} s={restam != null ? `${restam}d` : 'programado'} />
-        <Mini l="Itens" v="em breve" s="agregação" />
-        <Mini l="Líquido real" v="em breve" s="net_proceeds" hero />
-        <Mini l="Lucro real" v="em breve" s="− custo Bling" prof />
+        <Mini l="Itens" v={tileV(met?.itens)} s={met ? `${met.itens_ativos} ativos` : 'agregação'} />
+        <Mini l="Desc. médio" v={met?.desconto_medio_pct != null ? `${met.desconto_medio_pct}%` : tileV(null)} s="médio" />
+        <Mini l="Líquido real" v={met?.liquido_total != null ? brl(met.liquido_total) : tileV(null)} s="net_proceeds" hero />
+        <Mini l="Lucro real" v={met?.lucro_total != null ? brl(met.lucro_total) : tileV(null)} s="− custo Bling" prof />
+        <Mini l="Margem méd." v={met?.margem_media_pct != null ? `${met.margem_media_pct}%` : tileV(null)} s="média" />
+        <Mini l="Abaixo do piso" v={tileV(met?.abaixo_piso)} s={met && met.abaixo_piso > 0 ? 'furam a margem' : 'protegido'} danger={met && met.abaixo_piso > 0} />
       </div>
       {tempo != null && <div className="h-1.5 rounded-full overflow-hidden mt-2.5" style={{ background: 'rgba(255,255,255,.08)' }}><div style={{ width: `${tempo}%`, height: '100%', background: `linear-gradient(90deg, ${barCor}, ${barCor}99)` }} /></div>}
+      {topIns && (() => { const it = INS[topIns.tipo] || INS.info; return (
+        <button onClick={() => setDrawer(true)} className="w-full text-left mt-2.5 rounded-xl px-3 py-2 flex items-center gap-2" style={{ background: `${it.c}12`, border: `1px solid ${it.c}33` }}>
+          <it.Icon size={14} style={{ color: it.c, flex: 'none' }} />
+          <span className="text-[11px] font-semibold truncate" style={{ color: it.c }}>{topIns.titulo}</span>
+          {nIns > 1 && <span className="ml-auto text-[10px] font-bold px-2 py-0.5 rounded-full flex-none" style={{ background: `${it.c}22`, color: it.c }}>+{nIns - 1}</span>}
+          <ChevronRight size={13} className="flex-none" style={{ color: it.c }} />
+        </button>
+      ) })()}
       <div className="flex gap-2 mt-3 flex-wrap">
-        <Act icon={SlidersHorizontal} onClick={() => onAcao('Editar itens')}>Editar itens</Act>
+        <Act icon={Plus} onClick={() => onAddItens && onAddItens(p)}>Adicionar itens</Act>
+        <Act icon={BarChart3} onClick={() => setDrawer(true)}>Desempenho{nIns ? ` (${nIns})` : ''}</Act>
         <Act icon={Gauge} onClick={() => onAcao('Simular')}>Simular</Act>
-        <Act icon={Activity} onClick={() => onAcao('Ver itens (net_proceeds)')}>Ver itens</Act>
-        <Act icon={Ban} danger onClick={() => onAcao('Encerrar')}>Encerrar</Act>
+        <Act icon={Trash2} danger onClick={() => onEncerrar && onEncerrar(p)}>Encerrar</Act>
       </div>
+      {drawer && <DesempenhoDrawer met={met} carregando={carrMet} p={p} onClose={() => setDrawer(false)} onSincronizar={onSincronizar} />}
     </div>
   )
 }
 
-function Mini({ l, v, s, hero, prof }) {
-  const bg = hero ? 'linear-gradient(160deg, rgba(47,217,141,.14), rgba(47,217,141,.02))'
-    : prof ? 'linear-gradient(160deg, rgba(160,107,232,.14), rgba(160,107,232,.02))' : 'rgba(0,0,0,.24)'
-  const bd = hero ? '1px solid rgba(47,217,141,.3)' : prof ? '1px solid rgba(160,107,232,.3)' : '1px solid transparent'
-  const vc = hero ? 'var(--ok)' : prof ? PURPLE : 'var(--text)'
+
+
+function Mini({ l, v, s, hero, prof, danger }) {
+  const bg = danger ? 'linear-gradient(160deg, rgba(255,122,122,.16), rgba(255,122,122,.02))'
+    : hero ? 'linear-gradient(160deg, rgba(47,217,141,.14), rgba(47,217,141,.02))'
+      : prof ? 'linear-gradient(160deg, rgba(160,107,232,.14), rgba(160,107,232,.02))' : 'rgba(0,0,0,.24)'
+  const bd = danger ? '1px solid rgba(255,122,122,.35)' : hero ? '1px solid rgba(47,217,141,.3)' : prof ? '1px solid rgba(160,107,232,.3)' : '1px solid transparent'
+  const vc = danger ? 'var(--danger)' : hero ? 'var(--ok)' : prof ? PURPLE : 'var(--text)'
   return (
     <div className="rounded-xl px-2.5 py-2.5" style={{ background: bg, border: bd }}>
       <div className="text-[8px] uppercase tracking-wide text-faint font-extrabold">{l}</div>
@@ -360,20 +451,20 @@ function Act({ icon: Ic, children, danger, onClick }) {
 }
 
 /* ================= CUPONS ================= */
-function SecCupons({ cupons, onAcao, full }) {
+function SecCupons({ cupons, onAcao, onEncerrar, full }) {
   return (
     <>
       <Secao icon={Ticket} cor={ML} titulo="Cupons" pill="com código · público · frete grátis" pillCor={ML} />
       {cupons.length === 0
         ? <Vazio texto="Nenhum cupom ativo. Crie um cupom com código (para distribuir aos seguidores por fora) ou público (o ML destaca para todos os compradores das publicações)." />
-        : cupons.map((m) => <CupomCard key={m.id} p={m} onAcao={onAcao} />)}
+        : cupons.map((m, i) => <CupomCard key={m.id} p={m} onAcao={onAcao} onEncerrar={onEncerrar} idx={i} />)}
     </>
   )
 }
-function CupomCard({ p, onAcao }) {
+function CupomCard({ p, onAcao, onEncerrar, idx = 0 }) {
   const st = stInfo(p.status); const ini = dcurta(p.start_date), fim = dcurta(p.finish_date)
   return (
-    <div className="rounded-2xl p-3.5 mb-3 glass lift" style={{ boxShadow: 'inset 3px 0 0 #F2C200' }}>
+    <div className="rounded-2xl p-3.5 mb-3 glass lift card-in" style={{ boxShadow: 'inset 3px 0 0 #F2C200', animationDelay: `${idx * 45}ms` }}>
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-[14px] font-bold">{p.name || 'Cupom'}</span>
         <Chip cor={ML}><Ticket size={10} /> Cupom (MLB)</Chip>
@@ -391,18 +482,24 @@ function CupomCard({ p, onAcao }) {
       <div className="flex gap-2 mt-3 flex-wrap">
         <Act icon={SlidersHorizontal} onClick={() => onAcao('Editar cupom')}>Editar</Act>
         <Act icon={Sparkles} onClick={() => onAcao('Versão pública (sem código)')}>Versão pública</Act>
-        <Act icon={Ban} danger onClick={() => onAcao('Encerrar')}>Encerrar</Act>
+        <Act icon={Trash2} danger onClick={() => onEncerrar && onEncerrar(p)}>Encerrar</Act>
       </div>
     </div>
   )
 }
 
 /* ================= SIMULADOR ================= */
-function Simulador({ notify }) {
+function Simulador({ notify, recarregar }) {
   const [itemId, setItemId] = useState('')
   const [desc, setDesc] = useState(20)
   const [res, setRes] = useState(null)
   const [busy, setBusy] = useState(false)
+  const [aplicando, setAplicando] = useState(false)
+  const [dur, setDur] = useState(7)
+  const [comparar, setComparar] = useState(false)
+  const [descB, setDescB] = useState(30)
+  const [resB, setResB] = useState(null)
+  const [busyB, setBusyB] = useState(false)
 
   const simular = useCallback(async (d = desc, id = itemId) => {
     const iid = (id || '').trim(); if (!iid) return
@@ -412,9 +509,36 @@ function Simulador({ notify }) {
     finally { setBusy(false) }
   }, [desc, itemId, notify])
 
+  const simularB = useCallback(async (d = descB, id = itemId) => {
+    const iid = (id || '').trim(); if (!iid) return
+    setBusyB(true)
+    try { setResB(await api.mlPromoSimular({ item_id: iid, desconto_pct: Number(d) })) }
+    catch { setResB(null) }
+    finally { setBusyB(false) }
+  }, [descB, itemId])
+
   const pisoPct = res && res.preco_atual && res.piso_preco ? (1 - res.piso_preco / res.preco_atual) * 100 : null
   const pos = (pct) => Math.max(0, Math.min(100, ((pct - 5) / (40 - 5)) * 100))
   const precoEm = (pct) => res && res.preco_atual ? res.preco_atual * (1 - pct / 100) : null
+
+  const aplicar = async () => {
+    if (!res || res.acima_do_piso === false) return
+    setAplicando(true)
+    try {
+      await api.mlPromoDesconto(res.item_id, { deal_price: res.deal_price, fim: isoDe(dur, '23:59:59') })
+      notify(`Desconto de ${res.desconto_pct}% aplicado por ${dur} dias (${brl(res.deal_price)}).`, 'ok')
+      recarregar && recarregar()
+    } catch (e) { notify(e.message || 'Falha ao aplicar o desconto', 'danger') }
+    finally { setAplicando(false) }
+  }
+  const sugPct = res && res.sugestao_pct != null ? res.sugestao_pct : null
+  const vencedor = (() => {
+    if (!res || !resB) return null
+    const aok = res.acima_do_piso !== false, bok = resB.acima_do_piso !== false
+    if (aok && !bok) return 'A'; if (bok && !aok) return 'B'
+    if (res.lucro == null || resB.lucro == null) return null
+    return res.lucro >= resB.lucro ? 'A' : 'B'
+  })()
 
   return (
     <div className="rounded-2xl p-4 mt-3" style={{ background: 'linear-gradient(160deg, rgba(214,0,127,.08), rgba(0,0,0,.18))', border: '1px solid rgba(214,0,127,.28)' }}>
@@ -437,6 +561,8 @@ function Simulador({ notify }) {
           <button key={d} onClick={() => { setDesc(d); if (itemId.trim()) simular(d) }} className="text-[11px] font-bold px-2.5 py-1 rounded-full num transition-colors"
             style={desc === d ? { background: 'var(--accent)', color: '#fff', boxShadow: '0 3px 10px rgba(214,0,127,.35)' } : { background: 'rgba(255,255,255,.06)', color: 'var(--dim)', border: '1px solid var(--glass-border)' }}>{d}%</button>
         ))}
+        {res && res.sugestao_pct != null && <button onClick={() => { const d = Math.round(res.sugestao_pct); setDesc(d); simular(d) }} className="text-[11px] font-bold px-2.5 py-1 rounded-full inline-flex items-center gap-1" style={{ background: 'rgba(242,194,0,.16)', color: ML, border: '1px solid rgba(242,194,0,.3)' }}><Sparkles size={11} /> sugestão ML {res.sugestao_pct}%</button>}
+        <button onClick={() => { const nv = !comparar; setComparar(nv); if (nv && itemId.trim()) simularB(descB) }} className="ml-auto text-[11px] font-bold px-2.5 py-1 rounded-full inline-flex items-center gap-1 transition-colors" style={comparar ? { background: BLUE, color: '#fff' } : { background: 'rgba(255,255,255,.06)', color: 'var(--dim)', border: '1px solid var(--glass-border)' }}><SlidersHorizontal size={11} /> Comparar</button>
       </div>
 
       {!res && <div className="text-[11.5px] text-faint py-3 flex items-center gap-2"><Info size={14} /> Informe o ID de um anúncio e o desconto para ver o <b style={{ color: 'var(--dim)' }}>líquido real</b>, o <b style={{ color: 'var(--dim)' }}>lucro</b> e se fica <b style={{ color: 'var(--dim)' }}>acima do piso</b> (Preço Bling).</div>}
@@ -467,6 +593,13 @@ function Simulador({ notify }) {
                   <div style={{ width: 2, height: 40, background: 'var(--danger)' }} />
                   <div className="absolute text-[8px] font-extrabold whitespace-nowrap" style={{ top: -12, left: '50%', transform: 'translateX(-50%)', color: 'var(--danger)' }}>piso (Bling)</div>
                   <div className="absolute text-[8px] num whitespace-nowrap" style={{ top: 42, left: '50%', transform: 'translateX(-50%)', color: 'var(--danger)' }}>{brl(res.piso_preco)}</div>
+                </div>
+              )}
+              {/* sugestão do ML */}
+              {sugPct != null && sugPct >= 5 && sugPct <= 40 && (
+                <div className="absolute" style={{ left: `${pos(sugPct)}%`, top: 10 }}>
+                  <div style={{ width: 2, height: 40, background: '#F2C200' }} />
+                  <div className="absolute text-[8px] font-extrabold whitespace-nowrap" style={{ top: -12, left: '50%', transform: 'translateX(-50%)', color: '#F2C200' }}>sugestão ML</div>
                 </div>
               )}
               {/* knob */}
@@ -507,10 +640,56 @@ function Simulador({ notify }) {
                 </div>
               )
             })()}
-            <button onClick={() => notify('Aplicar desconto: chega na Etapa 3.', 'warn')} disabled={res.acima_do_piso === false} className="mt-2 text-[11px] font-bold px-3 py-2 rounded-xl text-white inline-flex items-center justify-center gap-1.5 disabled:opacity-40" style={{ background: 'linear-gradient(135deg, var(--accent), #a80063)' }}><Percent size={13} /> Aplicar este desconto</button>
+            <div className="flex items-center gap-2 mt-2">
+              <span className="text-[10px] text-faint font-bold uppercase tracking-wide">Duração</span>
+              <select value={dur} onChange={(e) => setDur(Number(e.target.value))} className="text-[11px] px-2 py-1.5 rounded-lg bg-transparent text-fg" style={{ border: '1px solid var(--glass-border)' }}>
+                <option value={3}>3 dias</option>
+                <option value={7}>7 dias</option>
+                <option value={14}>14 dias</option>
+              </select>
+              <button onClick={aplicar} disabled={res.acima_do_piso === false || aplicando} className="flex-1 text-[11px] font-bold px-3 py-2 rounded-xl text-white inline-flex items-center justify-center gap-1.5 disabled:opacity-40" style={{ background: 'linear-gradient(135deg, var(--accent), #a80063)' }}>{aplicando ? <Loader2 size={13} className="animate-spin" /> : <Percent size={13} />} {res.acima_do_piso === false ? 'Abaixo do piso' : 'Aplicar desconto'}</button>
+            </div>
           </div>
         </div>
       )}
+
+      {comparar && res && (
+        <div className="mt-4 pt-3" style={{ borderTop: '1px dashed var(--glass-border)' }}>
+          <div className="flex items-center gap-2 flex-wrap mb-2">
+            <span className="text-[9.5px] text-faint font-extrabold uppercase tracking-wide">Comparar com</span>
+            {[10, 15, 20, 25, 30].map((d) => (
+              <button key={d} onClick={() => { setDescB(d); simularB(d) }} className="text-[11px] font-bold px-2.5 py-1 rounded-full num transition-colors" style={descB === d ? { background: BLUE, color: '#fff' } : { background: 'rgba(255,255,255,.06)', color: 'var(--dim)', border: '1px solid var(--glass-border)' }}>{d}%</button>
+            ))}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <MiniResultado r={res} label={`Desconto A · ${res.desconto_pct}%`} cor="var(--accent)" melhor={vencedor === 'A'} />
+            {resB ? <MiniResultado r={resB} label={`Desconto B · ${resB.desconto_pct}%`} cor={BLUE} melhor={vencedor === 'B'} />
+              : <div className="rounded-xl grid place-items-center text-[11px] text-faint" style={{ border: '1px dashed var(--glass-border)', minHeight: 120 }}>{busyB ? <Loader2 className="animate-spin" size={16} /> : 'Escolha o desconto B'}</div>}
+          </div>
+          {resB && res.lucro != null && resB.lucro != null && (
+            <div className="text-[10.5px] mt-2 flex items-center gap-1.5" style={{ color: (resB.lucro - res.lucro) >= 0 ? 'var(--ok)' : 'var(--danger)' }}>{(resB.lucro - res.lucro) >= 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />} Desconto B rende <b className="num">{brl(Math.abs(resB.lucro - res.lucro))}</b> {(resB.lucro - res.lucro) >= 0 ? 'a mais' : 'a menos'} de lucro por venda que o A.</div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function MiniResultado({ r, label, cor, melhor }) {
+  return (
+    <div className="rounded-xl p-3 relative" style={{ background: 'rgba(0,0,0,.22)', border: `1px solid ${melhor ? 'rgba(47,217,141,.5)' : 'var(--glass-border)'}` }}>
+      {melhor && <span className="absolute -top-2 right-3 text-[8.5px] font-extrabold px-2 py-0.5 rounded-full" style={{ background: 'var(--ok)', color: '#08130d' }}>melhor lucro</span>}
+      <div className="text-[10px] font-extrabold" style={{ color: cor }}>{label}</div>
+      <div className="text-[16px] font-extrabold num mt-1">{brl(r.deal_price)}</div>
+      <div className="flex flex-col gap-0.5 mt-2 text-[11px]">
+        <div className="flex justify-between"><span className="text-dim">Líquido</span><span className="num" style={{ color: 'var(--ok)' }}>{brl(r.liquido)}</span></div>
+        <div className="flex justify-between"><span className="text-dim">Lucro</span><span className="num" style={{ color: PURPLE, fontWeight: 800 }}>{r.lucro == null ? '—' : `${brl(r.lucro)} · ${r.margem_pct ?? '—'}%`}</span></div>
+      </div>
+      <div className="mt-2">
+        {r.acima_do_piso === false
+          ? <span className="text-[9px] font-extrabold px-2 py-0.5 rounded-full" style={{ background: 'rgba(255,122,122,.14)', color: 'var(--danger)' }}>abaixo do piso</span>
+          : r.acima_do_piso ? <span className="text-[9px] font-extrabold px-2 py-0.5 rounded-full" style={{ background: 'rgba(47,217,141,.14)', color: 'var(--ok)' }}>acima do piso</span> : null}
+      </div>
     </div>
   )
 }
@@ -632,7 +811,7 @@ function Automacao() {
         {AGENTES.map((a, i) => {
           const Ic = a.icon
           return (
-            <div key={i} className="rounded-2xl p-3.5 lift" style={{ background: 'linear-gradient(158deg, rgba(255,255,255,.05), rgba(0,0,0,.18))', border: '1px solid var(--glass-border)' }}>
+            <div key={i} className="rounded-2xl p-3.5 lift card-in" style={{ background: 'linear-gradient(158deg, rgba(255,255,255,.05), rgba(0,0,0,.18))', border: '1px solid var(--glass-border)', animationDelay: `${i * 45}ms` }}>
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-lg grid place-items-center flex-none" style={{ background: `${a.cor}22`, color: a.cor }}><Ic size={16} /></div>
                 <div className="flex-1 min-w-0"><div className="text-[12.5px] font-bold">{a.nm}</div><div className="text-[8.5px] font-extrabold uppercase tracking-wide text-faint">{a.tg}</div></div>
@@ -671,6 +850,437 @@ function Ads() {
         <div className="ml-auto flex gap-2"><Act icon={Target}>Otimizar lance por ROAS</Act><Act icon={Ban} danger>Pausar acima do ACOS</Act></div>
       </div>
       <div className="text-[10px] text-faint mt-2 flex items-center gap-1.5"><Info size={12} /> Métricas reais quando a permissão Advertising e o advertiser_id estiverem habilitados. Entra depois do núcleo de campanhas.</div>
+    </div>
+  )
+}
+
+/* ================= drawer de desempenho & insights ================= */
+function DeltaBadge({ v }) {
+  const up = v >= 0
+  return <span className="text-[10px] font-extrabold inline-flex items-center gap-0.5 mt-0.5" style={{ color: up ? 'var(--ok)' : 'var(--danger)' }}>{up ? <TrendingUp size={11} /> : <TrendingDown size={11} />} {up ? '+' : ''}{v}% vs antes</span>
+}
+function Sparkline({ serie }) {
+  if (!serie || !serie.length) return <div className="text-[10px] text-faint mt-2">Sem vendas registradas na janela.</div>
+  const max = Math.max(...serie.map((s) => s.unidades), 1)
+  return (
+    <div className="mt-2.5 flex items-end gap-0.5" style={{ height: 42 }}>
+      {serie.map((s, i) => (
+        <div key={i} title={`${s.dia}: ${s.unidades} un · ${brl(s.receita)}`} style={{ flex: 1, minWidth: 3, height: `${Math.max(6, (s.unidades / max) * 100)}%`, background: 'linear-gradient(180deg, #5B8DEF, #3a6fd0)', borderRadius: '3px 3px 0 0' }} />
+      ))}
+    </div>
+  )
+}
+
+function DesempenhoDrawer({ met, carregando, p, onClose, onSincronizar }) {
+  const m = meta(p.type); const Ic = m.icon
+  const sd = met ? (SAUDE[met.saude] || SAUDE.atencao) : null
+  const bom = met ? Math.max(0, (met.itens || 0) - (met.abaixo_piso || 0)) : 0
+  const ruim = met ? (met.abaixo_piso || 0) : 0
+  const det = (met && met.itens_detalhe) || []
+  return createPortal(
+    <div className="fixed inset-0 z-[80] flex justify-end" style={{ background: 'rgba(0,0,0,.55)' }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="h-full w-full card-in flex flex-col" style={{ maxWidth: 560, background: 'var(--surface)', borderLeft: '1px solid var(--glass-border)', boxShadow: '-20px 0 60px rgba(0,0,0,.5)' }}>
+        {/* header */}
+        <div className="flex items-center gap-2 px-4 py-3 flex-none" style={{ borderBottom: '1px solid var(--glass-border)' }}>
+          <div className="w-8 h-8 rounded-lg grid place-items-center flex-none" style={{ background: `${m.cor}22`, color: m.cor }}><Ic size={16} /></div>
+          <div className="min-w-0">
+            <div className="text-[15px] font-bold truncate" style={{ fontFamily: 'Fraunces, Georgia, serif' }}>{p.name || m.label}</div>
+            <div className="text-[10.5px] text-faint truncate">{p.id} · Desempenho & insights</div>
+          </div>
+          {sd && <span className="text-[10px] font-extrabold px-2 py-1 rounded-full inline-flex items-center gap-1 flex-none" style={{ background: `${sd.c}1f`, color: sd.c }}><sd.Icon size={11} /> {sd.t}</span>}
+          <button onClick={onClose} className="text-faint hover:text-fg flex-none"><X size={18} /></button>
+        </div>
+
+        <div className="overflow-y-auto flex-1 p-4">
+          {carregando && !met ? (
+            <div>{Array.from({ length: 4 }).map((_, i) => <div key={i} className="skel mb-3" style={{ height: i === 0 ? 90 : 60, borderRadius: 14 }} />)}</div>
+          ) : !met ? (
+            <div className="text-[12px] text-faint p-6 text-center">Não foi possível carregar as métricas desta campanha.</div>
+          ) : (
+            <>
+              {/* KPIs reais */}
+              <div className="grid grid-cols-3 gap-2.5">
+                <Mini l="Itens" v={met.itens} s={`${met.itens_ativos} ativos`} />
+                <Mini l="Desconto médio" v={met.desconto_medio_pct != null ? `${met.desconto_medio_pct}%` : '—'} s="ponderado" />
+                <Mini l="Abaixo do piso" v={met.abaixo_piso} s={met.abaixo_piso > 0 ? 'furam a margem' : 'protegido'} danger={met.abaixo_piso > 0} />
+                <Mini l="Líquido real" v={met.liquido_total != null ? brl(met.liquido_total) : '—'} s="soma net_proceeds" hero />
+                <Mini l="Lucro real" v={met.lucro_total != null ? brl(met.lucro_total) : '—'} s="− custo Bling" prof />
+                <Mini l="Margem média" v={met.margem_media_pct != null ? `${met.margem_media_pct}%` : '—'} s={met.sem_custo > 0 ? `${met.sem_custo} sem custo` : 'do lucro real'} />
+              </div>
+
+              {/* saúde da margem */}
+              {(bom + ruim) > 0 && (
+                <div className="mt-4">
+                  <div className="flex items-center justify-between text-[10px] mb-1.5">
+                    <span className="text-faint font-extrabold uppercase tracking-wide">Saúde da margem</span>
+                    <span className="text-dim">{bom} {bom === 1 ? 'saudável' : 'saudáveis'}{ruim > 0 && <span style={{ color: 'var(--danger)' }}> · {ruim} abaixo do piso</span>}</span>
+                  </div>
+                  <div className="flex h-3 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,.06)' }}>
+                    {bom > 0 && <div style={{ width: `${(bom / (bom + ruim)) * 100}%`, background: 'linear-gradient(90deg, var(--ok), #27c07d)' }} />}
+                    {ruim > 0 && <div style={{ width: `${(ruim / (bom + ruim)) * 100}%`, background: 'linear-gradient(90deg, #ff9a9a, var(--danger))' }} />}
+                  </div>
+                </div>
+              )}
+
+              {/* vendas dos itens na janela */}
+              {met.vendas && (
+                <div className="mt-5">
+                  <div className="text-[11px] uppercase tracking-wide text-faint font-extrabold mb-2 flex items-center gap-1.5"><Activity size={12} style={{ color: BLUE }} /> Vendas dos itens (na janela)</div>
+                  {met.vendas.cache_vazio ? (
+                    <div className="rounded-xl p-3 flex items-center gap-2.5" style={{ background: 'rgba(91,141,239,.1)', border: '1px solid rgba(91,141,239,.3)' }}>
+                      <RefreshCw size={15} style={{ color: BLUE, flex: 'none' }} />
+                      <div className="text-[11px] text-dim flex-1">Cache de pedidos vazio — sincronize para liberar a análise de vendas.</div>
+                      <button onClick={() => onSincronizar && onSincronizar()} className="text-[11px] font-bold px-3 py-1.5 rounded-lg text-white flex-none" style={{ background: BLUE }}>Sincronizar</button>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-2 gap-2.5">
+                        <div className="rounded-xl p-3" style={{ background: 'rgba(91,141,239,.08)', border: '1px solid rgba(91,141,239,.25)' }}>
+                          <div className="text-[9px] uppercase text-faint font-extrabold">Unidades vendidas</div>
+                          <div className="text-[17px] font-extrabold num" style={{ color: BLUE }}>{met.vendas.unidades}</div>
+                          {met.vendas.delta_unidades_pct != null && <DeltaBadge v={met.vendas.delta_unidades_pct} />}
+                        </div>
+                        <div className="rounded-xl p-3" style={{ background: 'rgba(91,141,239,.08)', border: '1px solid rgba(91,141,239,.25)' }}>
+                          <div className="text-[9px] uppercase text-faint font-extrabold">Receita</div>
+                          <div className="text-[17px] font-extrabold num" style={{ color: BLUE }}>{brl(met.vendas.receita)}</div>
+                          {met.vendas.delta_receita_pct != null && <DeltaBadge v={met.vendas.delta_receita_pct} />}
+                        </div>
+                      </div>
+                      <Sparkline serie={met.vendas.serie} />
+                      <div className="text-[9.5px] text-faint mt-1">Comparado ao período anterior de mesma duração {met.vendas.baseline_disponivel ? `(${met.vendas.unidades_baseline} un antes)` : '(sem base — amplie a sincronização)'}. Vendas dos itens da campanha na janela — não é atribuição direta à promoção.</div>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* insights */}
+              {met.insights && met.insights.length > 0 && (
+                <div className="mt-5">
+                  <div className="text-[11px] uppercase tracking-wide text-faint font-extrabold mb-2 flex items-center gap-1.5"><Sparkles size={12} style={{ color: 'var(--accent)' }} /> Insights e recomendações</div>
+                  <div className="flex flex-col gap-2">
+                    {met.insights.map((it, i) => { const cfg = INS[it.tipo] || INS.info; return (
+                      <div key={i} className="rounded-xl p-3 flex gap-2.5" style={{ background: `${cfg.c}0f`, border: `1px solid ${cfg.c}2e` }}>
+                        <div className="w-7 h-7 rounded-lg grid place-items-center flex-none" style={{ background: `${cfg.c}22`, color: cfg.c }}><cfg.Icon size={14} /></div>
+                        <div className="min-w-0">
+                          <div className="text-[12px] font-bold" style={{ color: cfg.c }}>{it.titulo}</div>
+                          <div className="text-[11px] text-dim mt-0.5 leading-snug">{it.detalhe}</div>
+                        </div>
+                      </div>
+                    ) })}
+                  </div>
+                </div>
+              )}
+
+              {/* itens */}
+              {det.length > 0 && (
+                <div className="mt-5">
+                  <div className="text-[11px] uppercase tracking-wide text-faint font-extrabold mb-2">Itens da campanha ({det.length})</div>
+                  <div className="flex flex-col gap-1.5">
+                    {det.map((d) => (
+                      <div key={d.item_id} className="flex items-center gap-2.5 rounded-xl px-2.5 py-2" style={{ background: 'rgba(0,0,0,.22)', border: '1px solid ' + (d.abaixo_piso ? 'rgba(255,122,122,.3)' : 'var(--glass-border)') }}>
+                        {d.imagem ? <img src={d.imagem} alt="" className="w-9 h-9 rounded-lg object-cover flex-none" /> : <div className="w-9 h-9 rounded-lg grid place-items-center flex-none" style={{ background: 'rgba(255,255,255,.05)' }}><Boxes size={15} className="text-faint" /></div>}
+                        <div className="min-w-0 flex-1">
+                          <div className="text-[11.5px] font-semibold truncate">{d.titulo || d.item_id}</div>
+                          <div className="text-[9.5px] text-faint num truncate">{d.sku || d.item_id}{d.desconto_pct != null ? ` · −${d.desconto_pct}%` : ''}{d.estoque != null ? ` · ${d.estoque} un` : ''}</div>
+                        </div>
+                        <div className="text-right flex-none">
+                          <div className="text-[11px] font-extrabold num" style={{ color: 'var(--ok)' }}>{d.liquido != null ? brl(d.liquido) : '—'}</div>
+                          <div className="text-[9px] num" style={{ color: d.lucro == null ? 'var(--faint)' : PURPLE }}>{d.lucro == null ? 'sem custo' : `lucro ${brl(d.lucro)}${d.margem_pct != null ? ` · ${d.margem_pct}%` : ''}`}</div>
+                        </div>
+                        <div className="flex-none w-[64px] text-right">
+                          {d.abaixo_piso ? <span className="text-[8.5px] font-extrabold" style={{ color: 'var(--danger)' }}>fura piso</span>
+                            : d.oportunidade ? <span className="text-[8.5px] font-extrabold" style={{ color: 'var(--warn)' }}>+ desconto</span>
+                              : <span className="text-[8.5px] font-extrabold" style={{ color: 'var(--ok)' }}>ok</span>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>, document.body)
+}
+
+/* ================= seletor de itens (campanha / convite) ================= */
+function SeletorItens({ modo, promotionId, promotionType, promoNome, onClose, onOk, notify }) {
+  const [q, setQ] = useState('')
+  const [itens, setItens] = useState(null)
+  const [carregando, setCarregando] = useState(true)
+  const [erro, setErro] = useState('')
+  const [pct, setPct] = useState(15)
+  const [sel, setSel] = useState(() => new Set())
+  const [aplicando, setAplicando] = useState(false)
+  const [prog, setProg] = useState(null)
+
+  const carregar = useCallback(async (busca = '') => {
+    setCarregando(true); setErro('')
+    try {
+      if (modo === 'convite') {
+        const r = await api.mlPromoPromocaoItens(promotionId, promotionType)
+        setItens(r.itens || [])
+      } else {
+        const r = await api.mlPromoItens({ q: busca, apenas_ativos: true, limit: 50 })
+        setItens(r.itens || [])
+      }
+    } catch (e) { setErro(e.message || 'Falha ao carregar itens'); setItens([]) }
+    finally { setCarregando(false) }
+  }, [modo, promotionId, promotionType])
+
+  useEffect(() => { carregar('') }, [carregar])
+
+  const dealDe = (it) => {
+    const base = (modo === 'convite' ? (it.original_price || it.preco) : it.preco) || 0
+    let dp = base * (1 - pct / 100)
+    if (modo === 'convite') {
+      if (it.max_discounted_price != null) dp = Math.max(dp, it.max_discounted_price)
+      if (it.min_discounted_price != null) dp = Math.min(dp, it.min_discounted_price)
+    }
+    return Math.round(dp * 100) / 100
+  }
+  const furaPiso = (it) => it.piso_preco != null && dealDe(it) < it.piso_preco - 0.005
+  const podeSel = (it) => !furaPiso(it)
+  const toggle = (it) => { if (!podeSel(it)) return; setSel((s) => { const n = new Set(s); n.has(it.item_id) ? n.delete(it.item_id) : n.add(it.item_id); return n }) }
+  const lista = itens || []
+  const elegiveis = lista.filter(podeSel)
+  const ignorados = lista.filter(furaPiso).length
+  const nSel = lista.filter((i) => sel.has(i.item_id) && podeSel(i)).length
+
+  const aplicar = async () => {
+    const alvos = lista.filter((i) => sel.has(i.item_id) && !furaPiso(i))
+    if (!alvos.length) { notify('Selecione ao menos um item acima do piso.', 'warn'); return }
+    setAplicando(true); setProg({ feito: 0, total: alvos.length, falhas: [] })
+    const falhas = []
+    for (let k = 0; k < alvos.length; k++) {
+      const it = alvos[k]
+      try {
+        const body = { promotion_id: promotionId, promotion_type: promotionType, deal_price: dealDe(it) }
+        if (promotionType === 'LIGHTNING' && it.stock_min != null) body.stock = it.stock_min
+        await api.mlPromoAderir(it.item_id, body)
+      } catch (e) { falhas.push({ id: it.item_id, msg: (e.message || 'erro').slice(0, 90) }) }
+      setProg({ feito: k + 1, total: alvos.length, falhas: [...falhas] })
+    }
+    setAplicando(false)
+    if (falhas.length === 0) { notify(`${alvos.length} ${alvos.length === 1 ? 'item adicionado' : 'itens adicionados'}.`, 'ok'); onOk() }
+    else notify(`${alvos.length - falhas.length} ok · ${falhas.length} com erro.`, falhas.length === alvos.length ? 'danger' : 'warn')
+  }
+
+  return createPortal(
+    <div className="fixed inset-0 z-[80] grid place-items-center p-4" style={{ background: 'rgba(0,0,0,.62)' }} onClick={aplicando ? undefined : onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="rounded-2xl w-full card-in flex flex-col" style={{ maxWidth: 720, maxHeight: '86vh', background: 'var(--surface)', border: '1px solid var(--glass-border)', boxShadow: 'var(--shadow)' }}>
+        {/* header */}
+        <div className="flex items-center gap-2 px-4 py-3 flex-none" style={{ borderBottom: '1px solid var(--glass-border)' }}>
+          <div className="w-7 h-7 rounded-lg grid place-items-center flex-none" style={{ background: 'rgba(214,0,127,.16)', color: 'var(--accent)' }}><Layers size={15} /></div>
+          <div className="min-w-0">
+            <div className="text-[14px] font-bold truncate" style={{ fontFamily: 'Fraunces, Georgia, serif' }}>{modo === 'convite' ? 'Aderir com itens' : 'Adicionar itens'}</div>
+            <div className="text-[10.5px] text-faint truncate">{promoNome || promotionId}</div>
+          </div>
+          <button onClick={onClose} disabled={aplicando} className="ml-auto text-faint hover:text-fg disabled:opacity-40"><X size={18} /></button>
+        </div>
+
+        {/* controles */}
+        <div className="px-4 pt-3 pb-2 flex-none">
+          {modo !== 'convite' && (
+            <div className="relative mb-2">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
+              <input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && carregar(q)} placeholder="Buscar por título, SKU ou ID…" className="w-full text-[12px] pl-9 pr-3 py-2 rounded-xl bg-transparent text-fg placeholder:text-faint" style={{ border: '1px solid var(--glass-border)' }} />
+            </div>
+          )}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[9.5px] text-faint font-extrabold uppercase tracking-wide">Desconto</span>
+            {[10, 15, 20, 25, 30].map((d) => (
+              <button key={d} onClick={() => setPct(d)} className="text-[11px] font-bold px-2.5 py-1 rounded-full num transition-colors" style={pct === d ? { background: 'var(--accent)', color: '#fff' } : { background: 'rgba(255,255,255,.06)', color: 'var(--dim)', border: '1px solid var(--glass-border)' }}>{d}%</button>
+            ))}
+            <input type="range" min={5} max={40} step={1} value={pct} onChange={(e) => setPct(Number(e.target.value))} className="flex-1 min-w-[120px]" style={{ accentColor: '#d6007f' }} />
+            <span className="text-[11px] font-extrabold num" style={{ color: 'var(--accent)' }}>{pct}%</span>
+          </div>
+          {modo === 'convite' && <div className="text-[10px] text-faint mt-1.5 flex items-start gap-1.5"><Info size={12} className="flex-none mt-0.5" /> Preço de cada item é ajustado para caber na banda do convite (mín–máx do ML) e nunca abaixo do piso.</div>}
+        </div>
+
+        {/* lista */}
+        <div className="px-3 overflow-y-auto flex-1" style={{ minHeight: 160 }}>
+          {carregando ? (
+            <div className="p-4">{Array.from({ length: 5 }).map((_, i) => <div key={i} className="skel mb-2" style={{ height: 52, borderRadius: 12 }} />)}</div>
+          ) : erro ? (
+            <div className="text-[12px] text-danger p-4 flex items-center gap-2"><Ban size={14} /> {erro}</div>
+          ) : !lista.length ? (
+            <div className="text-[12px] text-faint p-6 text-center">{modo === 'convite' ? 'Nenhum item elegível neste convite.' : 'Nenhum anúncio ativo encontrado.'}</div>
+          ) : lista.map((it) => {
+            const dp = dealDe(it); const fura = furaPiso(it); const sb = it.piso_preco == null
+            const folga = it.piso_preco != null ? dp - it.piso_preco : null
+            const on = sel.has(it.item_id)
+            return (
+              <div key={it.item_id} onClick={() => toggle(it)} className="flex items-center gap-3 px-3 py-2 rounded-xl mb-1 cursor-pointer" style={{ background: on ? 'rgba(214,0,127,.08)' : 'transparent', border: '1px solid ' + (on ? 'rgba(214,0,127,.3)' : 'transparent'), opacity: fura ? 0.55 : 1 }}>
+                <div className="w-5 h-5 rounded-md grid place-items-center flex-none" style={{ border: '1.5px solid ' + (on ? 'var(--accent)' : 'var(--glass-border)'), background: on ? 'var(--accent)' : 'transparent' }}>{on && <Check size={13} color="#fff" />}</div>
+                {it.imagem ? <img src={it.imagem} alt="" className="w-10 h-10 rounded-lg object-cover flex-none" style={{ border: '1px solid var(--glass-border)' }} /> : <div className="w-10 h-10 rounded-lg grid place-items-center flex-none" style={{ background: 'rgba(255,255,255,.05)' }}><Boxes size={16} className="text-faint" /></div>}
+                <div className="min-w-0 flex-1">
+                  <div className="text-[12px] font-semibold truncate">{it.titulo || it.item_id}</div>
+                  <div className="text-[10px] text-faint num truncate">{it.sku || it.item_id}{it.estoque != null ? ` · ${it.estoque} un` : ''}{it.em_promocao ? ' · já em promoção' : ''}</div>
+                </div>
+                <div className="text-right flex-none">
+                  <div className="text-[10px] text-faint num">de {brl(it.preco || it.original_price)}</div>
+                  <div className="text-[12.5px] font-extrabold num" style={{ color: fura ? 'var(--danger)' : 'var(--ok)' }}>{brl(dp)}</div>
+                </div>
+                <div className="flex-none text-right" style={{ width: 128 }}>
+                  {sb ? <span className="text-[9px] text-faint">sem Preço Bling</span>
+                    : fura ? <span className="text-[9px] font-extrabold" style={{ color: 'var(--danger)' }}>fura o piso {brl(it.piso_preco)}</span>
+                      : <span className="text-[9px] font-extrabold" style={{ color: 'var(--ok)' }}>folga {brl(folga)}</span>}
+                  {modo === 'convite' && it.min_discounted_price != null && <div className="text-[8.5px] text-faint num">banda {brl(it.max_discounted_price)}–{brl(it.min_discounted_price)}</div>}
+                  {modo === 'convite' && it.suggested_discounted_price != null && <div className="text-[8.5px] num" style={{ color: '#F2C200' }}>sugerido {brl(it.suggested_discounted_price)}</div>}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        {/* rodapé */}
+        <div className="px-4 py-3 flex-none" style={{ borderTop: '1px solid var(--glass-border)' }}>
+          {prog && (
+            <div className="mb-2">
+              <div className="flex items-center justify-between text-[10px] mb-1"><span className="text-dim">{aplicando ? 'Aplicando…' : 'Concluído'} {prog.feito}/{prog.total}</span>{prog.falhas.length > 0 && <span style={{ color: 'var(--danger)' }}>{prog.falhas.length} com erro</span>}</div>
+              <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,.08)' }}><div style={{ width: `${(prog.feito / prog.total) * 100}%`, height: '100%', background: 'linear-gradient(90deg, var(--accent), #ff2b9d)', transition: 'width .2s' }} /></div>
+              {prog.falhas.length > 0 && !aplicando && <div className="mt-1.5 max-h-16 overflow-y-auto">{prog.falhas.map((f, i) => <div key={i} className="text-[9px] text-faint num truncate">{f.id}: {f.msg}</div>)}</div>}
+            </div>
+          )}
+          <div className="flex items-center gap-2 flex-wrap">
+            <button onClick={() => setSel(new Set(elegiveis.map((i) => i.item_id)))} disabled={aplicando || !elegiveis.length} className="text-[10.5px] px-2.5 py-1 rounded-lg glass text-dim hover:text-fg disabled:opacity-40">Selecionar todos ({elegiveis.length})</button>
+            {sel.size > 0 && <button onClick={() => setSel(new Set())} disabled={aplicando} className="text-[10.5px] px-2.5 py-1 rounded-lg glass text-dim hover:text-fg">Limpar</button>}
+            <div className="text-[10.5px] text-dim ml-1"><b className="num" style={{ color: 'var(--fg)' }}>{nSel}</b> selecionado{nSel === 1 ? '' : 's'}{ignorados > 0 && <span className="text-faint"> · {ignorados} abaixo do piso ignorado{ignorados === 1 ? '' : 's'}</span>}</div>
+            <button onClick={aplicar} disabled={aplicando || nSel === 0} className="ml-auto text-[12px] font-bold px-4 py-2 rounded-xl text-white inline-flex items-center gap-1.5 disabled:opacity-40" style={{ background: 'linear-gradient(135deg, var(--accent), #a80063)' }}>{aplicando ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} {modo === 'convite' ? 'Aderir' : 'Adicionar'} {nSel > 0 ? `(${nSel})` : ''}</button>
+          </div>
+        </div>
+      </div>
+    </div>, document.body)
+}
+
+/* ================= modais de criação (portal, fundo sólido) ================= */
+const inputCls = 'w-full text-[12.5px] px-3 py-2 rounded-xl bg-transparent text-fg placeholder:text-faint'
+const inputSty = { border: '1px solid var(--glass-border)' }
+
+function Modal({ title, icon: Ic, onClose, children }) {
+  return createPortal(
+    <div className="fixed inset-0 z-[80] grid place-items-center p-4" style={{ background: 'rgba(0,0,0,.62)' }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="rounded-2xl w-full card-in" style={{ maxWidth: 470, background: 'var(--surface)', border: '1px solid var(--glass-border)', boxShadow: 'var(--shadow)' }}>
+        <div className="flex items-center gap-2 px-4 py-3" style={{ borderBottom: '1px solid var(--glass-border)' }}>
+          {Ic && <div className="w-7 h-7 rounded-lg grid place-items-center flex-none" style={{ background: 'rgba(214,0,127,.16)', color: 'var(--accent)' }}><Ic size={15} /></div>}
+          <span className="text-[14px] font-bold" style={{ fontFamily: 'Fraunces, Georgia, serif' }}>{title}</span>
+          <button onClick={onClose} className="ml-auto text-faint hover:text-fg"><X size={18} /></button>
+        </div>
+        <div className="p-4">{children}</div>
+      </div>
+    </div>, document.body)
+}
+
+function Campo({ label, children }) {
+  return (
+    <label className="block mb-3">
+      <div className="text-[10px] uppercase tracking-wide text-faint font-extrabold mb-1">{label}</div>
+      {children}
+    </label>
+  )
+}
+
+function NovaCampanhaModal({ onClose, onOk, notify }) {
+  const [nome, setNome] = useState('')
+  const [comeca, setComeca] = useState(0)
+  const [dura, setDura] = useState(7)
+  const [busy, setBusy] = useState(false)
+  const criar = async () => {
+    if (!nome.trim()) { notify('Dê um nome para a campanha.', 'warn'); return }
+    setBusy(true)
+    try {
+      await api.mlPromoCriarCampanha({ nome: nome.trim(), inicio: isoDe(comeca, '00:00:00'), fim: isoDe(comeca + dura, '23:59:59') })
+      notify('Campanha criada. Agora adicione itens a ela.', 'ok'); onOk()
+    } catch (e) { notify(e.message || 'Falha ao criar campanha', 'danger') }
+    finally { setBusy(false) }
+  }
+  return (
+    <Modal title="Nova campanha de %" icon={Tag} onClose={onClose}>
+      <Campo label="Nome da campanha"><input value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Ex.: Semana do Armarinho" className={inputCls} style={inputSty} /></Campo>
+      <div className="grid grid-cols-2 gap-3">
+        <Campo label="Começa"><select value={comeca} onChange={(e) => setComeca(Number(e.target.value))} className={inputCls} style={inputSty}><option value={0}>Hoje</option><option value={1}>Amanhã</option></select></Campo>
+        <Campo label="Duração"><select value={dura} onChange={(e) => setDura(Number(e.target.value))} className={inputCls} style={inputSty}><option value={3}>3 dias</option><option value={7}>7 dias</option><option value={14}>14 dias</option></select></Campo>
+      </div>
+      <div className="text-[10.5px] text-faint flex items-start gap-1.5 mb-3"><Info size={13} className="flex-none mt-0.5" /> Campanha de desconto percentual (flexível), no máximo 14 dias. Depois de criada, adicione os itens e aplique descontos pelo simulador — sempre acima do Preço Bling.</div>
+      <div className="flex gap-2 justify-end">
+        <button onClick={onClose} className="text-[12px] px-3 py-2 rounded-xl glass text-dim hover:text-fg">Cancelar</button>
+        <button onClick={criar} disabled={busy} className="text-[12px] font-semibold px-4 py-2 rounded-xl text-white inline-flex items-center gap-1.5 disabled:opacity-50" style={{ background: 'linear-gradient(135deg, var(--accent), #a80063)' }}>{busy ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Criar campanha</button>
+      </div>
+    </Modal>
+  )
+}
+
+function NovoCupomModal({ onClose, onOk, notify }) {
+  const [nome, setNome] = useState('')
+  const [tipo, setTipo] = useState('FIXED_AMOUNT')
+  const [valor, setValor] = useState('')
+  const [minCompra, setMinCompra] = useState('')
+  const [codigo, setCodigo] = useState('')
+  const [orcamento, setOrcamento] = useState('')
+  const [comeca, setComeca] = useState(0)
+  const [dura, setDura] = useState(14)
+  const [busy, setBusy] = useState(false)
+  const criar = async () => {
+    if (!nome.trim()) { notify('Dê um nome para o cupom.', 'warn'); return }
+    if (!valor || Number(valor) <= 0) { notify('Informe o valor do cupom.', 'warn'); return }
+    if (!minCompra || Number(minCompra) <= 0) { notify('Informe a compra mínima.', 'warn'); return }
+    setBusy(true)
+    try {
+      await api.mlPromoCriarCupom({
+        nome: nome.trim(), inicio: isoDe(comeca, '00:00:00'), fim: isoDe(comeca + dura, '23:59:59'),
+        subtipo: tipo, valor: Number(valor), min_compra: Number(minCompra),
+        codigo: codigo.trim() || undefined, orcamento: orcamento ? Number(orcamento) : undefined,
+      })
+      notify('Cupom criado.', 'ok'); onOk()
+    } catch (e) { notify(e.message || 'Falha ao criar cupom', 'danger') }
+    finally { setBusy(false) }
+  }
+  return (
+    <Modal title="Novo cupom" icon={Ticket} onClose={onClose}>
+      <Campo label="Nome do cupom"><input value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Ex.: Frete pra seguidores" className={inputCls} style={inputSty} /></Campo>
+      <div className="grid grid-cols-2 gap-3">
+        <Campo label="Tipo"><select value={tipo} onChange={(e) => setTipo(e.target.value)} className={inputCls} style={inputSty}><option value="FIXED_AMOUNT">Valor fixo (R$)</option><option value="FIXED_PERCENTAGE">Percentual (%)</option></select></Campo>
+        <Campo label={tipo === 'FIXED_AMOUNT' ? 'Desconto (R$)' : 'Desconto (%)'}><input value={valor} onChange={(e) => setValor(e.target.value)} type="number" placeholder={tipo === 'FIXED_AMOUNT' ? '20' : '10'} className={inputCls} style={inputSty} /></Campo>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <Campo label="Compra mínima (R$)"><input value={minCompra} onChange={(e) => setMinCompra(e.target.value)} type="number" placeholder="100" className={inputCls} style={inputSty} /></Campo>
+        <Campo label="Orçamento (R$, opcional)"><input value={orcamento} onChange={(e) => setOrcamento(e.target.value)} type="number" placeholder="ilimitado" className={inputCls} style={inputSty} /></Campo>
+      </div>
+      <Campo label="Código (opcional — vazio = cupom público)"><input value={codigo} onChange={(e) => setCodigo(e.target.value)} placeholder="Ex.: SEGUIDOR10" className={inputCls} style={inputSty} /></Campo>
+      <div className="grid grid-cols-2 gap-3">
+        <Campo label="Começa"><select value={comeca} onChange={(e) => setComeca(Number(e.target.value))} className={inputCls} style={inputSty}><option value={0}>Hoje</option><option value={1}>Amanhã</option></select></Campo>
+        <Campo label="Duração"><select value={dura} onChange={(e) => setDura(Number(e.target.value))} className={inputCls} style={inputSty}><option value={7}>7 dias</option><option value={14}>14 dias</option><option value={30}>30 dias</option></select></Campo>
+      </div>
+      <div className="text-[10.5px] text-faint flex items-start gap-1.5 mb-3"><Info size={13} className="flex-none mt-0.5" /> O cupom é cumulativo com a promoção ativa e 100% custeado por você. Com código, distribua por fora (seguidores); sem código, o ML destaca para todos.</div>
+      <div className="flex gap-2 justify-end">
+        <button onClick={onClose} className="text-[12px] px-3 py-2 rounded-xl glass text-dim hover:text-fg">Cancelar</button>
+        <button onClick={criar} disabled={busy} className="text-[12px] font-semibold px-4 py-2 rounded-xl text-white inline-flex items-center gap-1.5 disabled:opacity-50" style={{ background: 'linear-gradient(135deg, var(--accent), #a80063)' }}>{busy ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Criar cupom</button>
+      </div>
+    </Modal>
+  )
+}
+
+/* ================= skeleton de carregamento ================= */
+function SkeletonPromocoes() {
+  return (
+    <div className="mt-4">
+      <div className="grid grid-cols-6 gap-3">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="rounded-2xl p-3" style={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)' }}>
+            <div className="skel" style={{ height: 12, width: '70%' }} />
+            <div className="skel mt-3" style={{ height: 20, width: '55%' }} />
+            <div className="skel mt-2" style={{ height: 9, width: '80%' }} />
+          </div>
+        ))}
+      </div>
+      <div className="skel mt-3" style={{ height: 62, borderRadius: 16 }} />
+      <div className="skel mt-3" style={{ height: 150, borderRadius: 18 }} />
+      <div className="grid grid-cols-3 gap-3 mt-6">
+        {Array.from({ length: 3 }).map((_, i) => <div key={i} className="skel" style={{ height: 120, borderRadius: 16 }} />)}
+      </div>
+      <div className="skel mt-3" style={{ height: 130, borderRadius: 16 }} />
     </div>
   )
 }
