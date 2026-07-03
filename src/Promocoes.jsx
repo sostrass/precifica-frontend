@@ -1014,20 +1014,35 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, onClose, on
   const [sel, setSel] = useState(() => new Set())
   const [aplicando, setAplicando] = useState(false)
   const [prog, setProg] = useState(null)
+  const [temMais, setTemMais] = useState(false)
+  const [carregandoMais, setCarregandoMais] = useState(false)
+  const [meta, setMeta] = useState(null)
 
   const carregar = useCallback(async (busca = '') => {
-    setCarregando(true); setErro('')
+    setCarregando(true); setErro(''); setSel(new Set())
     try {
       if (modo === 'convite') {
         const r = await api.mlPromoPromocaoItens(promotionId, promotionType)
-        setItens(r.itens || [])
+        setItens(r.itens || []); setTemMais(false)
+        setMeta({ total: r.total ?? (r.itens || []).length, truncado: !!r.truncado, semBling: r.sem_preco_bling ?? 0 })
       } else {
-        const r = await api.mlPromoItens({ q: busca, apenas_ativos: true, limit: 50 })
-        setItens(r.itens || [])
+        const r = await api.mlPromoItens({ q: busca, apenas_ativos: true, limit: 50, offset: 0 })
+        setItens(r.itens || []); setTemMais((r.itens || []).length >= 50); setMeta(null)
       }
     } catch (e) { setErro(e.message || 'Falha ao carregar itens'); setItens([]) }
     finally { setCarregando(false) }
   }, [modo, promotionId, promotionType])
+
+  const carregarMais = async () => {
+    setCarregandoMais(true)
+    try {
+      const off = (itens || []).length
+      const r = await api.mlPromoItens({ q, apenas_ativos: true, limit: 50, offset: off })
+      setItens((prev) => [...(prev || []), ...(r.itens || [])])
+      setTemMais((r.itens || []).length >= 50)
+    } catch (e) { notify(e.message || 'Falha ao carregar mais', 'danger') }
+    finally { setCarregandoMais(false) }
+  }
 
   useEffect(() => { carregar('') }, [carregar])
 
@@ -1044,6 +1059,12 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, onClose, on
   const podeSel = (it) => !furaPiso(it)
   const toggle = (it) => { if (!podeSel(it)) return; setSel((s) => { const n = new Set(s); n.has(it.item_id) ? n.delete(it.item_id) : n.add(it.item_id); return n }) }
   const lista = itens || []
+  const ql = q.trim().toLowerCase()
+  const listaExibida = (modo === 'convite' && ql)
+    ? lista.filter((it) => (`${it.titulo || ''} ${it.item_id || ''} ${it.sku || ''}`).toLowerCase().includes(ql))
+    : lista
+  const semBling = lista.filter((i) => i.piso_preco == null).length
+  const elegiveisVis = listaExibida.filter(podeSel)
   const elegiveis = lista.filter(podeSel)
   const ignorados = lista.filter(furaPiso).length
   const nSel = lista.filter((i) => sel.has(i.item_id) && podeSel(i)).length
@@ -1057,9 +1078,14 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, onClose, on
       const it = alvos[k]
       try {
         const body = { promotion_id: promotionId, promotion_type: promotionType, deal_price: dealDe(it) }
-        if (promotionType === 'LIGHTNING' && it.stock_min != null) body.stock = it.stock_min
+        if (promotionType === 'LIGHTNING') {
+          let st = it.estoque != null ? it.estoque : (it.stock_min != null ? it.stock_min : 1)
+          if (it.stock_min != null) st = Math.max(st, it.stock_min)
+          if (it.stock_max != null) st = Math.min(st, it.stock_max)
+          body.stock = Math.max(1, Math.round(st))
+        }
         await api.mlPromoAderir(it.item_id, body)
-      } catch (e) { falhas.push({ id: it.item_id, msg: (e.message || 'erro').slice(0, 90) }) }
+      } catch (e) { falhas.push({ id: it.item_id, msg: (e.message || 'erro').replace(/^Mercado Livre:\s*/, '').slice(0, 220) }) }
       setProg({ feito: k + 1, total: alvos.length, falhas: [...falhas] })
     }
     setAplicando(false)
@@ -1075,19 +1101,17 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, onClose, on
           <div className="w-7 h-7 rounded-lg grid place-items-center flex-none" style={{ background: 'rgba(214,0,127,.16)', color: 'var(--accent)' }}><Layers size={15} /></div>
           <div className="min-w-0">
             <div className="text-[14px] font-bold truncate" style={{ fontFamily: 'Fraunces, Georgia, serif' }}>{modo === 'convite' ? 'Aderir com itens' : 'Adicionar itens'}</div>
-            <div className="text-[10.5px] text-faint truncate">{promoNome || promotionId}</div>
+            <div className="text-[10.5px] text-faint truncate">{promoNome || promotionId}{modo === 'convite' && meta ? ` · ${meta.total} ${meta.total === 1 ? 'candidato' : 'candidatos'}${meta.truncado ? '+' : ''}` : ''}</div>
           </div>
           <button onClick={onClose} disabled={aplicando} className="ml-auto text-faint hover:text-fg disabled:opacity-40"><X size={18} /></button>
         </div>
 
         {/* controles */}
         <div className="px-4 pt-3 pb-2 flex-none">
-          {modo !== 'convite' && (
-            <div className="relative mb-2">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
-              <input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && carregar(q)} placeholder="Buscar por título, SKU ou ID…" className="w-full text-[12px] pl-9 pr-3 py-2 rounded-xl bg-transparent text-fg placeholder:text-faint" style={{ border: '1px solid var(--glass-border)' }} />
-            </div>
-          )}
+          <div className="relative mb-2">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
+            <input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && modo !== 'convite' && carregar(q)} placeholder={modo === 'convite' ? 'Filtrar itens do convite…' : 'Buscar por título, SKU ou ID… (Enter)'} className="w-full text-[12px] pl-9 pr-3 py-2 rounded-xl bg-transparent text-fg placeholder:text-faint" style={{ border: '1px solid var(--glass-border)' }} />
+          </div>
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-[9.5px] text-faint font-extrabold uppercase tracking-wide">Desconto</span>
             {[10, 15, 20, 25, 30].map((d) => (
@@ -1097,6 +1121,7 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, onClose, on
             <span className="text-[11px] font-extrabold num" style={{ color: 'var(--accent)' }}>{pct}%</span>
           </div>
           {modo === 'convite' && <div className="text-[10px] text-faint mt-1.5 flex items-start gap-1.5"><Info size={12} className="flex-none mt-0.5" /> Preço de cada item é ajustado para caber na banda do convite (mín–máx do ML) e nunca abaixo do piso.</div>}
+          {semBling > 0 && <div className="text-[10px] mt-1.5 flex items-start gap-1.5" style={{ color: 'var(--warn)' }}><AlertTriangle size={12} className="flex-none mt-0.5" /> {semBling} {semBling === 1 ? 'item sem' : 'itens sem'} Preço Bling — sem trava de margem. Cadastre o custo/Preço Bling no Bling para proteger a margem.</div>}
         </div>
 
         {/* lista */}
@@ -1107,7 +1132,9 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, onClose, on
             <div className="text-[12px] text-danger p-4 flex items-center gap-2"><Ban size={14} /> {erro}</div>
           ) : !lista.length ? (
             <div className="text-[12px] text-faint p-6 text-center">{modo === 'convite' ? 'Nenhum item elegível neste convite.' : 'Nenhum anúncio ativo encontrado.'}</div>
-          ) : lista.map((it) => {
+          ) : !listaExibida.length ? (
+            <div className="text-[12px] text-faint p-6 text-center">Nenhum resultado para “{q}”.</div>
+          ) : (<>{listaExibida.map((it) => {
             const dp = dealDe(it); const fura = furaPiso(it); const sb = it.piso_preco == null
             const folga = it.piso_preco != null ? dp - it.piso_preco : null
             const on = sel.has(it.item_id)
@@ -1127,12 +1154,13 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, onClose, on
                   {sb ? <span className="text-[9px] text-faint">sem Preço Bling</span>
                     : fura ? <span className="text-[9px] font-extrabold" style={{ color: 'var(--danger)' }}>fura o piso {brl(it.piso_preco)}</span>
                       : <span className="text-[9px] font-extrabold" style={{ color: 'var(--ok)' }}>folga {brl(folga)}</span>}
-                  {modo === 'convite' && it.min_discounted_price != null && <div className="text-[8.5px] text-faint num">banda {brl(it.max_discounted_price)}–{brl(it.min_discounted_price)}</div>}
+                  {modo === 'convite' && it.max_discounted_price != null && it.min_discounted_price != null && <div className="text-[8.5px] text-faint num">faixa {brl(it.max_discounted_price)}–{brl(it.min_discounted_price)}</div>}
                   {modo === 'convite' && it.suggested_discounted_price != null && <div className="text-[8.5px] num" style={{ color: '#F2C200' }}>sugerido {brl(it.suggested_discounted_price)}</div>}
                 </div>
               </div>
             )
-          })}
+          })}</>)}
+          {temMais && modo !== 'convite' && listaExibida.length > 0 && <button onClick={carregarMais} disabled={carregandoMais} className="w-full text-[11px] text-dim py-2 mt-1 rounded-lg glass hover:text-fg disabled:opacity-50">{carregandoMais ? 'Carregando…' : 'Carregar mais 50'}</button>}
         </div>
 
         {/* rodapé */}
@@ -1145,7 +1173,8 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, onClose, on
             </div>
           )}
           <div className="flex items-center gap-2 flex-wrap">
-            <button onClick={() => setSel(new Set(elegiveis.map((i) => i.item_id)))} disabled={aplicando || !elegiveis.length} className="text-[10.5px] px-2.5 py-1 rounded-lg glass text-dim hover:text-fg disabled:opacity-40">Selecionar todos ({elegiveis.length})</button>
+            <button onClick={() => setSel((prev) => new Set([...prev, ...elegiveisVis.map((i) => i.item_id)]))} disabled={aplicando || !elegiveisVis.length} className="text-[10.5px] px-2.5 py-1 rounded-lg glass text-dim hover:text-fg disabled:opacity-40">Selecionar todos ({elegiveisVis.length})</button>
+            {(() => { const cm = listaExibida.filter((i) => i.preco_bling != null && !furaPiso(i)); return cm.length > 0 && cm.length !== elegiveisVis.length ? <button onClick={() => setSel((prev) => new Set([...prev, ...cm.map((i) => i.item_id)]))} disabled={aplicando} className="text-[10.5px] px-2.5 py-1 rounded-lg hover:opacity-90" style={{ background: 'rgba(47,217,141,.12)', border: '1px solid rgba(47,217,141,.3)', color: 'var(--ok)' }}>Só com margem ({cm.length})</button> : null })()}
             {sel.size > 0 && <button onClick={() => setSel(new Set())} disabled={aplicando} className="text-[10.5px] px-2.5 py-1 rounded-lg glass text-dim hover:text-fg">Limpar</button>}
             <div className="text-[10.5px] text-dim ml-1"><b className="num" style={{ color: 'var(--fg)' }}>{nSel}</b> selecionado{nSel === 1 ? '' : 's'}{ignorados > 0 && <span className="text-faint"> · {ignorados} abaixo do piso ignorado{ignorados === 1 ? '' : 's'}</span>}</div>
             <button onClick={aplicar} disabled={aplicando || nSel === 0} className="ml-auto text-[12px] font-bold px-4 py-2 rounded-xl text-white inline-flex items-center gap-1.5 disabled:opacity-40" style={{ background: 'linear-gradient(135deg, var(--accent), #a80063)' }}>{aplicando ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} {modo === 'convite' ? 'Aderir' : 'Adicionar'} {nSel > 0 ? `(${nSel})` : ''}</button>
