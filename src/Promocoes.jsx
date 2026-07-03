@@ -316,6 +316,12 @@ function ConviteCard({ p, onAderir, idx = 0 }) {
   const cofin = ben.type === 'REBATE' ? `ML ${ben.meli_percent ?? '—'}% + você ${ben.seller_percent ?? '—'}%` : null
   const ddl = dcurta(p.deadline_date); const dd = diasAte(p.deadline_date)
   const vi = dcurta(p.start_date), vf = dcurta(p.finish_date)
+  const [cont, setCont] = useState(null)
+  useEffect(() => {
+    let vivo = true
+    api.mlPromoContagem(p.id, p.type).then((r) => { if (vivo) setCont(r) }).catch(() => {})
+    return () => { vivo = false }
+  }, [p.id, p.type])
   return (
     <div className="rounded-2xl p-3.5 relative overflow-hidden lift card-in" style={{ background: `linear-gradient(160deg, ${m.cor}14, rgba(0,0,0,.14))`, border: `1px solid ${m.cor}33`, animationDelay: `${idx * 45}ms` }}>
       <div className="absolute top-0 left-0 right-0 h-[3px]" style={{ background: `linear-gradient(90deg, ${m.cor}, transparent)` }} />
@@ -327,6 +333,10 @@ function ConviteCard({ p, onAderir, idx = 0 }) {
       <div className="text-[10px] text-dim mt-1 min-h-[26px]">{m.desc}</div>
       {cofin && <div className="inline-flex items-center gap-1.5 text-[9.5px] font-extrabold px-2 py-0.5 rounded-full mt-1" style={{ background: 'rgba(91,141,239,.16)', color: BLUE }}><Gift size={11} /> {cofin}</div>}
       {(vi || vf) && <div className="text-[9px] text-faint mt-1.5 flex items-center gap-1"><Calendar size={10} /> vale {vi || '—'} → {vf || '—'}</div>}
+      <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+        {cont ? <span className="text-[9px] font-extrabold px-2 py-0.5 rounded-full" style={{ background: 'rgba(214,0,127,.12)', color: 'var(--accent)' }}>{cont.total} elegíveis</span> : <span className="skel" style={{ height: 15, width: 62, borderRadius: 999 }} />}
+        {cont && cont.participando > 0 && <span className="text-[9px] font-extrabold px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'rgba(47,217,141,.14)', color: 'var(--ok)' }}><Check size={9} /> {cont.participando} participando</span>}
+      </div>
       <div className="flex items-center gap-2 mt-3">
         {ddl && <span className="text-[9.5px] font-extrabold px-2 py-1 rounded-lg inline-flex items-center gap-1.5" style={{ background: 'rgba(224,162,60,.14)', color: 'var(--warn)' }}><Clock size={11} /> {dd != null && dd >= 0 ? `${dd}d` : ddl}</span>}
         <button onClick={() => onAderir(p)} className="ml-auto text-[10.5px] font-bold px-3 py-1.5 rounded-lg inline-flex items-center gap-1" style={{ background: 'linear-gradient(135deg, #F2C200, #d9a400)', color: '#3a2c00' }}>Aderir <ChevronRight size={12} /></button>
@@ -395,6 +405,7 @@ function CampanhaCard({ p, onAcao, onEncerrar, onAddItens, onSincronizar, notify
             {p.sub_type === 'FLEXIBLE_PERCENTAGE' && <Chip cor={PURPLE}>flexível</Chip>}
             <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full" style={{ background: `${st.c}22`, color: st.c }}>{st.t}</span>
             {sd && met.itens > 0 && <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: `${sd.c}1f`, color: sd.c }}><sd.Icon size={10} /> {sd.t}</span>}
+            {met && met.itens != null && <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: 'rgba(214,0,127,.12)', color: 'var(--accent)' }}><Layers size={10} /> {met.itens} participando</span>}
           </div>
           <div className="text-[11px] text-faint mt-1">{p.id} {ini && `· ${ini} → ${fim}`} {restam != null && restam >= 0 && `· termina em ${restam}d`}</div>
         </div>
@@ -1058,6 +1069,7 @@ function Sparkline({ serie }) {
 
 function DesempenhoDrawer({ met, carregando, p, onClose, onSincronizar, notify }) {
   const m = meta(p.type); const Ic = m.icon
+  const vi = dcurta(p.start_date), vf = dcurta(p.finish_date); const rest = diasAte(p.finish_date)
   const sd = met ? (SAUDE[met.saude] || SAUDE.atencao) : null
   const bom = met ? Math.max(0, (met.itens || 0) - (met.abaixo_piso || 0)) : 0
   const ruim = met ? (met.abaixo_piso || 0) : 0
@@ -1091,7 +1103,7 @@ function DesempenhoDrawer({ met, carregando, p, onClose, onSincronizar, notify }
           <div className="w-8 h-8 rounded-lg grid place-items-center flex-none" style={{ background: `${m.cor}22`, color: m.cor }}><Ic size={16} /></div>
           <div className="min-w-0">
             <div className="text-[15px] font-bold truncate" style={{ fontFamily: 'Fraunces, Georgia, serif' }}>{p.name || m.label}</div>
-            <div className="text-[10.5px] text-faint truncate">{p.id} · Desempenho & insights</div>
+            <div className="text-[10.5px] text-faint truncate">{p.id}{(vi || vf) ? ` · vale ${vi || '—'} → ${vf || '—'}` : ''}{rest != null && rest >= 0 ? ` · ${rest}d restantes` : ''}</div>
           </div>
           {sd && <span className="text-[10px] font-extrabold px-2 py-1 rounded-full inline-flex items-center gap-1 flex-none" style={{ background: `${sd.c}1f`, color: sd.c }}><sd.Icon size={11} /> {sd.t}</span>}
           <button onClick={onClose} className="text-faint hover:text-fg flex-none"><X size={18} /></button>
@@ -1106,7 +1118,7 @@ function DesempenhoDrawer({ met, carregando, p, onClose, onSincronizar, notify }
             <>
               {/* KPIs reais */}
               <div className="grid grid-cols-3 gap-2.5">
-                <Mini l="Itens" v={met.itens} s={`${met.itens_ativos} ativos`} />
+                <Mini l="Participando" v={met.itens} s={`${met.itens_ativos} ativos`} />
                 <Mini l="Desconto médio" v={met.desconto_medio_pct != null ? `${met.desconto_medio_pct}%` : '—'} s="ponderado" />
                 <Mini l="Abaixo do piso" v={met.abaixo_piso} s={met.abaixo_piso > 0 ? 'furam a margem' : 'protegido'} danger={met.abaixo_piso > 0} />
                 <Mini l="Líquido real" v={met.liquido_total != null ? brl(met.liquido_total) : '—'} s="soma net_proceeds" hero />
@@ -1261,6 +1273,9 @@ function traduzErroML(msg) {
   return m.replace(/^Mercado Livre:\s*/, '').slice(0, 220)
 }
 
+/* Tipos de promoção que EXIGEM offer_id do candidato ao aderir (DEAL/DOD/MARKETPLACE/VOLUME não levam). */
+const TIPOS_OFFER_ID = new Set(['LIGHTNING', 'SMART', 'PRE_NEGOTIATED', 'UNHEALTHY_STOCK', 'BANK', 'PRICE_MATCHING', 'PRICE_MATCHING_MELI_ALL'])
+
 /* ================= seletor de itens (campanha / convite) ================= */
 function SeletorItens({ modo, promotionId, promotionType, promoNome, inicio, fim, onClose, onOk, notify }) {
   const [q, setQ] = useState('')
@@ -1306,12 +1321,11 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, inicio, fim
 
   const dealDe = (it) => {
     if (modo === 'convite') {
-      // O ML dita a faixa do convite. Usamos a sugestão do ML (ou o menor desconto permitido = maior preço),
-      // sem barra manual — em convite não somos nós que definimos a margem.
-      const dp = (it.suggested_discounted_price != null ? it.suggested_discounted_price
-        : it.min_discounted_price != null ? it.min_discounted_price
-          : it.max_discounted_price != null ? it.max_discounted_price
-            : it.original_price) || 0
+      // O desconto vem da barra; grampeia na banda do ML quando há (semântica oficial:
+      // max_discounted_price = MENOR preço permitido = piso da banda; min_discounted_price = MAIOR preço = teto).
+      let dp = (it.original_price || it.preco || 0) * (1 - pct / 100)
+      if (it.max_discounted_price != null) dp = Math.max(dp, it.max_discounted_price)
+      if (it.min_discounted_price != null) dp = Math.min(dp, it.min_discounted_price)
       return Math.round(dp * 100) / 100
     }
     const dp = (it.preco || 0) * (1 - pct / 100)
@@ -1331,6 +1345,8 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, inicio, fim
   const elegiveis = lista.filter(podeSel)
   const ignorados = permitirAbaixo ? 0 : abaixoTotal
   const nSel = lista.filter((i) => sel.has(i.item_id) && podeSel(i)).length
+  const participando = lista.filter((i) => ['active', 'started', 'enabled'].includes((i.status || '').toLowerCase())).length
+  const valorSel = lista.filter((i) => sel.has(i.item_id)).reduce((acc, i) => acc + (dealDe(i) || 0), 0)
 
   const aplicar = async () => {
     const alvos = lista.filter((i) => sel.has(i.item_id) && podeSel(i))
@@ -1343,7 +1359,7 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, inicio, fim
       const it = alvos[k]
       try {
         const body = { promotion_id: promotionId, promotion_type: promotionType, deal_price: dealDe(it) }
-        if (it.offer_id) body.offer_id = it.offer_id
+        if (it.offer_id && TIPOS_OFFER_ID.has(promotionType)) body.offer_id = it.offer_id
         if (furaPiso(it)) body.permitir_abaixo_piso = true
         if (promotionType === 'LIGHTNING') {
           // limites do ML são EXCLUSIVOS: "greater than min and less than max"
@@ -1364,8 +1380,8 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, inicio, fim
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-[80] grid place-items-center p-4" style={{ background: 'rgba(0,0,0,.62)' }} onClick={aplicando ? undefined : onClose}>
-      <div onClick={(e) => e.stopPropagation()} className="rounded-2xl w-full card-in flex flex-col" style={{ maxWidth: 720, maxHeight: '86vh', background: 'var(--surface)', border: '1px solid var(--glass-border)', boxShadow: 'var(--shadow)' }}>
+    <div className="fixed inset-0 z-[80] flex justify-end" style={{ background: 'rgba(0,0,0,.55)' }} onClick={aplicando ? undefined : (e) => { e.stopPropagation(); onClose() }}>
+      <div onClick={(e) => e.stopPropagation()} className="h-full w-full card-in flex flex-col" style={{ maxWidth: 640, background: 'var(--surface)', borderLeft: '1px solid var(--glass-border)', boxShadow: '-20px 0 60px rgba(0,0,0,.5)' }}>
         {/* header */}
         <div className="flex items-center gap-2 px-4 py-3 flex-none" style={{ borderBottom: '1px solid var(--glass-border)' }}>
           <div className="w-7 h-7 rounded-lg grid place-items-center flex-none" style={{ background: 'rgba(214,0,127,.16)', color: 'var(--accent)' }}><Layers size={15} /></div>
@@ -1376,23 +1392,29 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, inicio, fim
           <button onClick={onClose} disabled={aplicando} className="ml-auto text-faint hover:text-fg disabled:opacity-40"><X size={18} /></button>
         </div>
 
+        {/* KPIs */}
+        <div className="grid grid-cols-4 gap-2 px-4 pt-3 flex-none">
+          <BbKpi l={modo === 'convite' ? 'Elegíveis' : 'No catálogo'} v={meta ? meta.total : lista.length} c="var(--accent)" />
+          <BbKpi l="Participando" v={participando} c="var(--ok)" />
+          <BbKpi l="Selecionados" v={nSel} c={nSel > 0 ? 'var(--accent)' : 'var(--dim)'} sub={valorSel > 0 ? brl(valorSel) : 'nenhum'} />
+          <BbKpi l={modo === 'convite' ? 'Válido até' : 'Duração'} v={dcurta(fim) || '—'} c="var(--warn)" sub={inicio ? `de ${dcurta(inicio)}` : null} />
+        </div>
+
         {/* controles */}
         <div className="px-4 pt-3 pb-2 flex-none">
           <div className="relative mb-2">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
             <input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && modo !== 'convite' && carregar(q)} placeholder={modo === 'convite' ? 'Filtrar itens do convite…' : 'Buscar por título, SKU ou ID… (Enter)'} className="w-full text-[12px] pl-9 pr-3 py-2 rounded-xl bg-transparent text-fg placeholder:text-faint" style={{ border: '1px solid var(--glass-border)' }} />
           </div>
-          {modo !== 'convite' && (
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-[9.5px] text-faint font-extrabold uppercase tracking-wide">Desconto</span>
-              {[10, 15, 20, 25, 30].map((d) => (
-                <button key={d} onClick={() => setPct(d)} className="text-[11px] font-bold px-2.5 py-1 rounded-full num transition-colors" style={pct === d ? { background: 'var(--accent)', color: '#fff' } : { background: 'rgba(255,255,255,.06)', color: 'var(--dim)', border: '1px solid var(--glass-border)' }}>{d}%</button>
-              ))}
-              <input type="range" min={5} max={40} step={1} value={pct} onChange={(e) => setPct(Number(e.target.value))} className="flex-1 min-w-[120px]" style={{ accentColor: '#d6007f' }} />
-              <span className="text-[11px] font-extrabold num" style={{ color: 'var(--accent)' }}>{pct}%</span>
-            </div>
-          )}
-          {modo === 'convite' && <div className="text-[10px] text-faint mt-1.5 flex items-start gap-1.5"><Info size={12} className="flex-none mt-0.5" /> Preço de cada item é ajustado para caber na banda do convite (mín–máx do ML) e nunca abaixo do piso.</div>}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[9.5px] text-faint font-extrabold uppercase tracking-wide">Desconto</span>
+            {[10, 15, 20, 25, 30].map((d) => (
+              <button key={d} onClick={() => setPct(d)} className="text-[11px] font-bold px-2.5 py-1 rounded-full num transition-colors" style={pct === d ? { background: 'var(--accent)', color: '#fff' } : { background: 'rgba(255,255,255,.06)', color: 'var(--dim)', border: '1px solid var(--glass-border)' }}>{d}%</button>
+            ))}
+            <input type="range" min={5} max={40} step={1} value={pct} onChange={(e) => setPct(Number(e.target.value))} className="flex-1 min-w-[120px]" style={{ accentColor: '#d6007f' }} />
+            <span className="text-[11px] font-extrabold num" style={{ color: 'var(--accent)' }}>{pct}%</span>
+          </div>
+          {modo === 'convite' && <div className="text-[10px] text-faint mt-1.5 flex items-start gap-1.5"><Info size={12} className="flex-none mt-0.5" /> Ajuste o desconto na barra. Em convites com banda (ex.: Relâmpago) o preço é encaixado no mín–máx do ML; nunca abaixo do piso.</div>}
           {semBling > 0 && <div className="text-[10px] mt-1.5 flex items-start gap-1.5" style={{ color: 'var(--warn)' }}><AlertTriangle size={12} className="flex-none mt-0.5" /> {semBling} {semBling === 1 ? 'item sem' : 'itens sem'} Preço Bling — sem trava de margem. Cadastre o custo/Preço Bling no Bling para proteger a margem.</div>}
           {abaixoTotal > 0 && (
             <div className="mt-2 rounded-xl p-2.5" style={{ background: permitirAbaixo ? 'rgba(255,122,122,.12)' : 'rgba(224,162,60,.1)', border: `1px solid ${permitirAbaixo ? 'rgba(255,122,122,.35)' : 'rgba(224,162,60,.3)'}` }}>
