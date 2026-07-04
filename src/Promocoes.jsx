@@ -1078,6 +1078,9 @@ function Automacao({ notify }) {
   const [carregando, setCarregando] = useState(true)
   const [aplicandoId, setAplicandoId] = useState(null)
   const [dispensados, setDispensados] = useState(() => { try { return new Set(JSON.parse(localStorage.getItem('promo_dispensados') || '[]')) } catch { return new Set() } })
+  const [modo, setModo] = useState(() => localStorage.getItem('promo_modo') || 'sugestivo')
+  const trocarModo = (m) => { setModo(m); localStorage.setItem('promo_modo', m) }
+  const [aplicandoTodas, setAplicandoTodas] = useState(false)
 
   const on = (k) => ligado[k] !== false // default ligado
   const toggle = (k) => { const n = { ...ligado, [k]: !on(k) }; setLigado(n); localStorage.setItem('promo_agentes', JSON.stringify(n)) }
@@ -1102,18 +1105,42 @@ function Automacao({ notify }) {
 
   const lista = (sugs?.sugestoes || []).filter((s) => on(s.agente) && !dispensados.has(s.item_id))
   const porAgente = sugs?.por_agente || {}
+  const aplicaveis = lista.filter((s) => s.deal_price_sugerido != null)
+  const aplicarTodas = async () => {
+    if (!aplicaveis.length) return
+    if (!window.confirm(`Aplicar ${aplicaveis.length} sugestão(ões) segura(s)? Todas respeitam o piso do Preço Bling (7 dias cada).`)) return
+    setAplicandoTodas(true)
+    let ok = 0, falhas = 0
+    for (const s of aplicaveis) {
+      try { await api.mlPromoDesconto(s.item_id, { deal_price: s.deal_price_sugerido, fim: isoDe(7, '23:59:59') }); dispensar(s.item_id); ok++ }
+      catch { falhas++ }
+    }
+    setAplicandoTodas(false)
+    notify && notify(`${ok} desconto(s) aplicado(s)${falhas ? `, ${falhas} falha(s)` : ''}.`, falhas ? 'warn' : 'ok')
+  }
 
   return (
     <div className="mt-4">
       <Secao icon={Cpu} cor="var(--accent)" titulo="Automação — 6 agentes" pill="modo sugestivo · trava de margem" pillCor="var(--ok)" />
 
       {/* modos */}
-      <div className="rounded-2xl p-3 glass mb-3 flex items-center gap-2 flex-wrap">
-        <span className="text-[10px] uppercase tracking-wide text-faint font-extrabold">Modos</span>
-        <span className="text-[10px] font-extrabold px-2.5 py-1 rounded-full inline-flex items-center gap-1" style={{ background: 'rgba(47,217,141,.14)', color: 'var(--ok)' }}><Check size={11} /> Sugestivo (ativo)</span>
-        <span className="text-[10px] font-bold px-2.5 py-1 rounded-full" style={{ background: 'rgba(255,255,255,.06)', color: 'var(--faint)', border: '1px solid var(--glass-border)' }}>Manual (em breve)</span>
-        <span className="text-[10px] font-bold px-2.5 py-1 rounded-full" style={{ background: 'rgba(255,255,255,.06)', color: 'var(--faint)', border: '1px solid var(--glass-border)' }}>Automático (em breve)</span>
-        <span className="ml-auto text-[9.5px] text-faint flex items-center gap-1.5"><Shield size={12} /> No sugestivo, nada é aplicado sem o seu clique — e sempre acima do piso.</span>
+      <div className="rounded-2xl p-3 glass mb-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[10px] uppercase tracking-wide text-faint font-extrabold">Modos</span>
+          {[['sugestivo', 'Sugestivo', 'Você aplica cada sugestão'], ['manual', 'Manual (em lote)', 'Aplica todas de uma vez'], ['automatico', 'Automático', 'Aplica as seguras em lote']].map(([m, lb]) => (
+            <button key={m} onClick={() => trocarModo(m)} className="text-[10px] font-extrabold px-2.5 py-1 rounded-full inline-flex items-center gap-1 transition-colors" style={modo === m ? { background: 'rgba(47,217,141,.16)', color: 'var(--ok)', border: '1px solid rgba(47,217,141,.4)' } : { background: 'rgba(255,255,255,.06)', color: 'var(--dim)', border: '1px solid var(--glass-border)' }}>{modo === m && <Check size={11} />} {lb}</button>
+          ))}
+          <span className="ml-auto text-[9.5px] text-faint flex items-center gap-1.5"><Shield size={12} /> Nada é aplicado abaixo do piso — em qualquer modo.</span>
+        </div>
+        {modo !== 'sugestivo' && (
+          <div className="mt-3 pt-3 flex items-center gap-3 flex-wrap" style={{ borderTop: '1px solid var(--glass-border)' }}>
+            <div className="flex-1 min-w-[200px]">
+              <div className="text-[11.5px] font-semibold">{modo === 'automatico' ? 'Modo automático' : 'Aplicação em lote'}</div>
+              <div className="text-[10px] text-faint">{aplicaveis.length > 0 ? `${aplicaveis.length} sugestão(ões) segura(s) pronta(s) para aplicar (7 dias cada, acima do piso).` : 'Nenhuma sugestão segura no momento — nada a aplicar.'}{modo === 'automatico' ? ' A automação contínua no servidor entra na próxima fase.' : ''}</div>
+            </div>
+            <button onClick={aplicarTodas} disabled={aplicandoTodas || aplicaveis.length === 0} className="text-[11.5px] font-bold px-4 py-2 rounded-xl text-white inline-flex items-center gap-2 disabled:opacity-50" style={{ background: 'var(--ok)', color: '#04140c' }}>{aplicandoTodas ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />} Aplicar todas as sugestões ({aplicaveis.length})</button>
+          </div>
+        )}
       </div>
 
       {/* cards dos agentes (toggles reais filtram o feed) */}
@@ -1502,7 +1529,7 @@ function Participantes({ notify }) {
   const [dados, setDados] = useState(null)
   const [carregando, setCarregando] = useState(false)
   const [q, setQ] = useState('')
-  const [prod, setProd] = useState(null)
+  const [sel, setSel] = useState(null)
   const [vista, setVista] = useState('produto')
   const [expandido, setExpandido] = useState(() => new Set())
   const carregar = async (forcar) => {
@@ -1513,11 +1540,17 @@ function Participantes({ notify }) {
   }
   useEffect(() => { carregar(false) }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const ql = q.trim().toLowerCase()
-  const listaProd = (dados?.produtos || []).filter((p) => !ql || (`${p.titulo} ${p.sku || ''}`).toLowerCase().includes(ql))
-  const listaCamp = (dados?.campanhas || []).filter((c) => !ql || (c.nome || '').toLowerCase().includes(ql))
+  const produtos = dados?.produtos || []
+  const campanhas = dados?.campanhas || []
+  const listaProd = produtos.filter((p) => !ql || (`${p.titulo || ''} ${p.sku || ''}`).toLowerCase().includes(ql))
+  const listaCamp = campanhas.filter((c) => !ql || (c.nome || '').toLowerCase().includes(ql))
   const totais = dados?.totais || {}
   const toggleExp = (id) => { const n = new Set(expandido); n.has(id) ? n.delete(id) : n.add(id); setExpandido(n) }
-  const prodDaCampanha = (cid) => (dados?.produtos || []).filter((p) => p.campanhas.some((c) => c.id === cid))
+  const prodDaCampanha = (cid) => produtos.filter((p) => (p.campanhas || []).some((c) => c && c.id === cid))
+  const topCamp = [...campanhas].filter((c) => (c.n || 0) > 0).sort((a, b) => (b.voce_recebe || 0) - (a.voce_recebe || 0)).slice(0, 6)
+  const maxRec = Math.max(1, ...topCamp.map((c) => c.voce_recebe || 0))
+  const aberto = sel != null
+
   return (
     <div className="mt-4">
       <Secao icon={Boxes} cor="var(--accent)" titulo="Participantes" pill="produtos e campanhas em promoção" pillCor="var(--accent)" right={
@@ -1526,20 +1559,44 @@ function Participantes({ notify }) {
           <button onClick={() => carregar(true)} disabled={carregando} className="text-[11px] font-bold px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5 disabled:opacity-50" style={{ background: 'rgba(214,0,127,.14)', color: 'var(--accent)', border: '1px solid rgba(214,0,127,.3)' }}>{carregando ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Atualizar</button>
         </div>
       } />
+
       {carregando && !dados
         ? <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="skel" style={{ height: 62, borderRadius: 14 }} />)}</div>
         : dados && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
-            <BbKpi l="Produtos em campanhas" v={dados.total_produtos} c="var(--accent)" sub={`${(dados.produtos || []).reduce((a, p) => a + p.n, 0)} vínculos`} />
-            <BbKpi l="Campanhas com itens" v={totais.campanhas ?? 0} c={BLUE} sub={`de ${dados.promocoes_varridas} varridas`} />
+            <BbKpi l="Produtos em campanhas" v={dados.total_produtos ?? 0} c="var(--accent)" sub={`${produtos.reduce((a, p) => a + (p.n || 0), 0)} vínculos`} />
+            <BbKpi l="Campanhas com itens" v={totais.campanhas ?? 0} c={BLUE} sub={`de ${dados.promocoes_varridas ?? 0} varridas`} />
             <BbKpi l="Você recebe · total" v={brl(totais.voce_recebe || 0)} c="var(--ok)" sub="líquido estimado" />
             <BbKpi l="Desconto concedido" v={brl(totais.desconto || 0)} c="var(--warn)" sub="o quanto abre mão" />
           </div>
         )}
+
+      {carregando && !dados
+        ? <div className="skel mb-3" style={{ height: 150, borderRadius: 16 }} />
+        : topCamp.length > 0 && (
+          <div className="rounded-2xl p-4 glass mb-3">
+            <div className="text-[10px] uppercase tracking-wide text-faint font-extrabold flex items-center gap-1.5 mb-3"><BarChart3 size={12} style={{ color: 'var(--ok)' }} /> Você recebe por campanha <span className="text-faint">· top {topCamp.length}</span></div>
+            <div className="flex flex-col gap-1.5">
+              {topCamp.map((c) => (
+                <div key={c.id} className="flex items-center gap-2">
+                  <span className="text-[10.5px] truncate flex-none" style={{ width: 150 }} title={c.nome}>{c.nome || meta(c.type).label}</span>
+                  <div className="flex-1 h-5 rounded-md overflow-hidden relative" style={{ background: 'rgba(255,255,255,.05)' }}>
+                    <div className="h-full rounded-md flex items-center justify-end pr-1.5" style={{ width: `${Math.max(9, ((c.voce_recebe || 0) / maxRec) * 100)}%`, background: `linear-gradient(90deg, ${meta(c.type).cor}55, ${meta(c.type).cor})` }}>
+                      <span className="text-[9px] font-extrabold num text-white">{brl(c.voce_recebe)}</span>
+                    </div>
+                  </div>
+                  <span className="text-[9px] num flex-none text-right" style={{ width: 60, color: 'var(--warn)' }}>−{brl(c.desconto)}</span>
+                  <span className="text-[9px] text-faint num flex-none text-right" style={{ width: 28 }}>{c.n}un</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
       <div className="flex items-center gap-2 mb-3 flex-wrap">
         <div className="flex gap-1 p-1 rounded-xl flex-none" style={{ background: 'rgba(0,0,0,.28)', border: '1px solid var(--glass-border)' }}>
           {[['produto', 'Por produto', Boxes], ['campanha', 'Por campanha', Tag]].map(([id, lb, Ic]) => (
-            <button key={id} onClick={() => setVista(id)} className="text-[11px] font-bold px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5 transition-colors" style={vista === id ? { background: 'linear-gradient(135deg, rgba(214,0,127,.9), rgba(214,0,127,.55))', color: '#fff' } : { color: 'var(--dim)' }}><Ic size={12} /> {lb}</button>
+            <button key={id} onClick={() => { setVista(id); setSel(null) }} className="text-[11px] font-bold px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5 transition-colors" style={vista === id ? { background: 'linear-gradient(135deg, rgba(214,0,127,.9), rgba(214,0,127,.55))', color: '#fff' } : { color: 'var(--dim)' }}><Ic size={12} /> {lb}</button>
           ))}
         </div>
         <div className="relative flex-1 min-w-[180px]">
@@ -1547,81 +1604,92 @@ function Participantes({ notify }) {
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={vista === 'produto' ? 'Filtrar por produto ou SKU…' : 'Filtrar por campanha…'} className="w-full text-[12.5px] pl-9 pr-3 py-2.5 rounded-xl bg-transparent" style={{ border: '1px solid var(--glass-border)' }} />
         </div>
       </div>
+
       {carregando && !dados ? (
         <div>{Array.from({ length: 4 }).map((_, i) => <div key={i} className="skel mb-2" style={{ height: 66, borderRadius: 16 }} />)}</div>
       ) : !dados ? (
         <Vazio texto="Clique em Atualizar para varrer as campanhas." />
-      ) : vista === 'produto' ? (
-        listaProd.length === 0 ? <Vazio texto={ql ? `Nenhum produto para “${q}”.` : 'Nenhum produto participando de campanhas no momento. Adira itens nos convites/campanhas para vê-los aqui.'} /> : (
-          <div className="flex flex-col gap-2">
-            {listaProd.map((p) => (
-              <div key={p.item_id} onClick={() => setProd(p.item_id)} className="rounded-2xl p-3 glass lift flex items-center gap-3 cursor-pointer">
-                {p.imagem ? <img src={p.imagem} alt="" className="w-11 h-11 rounded-lg object-cover flex-none" style={{ border: '1px solid var(--glass-border)' }} /> : <div className="w-11 h-11 rounded-lg grid place-items-center flex-none" style={{ background: 'rgba(255,255,255,.05)' }}><Boxes size={17} className="text-faint" /></div>}
-                <div className="min-w-0 flex-1">
-                  <div className="text-[12.5px] font-semibold truncate">{p.titulo}</div>
-                  <div className="text-[9.5px] text-faint num truncate mb-1">{p.sku || p.item_id}{p.preco != null ? ` · ${brl(p.preco)}` : ''}</div>
-                  <div className="flex items-center gap-1 flex-wrap">
-                    {p.campanhas.slice(0, 4).map((c, i) => <span key={i} className="text-[8.5px] font-bold px-1.5 py-0.5 rounded-full truncate" style={{ background: `${meta(c.type).cor}1e`, color: meta(c.type).cor, maxWidth: 160 }}>{c.nome || meta(c.type).label}</span>)}
-                    {p.campanhas.length > 4 && <span className="text-[8.5px] text-faint">+{p.campanhas.length - 4}</span>}
-                  </div>
-                </div>
-                <div className="flex-none text-right">
-                  <div className="text-[16px] font-extrabold num" style={{ color: 'var(--accent)' }}>{p.n}</div>
-                  <div className="text-[8px] uppercase text-faint font-extrabold">campanhas</div>
-                </div>
-                <ChevronRight size={16} className="text-faint flex-none" />
-              </div>
-            ))}
-          </div>
-        )
       ) : (
-        listaCamp.length === 0 ? <Vazio texto={ql ? `Nenhuma campanha para “${q}”.` : 'Nenhuma campanha com itens participando ainda.'} /> : (
-          <div className="flex flex-col gap-2">
-            {listaCamp.map((c) => {
-              const aberto = expandido.has(c.id)
-              const Ic = meta(c.type).icon
-              const prods = aberto ? prodDaCampanha(c.id) : []
-              return (
-                <div key={c.id} className="rounded-2xl glass overflow-hidden">
-                  <button onClick={() => toggleExp(c.id)} className="w-full p-3 flex items-center gap-3 text-left">
-                    <div className="w-11 h-11 rounded-xl grid place-items-center flex-none" style={{ background: `${meta(c.type).cor}1e`, color: meta(c.type).cor }}><Ic size={18} /></div>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-[12.5px] font-semibold truncate">{c.nome || meta(c.type).label}</div>
-                      <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                        <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: `${meta(c.type).cor}1e`, color: meta(c.type).cor }}>{meta(c.type).label}</span>
-                        <span className="text-[9px] num inline-flex items-center gap-0.5" style={{ color: 'var(--ok)' }}><CircleDollarSign size={9} /> {brl(c.voce_recebe)}</span>
-                        <span className="text-[9px] num" style={{ color: 'var(--warn)' }}>−{brl(c.desconto)} desc.</span>
+        <div className={aberto ? 'grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(380px,520px)] gap-4 items-start' : ''}>
+          <div>
+            {vista === 'produto' ? (
+              listaProd.length === 0 ? <Vazio texto={ql ? `Nenhum produto para “${q}”.` : 'Nenhum produto participando de campanhas no momento. Adira itens nos convites/campanhas para vê-los aqui.'} /> : (
+                <div className="flex flex-col gap-2">
+                  {listaProd.map((p) => (
+                    <div key={p.item_id} onClick={() => setSel(p.item_id)} className="rounded-2xl p-3 glass lift flex items-center gap-3 cursor-pointer" style={sel === p.item_id ? { border: '1px solid rgba(214,0,127,.5)' } : {}}>
+                      {p.imagem ? <img src={p.imagem} alt="" className="w-11 h-11 rounded-lg object-cover flex-none" style={{ border: '1px solid var(--glass-border)' }} /> : <div className="w-11 h-11 rounded-lg grid place-items-center flex-none" style={{ background: 'rgba(255,255,255,.05)' }}><Boxes size={17} className="text-faint" /></div>}
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[12.5px] font-semibold truncate">{p.titulo}</div>
+                        <div className="text-[9.5px] text-faint num truncate mb-1">{p.sku || p.item_id}{p.preco != null ? ` · ${brl(p.preco)}` : ''}</div>
+                        <div className="flex items-center gap-1 flex-wrap">
+                          {(p.campanhas || []).slice(0, 4).map((c, i) => <span key={i} className="text-[8.5px] font-bold px-1.5 py-0.5 rounded-full truncate" style={{ background: `${meta(c.type).cor}1e`, color: meta(c.type).cor, maxWidth: 160 }}>{c.nome || meta(c.type).label}</span>)}
+                          {(p.campanhas || []).length > 4 && <span className="text-[8.5px] text-faint">+{p.campanhas.length - 4}</span>}
+                        </div>
                       </div>
+                      <div className="flex-none text-right">
+                        <div className="text-[16px] font-extrabold num" style={{ color: 'var(--accent)' }}>{p.n}</div>
+                        <div className="text-[8px] uppercase text-faint font-extrabold">campanhas</div>
+                      </div>
+                      <ChevronRight size={16} className="text-faint flex-none" />
                     </div>
-                    <div className="flex-none text-right">
-                      <div className="text-[16px] font-extrabold num" style={{ color: 'var(--accent)' }}>{c.n}</div>
-                      <div className="text-[8px] uppercase text-faint font-extrabold">produtos</div>
-                    </div>
-                    <ChevronDown size={16} className="text-faint flex-none" style={{ transform: aberto ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }} />
-                  </button>
-                  {aberto && (
-                    <div className="px-3 pb-3 flex flex-col gap-1" style={{ borderTop: '1px solid var(--glass-border)' }}>
-                      {prods.length === 0 ? <div className="text-[10.5px] text-faint py-2">Os produtos desta campanha não vieram na varredura atual.</div> : prods.slice(0, 60).map((p) => (
-                        <button key={p.item_id} onClick={() => setProd(p.item_id)} className="flex items-center gap-2.5 p-2 mt-1 rounded-lg text-left lift" style={{ background: 'rgba(0,0,0,.18)' }}>
-                          {p.imagem ? <img src={p.imagem} alt="" className="w-8 h-8 rounded-md object-cover flex-none" style={{ border: '1px solid var(--glass-border)' }} /> : <div className="w-8 h-8 rounded-md grid place-items-center flex-none" style={{ background: 'rgba(255,255,255,.05)' }}><Boxes size={13} className="text-faint" /></div>}
-                          <div className="min-w-0 flex-1"><div className="text-[11.5px] truncate">{p.titulo}</div><div className="text-[8.5px] text-faint num truncate">{p.sku || p.item_id}{p.preco != null ? ` · ${brl(p.preco)}` : ''}</div></div>
-                          <ChevronRight size={13} className="text-faint flex-none" />
-                        </button>
-                      ))}
-                    </div>
-                  )}
+                  ))}
                 </div>
               )
-            })}
+            ) : (
+              listaCamp.length === 0 ? <Vazio texto={ql ? `Nenhuma campanha para “${q}”.` : 'Nenhuma campanha com itens participando ainda.'} /> : (
+                <div className="flex flex-col gap-2">
+                  {listaCamp.map((c) => {
+                    const ab = expandido.has(c.id)
+                    const Ic = meta(c.type).icon
+                    const prods = ab ? prodDaCampanha(c.id) : []
+                    return (
+                      <div key={c.id} className="rounded-2xl glass overflow-hidden">
+                        <button onClick={() => toggleExp(c.id)} className="w-full p-3 flex items-center gap-3 text-left">
+                          <div className="w-11 h-11 rounded-xl grid place-items-center flex-none" style={{ background: `${meta(c.type).cor}1e`, color: meta(c.type).cor }}><Ic size={18} /></div>
+                          <div className="min-w-0 flex-1">
+                            <div className="text-[12.5px] font-semibold truncate">{c.nome || meta(c.type).label}</div>
+                            <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                              <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: `${meta(c.type).cor}1e`, color: meta(c.type).cor }}>{meta(c.type).label}</span>
+                              <span className="text-[9px] num inline-flex items-center gap-0.5" style={{ color: 'var(--ok)' }}><CircleDollarSign size={9} /> {brl(c.voce_recebe)}</span>
+                              <span className="text-[9px] num" style={{ color: 'var(--warn)' }}>−{brl(c.desconto)} desc.</span>
+                            </div>
+                          </div>
+                          <div className="flex-none text-right">
+                            <div className="text-[16px] font-extrabold num" style={{ color: 'var(--accent)' }}>{c.n}</div>
+                            <div className="text-[8px] uppercase text-faint font-extrabold">produtos</div>
+                          </div>
+                          <ChevronDown size={16} className="text-faint flex-none" style={{ transform: ab ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }} />
+                        </button>
+                        {ab && (
+                          <div className="px-3 pb-3 flex flex-col gap-1" style={{ borderTop: '1px solid var(--glass-border)' }}>
+                            {prods.length === 0 ? <div className="text-[10.5px] text-faint py-2">Os produtos desta campanha não vieram na varredura atual.</div> : prods.slice(0, 60).map((p) => (
+                              <button key={p.item_id} onClick={() => { setVista('produto'); setSel(p.item_id) }} className="flex items-center gap-2.5 p-2 mt-1 rounded-lg text-left lift" style={{ background: 'rgba(0,0,0,.18)' }}>
+                                {p.imagem ? <img src={p.imagem} alt="" className="w-8 h-8 rounded-md object-cover flex-none" style={{ border: '1px solid var(--glass-border)' }} /> : <div className="w-8 h-8 rounded-md grid place-items-center flex-none" style={{ background: 'rgba(255,255,255,.05)' }}><Boxes size={13} className="text-faint" /></div>}
+                                <div className="min-w-0 flex-1"><div className="text-[11.5px] truncate">{p.titulo}</div><div className="text-[8.5px] text-faint num truncate">{p.sku || p.item_id}{p.preco != null ? ` · ${brl(p.preco)}` : ''}</div></div>
+                                <ChevronRight size={13} className="text-faint flex-none" />
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            )}
           </div>
-        )
+          {aberto && (
+            <div className="xl:sticky xl:top-4">
+              <ProdutoCampanhasDrawer key={sel} itemId={sel} onClose={() => setSel(null)} notify={notify} onMudou={() => carregar(true)} />
+            </div>
+          )}
+        </div>
       )}
-      {prod && <ProdutoCampanhasDrawer itemId={prod} onClose={() => setProd(null)} notify={notify} />}
     </div>
   )
 }
 
-function ProdutoCampanhasDrawer({ itemId, onClose, notify }) {
+function ProdutoCampanhasDrawer({ itemId, onClose, notify, onMudou }) {
   const [d, setD] = useState(null)
   const [carr, setCarr] = useState(true)
   const [acao, setAcao] = useState(null)
@@ -1639,74 +1707,74 @@ function ProdutoCampanhasDrawer({ itemId, onClose, notify }) {
       const body = { promotion_id: c.id, promotion_type: c.type, deal_price: c.preco_final, permitir_abaixo_piso: !c.acima_piso }
       if (TIPOS_OFFER_ID.has(c.type) && c.offer_id) body.offer_id = c.offer_id
       await api.mlPromoAderir(itemId, body)
-      notify && notify('Participação confirmada no Mercado Livre.', 'ok'); await carregar(true)
+      notify && notify('Participação confirmada no Mercado Livre.', 'ok'); await carregar(true); onMudou && onMudou()
     } catch (e) { notify && notify(traduzErroML(e.message), 'danger') } finally { setAcao(null) }
   }
   const sair = async (c) => {
     setAcao(c.id)
     try {
       await api.mlPromoRemoverItem(itemId, c.type, c.id, TIPOS_OFFER_ID.has(c.type) ? c.offer_id : null)
-      notify && notify('Você deixou de participar da campanha.', 'ok'); await carregar(true)
+      notify && notify('Você deixou de participar da campanha.', 'ok'); await carregar(true); onMudou && onMudou()
     } catch (e) { notify && notify(traduzErroML(e.message), 'danger') } finally { setAcao(null) }
   }
   const ST = { active: { t: 'ATIVA', c: 'var(--ok)' }, started: { t: 'ATIVA', c: 'var(--ok)' }, pending: { t: 'PROGRAMADA', c: BLUE }, candidate: { t: 'DISPONÍVEL', c: 'var(--warn)' } }
-  return createPortal(
-    <div className="fixed inset-0 z-[100] flex justify-end" style={{ background: 'rgba(0,0,0,.55)' }} onClick={(e) => { e.stopPropagation(); onClose() }}>
-      <div onClick={(e) => e.stopPropagation()} className="h-full w-full drawer-in flex flex-col" style={{ maxWidth: 640, border: '1px solid transparent', background: 'linear-gradient(180deg,var(--surface),#160c13) padding-box, linear-gradient(155deg, rgba(214,0,127,.6), rgba(214,0,127,.06) 42%, rgba(255,255,255,.10)) border-box', boxShadow: '-24px 0 70px rgba(0,0,0,.55)' }}>
-        <div className="flex items-center gap-2.5 px-4 py-3 flex-none" style={{ borderBottom: '1px solid var(--glass-border)' }}>
-          {d?.imagem ? <img src={d.imagem} alt="" className="w-10 h-10 rounded-xl object-cover flex-none" style={{ border: '1px solid var(--glass-border)' }} /> : <div className="w-10 h-10 rounded-xl grid place-items-center flex-none" style={{ background: 'rgba(214,0,127,.16)', color: 'var(--accent)' }}><Boxes size={18} /></div>}
-          <div className="min-w-0 flex-1">
-            <div className="text-[14px] font-bold truncate" style={{ fontFamily: 'Fraunces, Georgia, serif' }}>{d?.titulo || 'Produto'}</div>
-            <div className="text-[10.5px] text-faint num truncate">{d?.sku || itemId}{d?.preco != null ? ` · ${brl(d.preco)}` : ''}{d?.piso != null ? ` · piso ${brl(d.piso)}` : ''}</div>
-          </div>
-          <button onClick={onClose} className="text-faint hover:text-fg flex-none"><X size={18} /></button>
+  const proms = d?.promocoes || []
+  return (
+    <div className="rounded-2xl overflow-hidden card-in" style={{ border: '1px solid transparent', background: 'linear-gradient(180deg,var(--surface),#160c13) padding-box, linear-gradient(155deg, rgba(214,0,127,.65), rgba(214,0,127,.06) 42%, rgba(255,255,255,.10)) border-box', boxShadow: '0 20px 60px rgba(0,0,0,.5)' }}>
+      <div className="px-4 py-3 flex items-center gap-2.5" style={{ borderBottom: '1px solid var(--glass-border)' }}>
+        {d?.imagem ? <img src={d.imagem} alt="" className="w-10 h-10 rounded-xl object-cover flex-none" style={{ border: '1px solid var(--glass-border)' }} /> : <div className="w-10 h-10 rounded-xl grid place-items-center flex-none" style={{ background: 'rgba(214,0,127,.16)', color: 'var(--accent)' }}><Boxes size={18} /></div>}
+        <div className="min-w-0 flex-1">
+          <div className="text-[14px] font-bold truncate" style={{ fontFamily: 'Fraunces, Georgia, serif' }}>{d?.titulo || 'Produto'}</div>
+          <div className="text-[10.5px] text-faint num truncate">{d?.sku || itemId}{d?.preco != null ? ` · ${brl(d.preco)}` : ''}{d?.piso != null ? ` · piso ${brl(d.piso)}` : ''}</div>
         </div>
-        <div className="flex-1 overflow-y-auto px-4 py-3">
-          <div className="text-[9.5px] uppercase tracking-wide text-faint font-bold mb-2 flex items-center gap-1.5"><Tag size={12} style={{ color: 'var(--accent)' }} /> Campanhas do anúncio{d ? ` (${d.promocoes.length})` : ''}{d && d.participando > 0 ? ` · ${d.participando} participando` : ''}</div>
-          {carr ? (
-            <div>{Array.from({ length: 4 }).map((_, i) => <div key={i} className="skel mb-2" style={{ height: 96, borderRadius: 14 }} />)}</div>
-          ) : !d || d.promocoes.length === 0 ? (
-            <div className="text-[12px] text-faint p-6 text-center">Este anúncio não tem promoções no momento.</div>
-          ) : (
-            <div className="flex flex-col gap-2">
-              {d.promocoes.map((c, i) => {
-                const st = ST[(c.status || '').toLowerCase()] || { t: (c.status || '—').toUpperCase(), c: 'var(--dim)' }
-                const part = ['active', 'started', 'enabled'].includes((c.status || '').toLowerCase())
-                const coop = (c.meli_percentage || 0) + (c.seller_percentage || 0)
-                const Ic = meta(c.type).icon
-                return (
-                  <div key={i} className="rounded-xl p-3" style={{ background: part ? 'rgba(47,217,141,.06)' : 'linear-gradient(158deg,rgba(255,255,255,.04),rgba(0,0,0,.18))', border: `1px solid ${part ? 'rgba(47,217,141,.3)' : 'var(--glass-border)'}`, boxShadow: part ? 'inset 3px 0 0 var(--ok)' : 'none' }}>
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className="w-7 h-7 rounded-lg grid place-items-center flex-none" style={{ background: `${meta(c.type).cor}1e`, color: meta(c.type).cor }}><Ic size={14} /></div>
-                      <div className="min-w-0 flex-1">
-                        <div className="text-[12.5px] font-bold truncate">{c.nome}</div>
-                        <div className="text-[9px] text-faint">{meta(c.type).label}{(c.start_date || c.finish_date) ? ` · ${dcurta(c.start_date) || '—'} a ${dcurta(c.finish_date) || '—'}` : ''}</div>
-                      </div>
-                      <span className="text-[8.5px] font-extrabold px-2 py-0.5 rounded-full flex-none" style={{ background: `${st.c}1f`, color: st.c }}>{part && <Check size={9} className="inline mr-0.5" />}{st.t}</span>
-                    </div>
-                    <div className="grid grid-cols-3 gap-2">
-                      <div className="rounded-lg px-2.5 py-1.5" style={{ background: 'rgba(0,0,0,.22)' }}><div className="text-[8px] uppercase text-faint font-extrabold">Desconto</div><div className="text-[13px] font-extrabold num" style={{ color: 'var(--warn)' }}>{c.desconto_pct > 0 ? `${c.desconto_pct}%` : '—'}</div></div>
-                      <div className="rounded-lg px-2.5 py-1.5" style={{ background: 'rgba(0,0,0,.22)' }}><div className="text-[8px] uppercase text-faint font-extrabold">Preço final</div><div className="text-[13px] font-extrabold num">{c.preco_final != null ? brl(c.preco_final) : '—'}</div></div>
-                      <div className="rounded-lg px-2.5 py-1.5" style={{ background: c.acima_piso ? 'rgba(47,217,141,.1)' : 'rgba(255,122,122,.1)' }}><div className="text-[8px] uppercase text-faint font-extrabold">Você recebe</div><div className="text-[13px] font-extrabold num" style={{ color: c.acima_piso ? 'var(--ok)' : 'var(--danger)' }}>{c.voce_recebe != null ? brl(c.voce_recebe) : '—'}</div></div>
-                    </div>
-                    {coop > 0 && <div className="text-[9px] mt-1.5 num" style={{ color: BLUE }}>cofinanciado: ML {Math.round(c.meli_percentage || 0)}% · você {Math.round(c.seller_percentage || 0)}%</div>}
-                    {!c.acima_piso && c.preco_final != null && c.piso != null && <div className="text-[9px] mt-1 flex items-center gap-1" style={{ color: 'var(--danger)' }}><AlertTriangle size={10} /> abaixo do piso ({brl(c.piso)})</div>}
-                    <div className="mt-2 flex justify-end">
-                      {part ? (
-                        <button onClick={() => sair(c)} disabled={acao === c.id} className="text-[10.5px] font-bold px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5 disabled:opacity-50" style={{ border: '1px solid rgba(255,122,122,.4)', color: 'var(--danger)' }}>{acao === c.id ? <Loader2 size={12} className="animate-spin" /> : <Ban size={12} />} Deixar de participar</button>
-                      ) : (c.preco_final != null && (
-                        <button onClick={() => participar(c)} disabled={acao === c.id} className="text-[10.5px] font-bold px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5 text-white disabled:opacity-50" style={{ background: c.acima_piso ? 'var(--accent)' : 'var(--warn)' }}>{acao === c.id ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />} {c.acima_piso ? 'Participar' : 'Participar mesmo assim'}</button>
-                      ))}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-          <div className="text-[9.5px] text-faint mt-3 flex items-start gap-1.5"><Info size={12} className="flex-none mt-0.5" /> <span>“Você recebe” é o líquido estimado após as taxas do ML (modelo do Preço Bling). Estados ATIVA / PROGRAMADA / DISPONÍVEL seguem o Mercado Livre.</span></div>
-        </div>
+        <button onClick={onClose} className="text-faint hover:text-fg flex-none"><X size={18} /></button>
       </div>
-    </div>, document.body)
+      <div className="px-4 py-3">
+        <div className="text-[9.5px] uppercase tracking-wide text-faint font-bold mb-2 flex items-center gap-1.5"><Tag size={12} style={{ color: 'var(--accent)' }} /> Campanhas do anúncio{d ? ` (${proms.length})` : ''}{d && d.participando > 0 ? ` · ${d.participando} participando` : ''}</div>
+        {carr ? (
+          <div>{Array.from({ length: 4 }).map((_, i) => <div key={i} className="skel mb-2" style={{ height: 118, borderRadius: 14 }} />)}</div>
+        ) : !d || proms.length === 0 ? (
+          <div className="text-[12px] text-faint p-6 text-center">Este anúncio não tem promoções no momento.</div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {proms.map((c, i) => {
+              const st = ST[(c.status || '').toLowerCase()] || { t: (c.status || '—').toUpperCase(), c: 'var(--dim)' }
+              const part = ['active', 'started', 'enabled'].includes((c.status || '').toLowerCase())
+              const coop = (c.meli_percentage || 0) + (c.seller_percentage || 0)
+              const Ic = meta(c.type).icon
+              return (
+                <div key={i} className="rounded-xl p-3" style={{ background: part ? 'rgba(47,217,141,.06)' : 'linear-gradient(158deg,rgba(255,255,255,.04),rgba(0,0,0,.18))', border: `1px solid ${part ? 'rgba(47,217,141,.3)' : 'var(--glass-border)'}`, boxShadow: part ? 'inset 3px 0 0 var(--ok)' : 'none' }}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="w-7 h-7 rounded-lg grid place-items-center flex-none" style={{ background: `${meta(c.type).cor}1e`, color: meta(c.type).cor }}><Ic size={14} /></div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[12.5px] font-bold truncate">{c.nome}</div>
+                      <div className="text-[9px] text-faint">{meta(c.type).label}{(c.start_date || c.finish_date) ? ` · ${dcurta(c.start_date) || '—'} a ${dcurta(c.finish_date) || '—'}` : ''}</div>
+                    </div>
+                    <span className="text-[8.5px] font-extrabold px-2 py-0.5 rounded-full flex-none" style={{ background: `${st.c}1f`, color: st.c }}>{part && <Check size={9} className="inline mr-0.5" />}{st.t}</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="rounded-lg px-2.5 py-1.5" style={{ background: 'rgba(0,0,0,.22)' }}><div className="text-[8px] uppercase text-faint font-extrabold">Desconto</div><div className="text-[13px] font-extrabold num" style={{ color: 'var(--warn)' }}>{c.desconto_pct > 0 ? `${c.desconto_pct}%` : '—'}</div></div>
+                    <div className="rounded-lg px-2.5 py-1.5" style={{ background: 'rgba(0,0,0,.22)' }}><div className="text-[8px] uppercase text-faint font-extrabold">Preço final</div><div className="text-[13px] font-extrabold num">{c.preco_final != null ? brl(c.preco_final) : '—'}</div></div>
+                    <div className="rounded-lg px-2.5 py-1.5" style={{ background: c.acima_piso ? 'rgba(47,217,141,.1)' : 'rgba(255,122,122,.1)' }}><div className="text-[8px] uppercase text-faint font-extrabold">Você recebe</div><div className="text-[13px] font-extrabold num" style={{ color: c.acima_piso ? 'var(--ok)' : 'var(--danger)' }}>{c.voce_recebe != null ? brl(c.voce_recebe) : '—'}</div></div>
+                  </div>
+                  {coop > 0 && <div className="text-[9px] mt-1.5 num" style={{ color: BLUE }}>cofinanciado: ML {Math.round(c.meli_percentage || 0)}% · você {Math.round(c.seller_percentage || 0)}%</div>}
+                  {!c.acima_piso && c.preco_final != null && c.piso != null && <div className="text-[9px] mt-1 flex items-center gap-1" style={{ color: 'var(--danger)' }}><AlertTriangle size={10} /> abaixo do piso ({brl(c.piso)})</div>}
+                  <div className="mt-2 flex justify-end">
+                    {part ? (
+                      <button onClick={() => sair(c)} disabled={acao === c.id} className="text-[10.5px] font-bold px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5 disabled:opacity-50" style={{ border: '1px solid rgba(255,122,122,.4)', color: 'var(--danger)' }}>{acao === c.id ? <Loader2 size={12} className="animate-spin" /> : <Ban size={12} />} Deixar de participar</button>
+                    ) : (c.preco_final != null && (
+                      <button onClick={() => participar(c)} disabled={acao === c.id} className="text-[10.5px] font-bold px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5 text-white disabled:opacity-50" style={{ background: c.acima_piso ? 'var(--accent)' : 'var(--warn)' }}>{acao === c.id ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />} {c.acima_piso ? 'Participar' : 'Participar mesmo assim'}</button>
+                    ))}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+        <div className="text-[9.5px] text-faint mt-3 flex items-start gap-1.5"><Info size={12} className="flex-none mt-0.5" /> <span>“Você recebe” é o líquido estimado após as taxas do ML (modelo do Preço Bling). Estados ATIVA / PROGRAMADA / DISPONÍVEL seguem o Mercado Livre.</span></div>
+      </div>
+    </div>
+  )
 }
 
 /* ================= seletor de itens interno ================= */
