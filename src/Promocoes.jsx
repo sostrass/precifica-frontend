@@ -229,12 +229,13 @@ export default function Promocoes() {
                 <Kpi icon={Shield} label="Governança" valor={painel.exclusao_ativa == null ? '—' : painel.exclusao_ativa ? 'ON' : 'OFF'} sub="exclusão do ML" />
               </div>
               <InsightsPromo convites={convites} contagens={contagens} cont={cont} />
+              <GanhosPorCampanha />
               <Distribuicao convites={convites.length} minhas={minhas.length} cupons={cupons.length} />
               <Simulador notify={notify} recarregar={carregar} />
               <SecConvites convites={convites} onAderir={abrirAderir} onAutoAderir={aderirAutoConvite} onSair={sairConvite} onAplicarAutomaticos={aplicarAutomaticos} autoRodando={autoRodando} onContagem={reportContagem} />
               <SecMinhas minhas={minhas} onAcao={emBreve} onEncerrar={encerrarCampanha} onAddItens={abrirAddItens} onSincronizar={sincronizarPedidos} notify={notify} />
               <SecCupons cupons={cupons} onAcao={emBreve} onEncerrar={encerrarCampanha} />
-              <Calendario minhas={minhas} cupons={cupons} convites={convites} />
+              <Calendario minhas={minhas} cupons={cupons} convites={convites} onAbrirCampanha={(p, fonte) => { if (fonte === 'convite') abrirAderir(p); else if (fonte === 'minha') abrirAddItens(p); else emBreve() }} />
             </>
           )}
           {aba === 'minhas' && <SecMinhas minhas={minhas} onAcao={emBreve} onEncerrar={encerrarCampanha} onAddItens={abrirAddItens} onSincronizar={sincronizarPedidos} notify={notify} full />}
@@ -833,12 +834,70 @@ function Linha({ k, v, cor, forte }) {
 }
 
 /* ================= CALENDÁRIO (dados reais) ================= */
-function Calendario({ minhas, cupons, convites }) {
+function GanhosPorCampanha() {
+  const [d, setD] = useState(null)
+  const [carr, setCarr] = useState(true)
+  useEffect(() => {
+    let vivo = true
+    api.mlPromoParticipantes().then((r) => { if (vivo) setD(r) }).catch(() => { if (vivo) setD(null) }).finally(() => { if (vivo) setCarr(false) })
+    return () => { vivo = false }
+  }, [])
+  const camps = (d?.campanhas || []).filter((c) => c.n > 0).slice(0, 8)
+  const maxV = Math.max(1, ...camps.map((c) => c.voce_recebe || 0))
+  return (
+    <div className="rounded-2xl p-4 mt-3 glass">
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-[10px] uppercase tracking-wide text-faint font-extrabold flex items-center gap-1.5"><TrendingUp size={12} style={{ color: 'var(--ok)' }} /> Ganhos e descontos por campanha</span>
+        {d && <span className="text-[10px] text-faint num">{d.totais.campanhas} campanhas · {d.totais.produtos} produtos</span>}
+      </div>
+      {carr ? (
+        <div>
+          <div className="grid grid-cols-2 gap-3 mb-3">{Array.from({ length: 2 }).map((_, i) => <div key={i} className="skel" style={{ height: 64, borderRadius: 14 }} />)}</div>
+          {Array.from({ length: 5 }).map((_, i) => <div key={i} className="skel mb-2" style={{ height: 26, borderRadius: 8 }} />)}
+        </div>
+      ) : !d || camps.length === 0 ? (
+        <div className="text-[11.5px] text-faint py-6 text-center">Nenhum produto participando de campanhas ainda. Assim que houver participação, o ganho estimado e o desconto concedido aparecem aqui.</div>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            <div className="rounded-xl p-3" style={{ background: 'rgba(47,217,141,.08)', border: '1px solid rgba(47,217,141,.28)' }}>
+              <div className="text-[9px] uppercase text-faint font-extrabold flex items-center gap-1"><CircleDollarSign size={11} style={{ color: 'var(--ok)' }} /> Você recebe · total</div>
+              <div className="text-[19px] font-extrabold num mt-1" style={{ color: 'var(--ok)' }}>{brl(d.totais.voce_recebe)}</div>
+              <div className="text-[9.5px] text-faint mt-0.5">líquido estimado dos itens participantes</div>
+            </div>
+            <div className="rounded-xl p-3" style={{ background: 'rgba(224,162,60,.08)', border: '1px solid rgba(224,162,60,.28)' }}>
+              <div className="text-[9px] uppercase text-faint font-extrabold flex items-center gap-1"><TrendingDown size={11} style={{ color: 'var(--warn)' }} /> Desconto concedido · total</div>
+              <div className="text-[19px] font-extrabold num mt-1" style={{ color: 'var(--warn)' }}>{brl(d.totais.desconto)}</div>
+              <div className="text-[9.5px] text-faint mt-0.5">o quanto você abre mão nas campanhas</div>
+            </div>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            {camps.map((c) => (
+              <div key={c.id} className="flex items-center gap-2">
+                <span className="text-[10.5px] truncate flex-none" style={{ width: 128 }} title={c.nome}>{c.nome || meta(c.type).label}</span>
+                <div className="flex-1 h-5 rounded-md overflow-hidden relative" style={{ background: 'rgba(255,255,255,.05)' }}>
+                  <div className="h-full rounded-md flex items-center justify-end pr-1.5" style={{ width: `${Math.max(9, (c.voce_recebe / maxV) * 100)}%`, background: `linear-gradient(90deg, ${meta(c.type).cor}55, ${meta(c.type).cor})` }}>
+                    <span className="text-[9px] font-extrabold num text-white">{brl(c.voce_recebe)}</span>
+                  </div>
+                </div>
+                <span className="text-[9px] num flex-none text-right" style={{ width: 62, color: 'var(--warn)' }}>−{brl(c.desconto)}</span>
+                <span className="text-[9px] text-faint num flex-none text-right" style={{ width: 30 }}>{c.n}un</span>
+              </div>
+            ))}
+          </div>
+          <div className="text-[9px] text-faint mt-2 flex items-center gap-1"><Info size={10} /> Barra = você recebe (líquido) · à direita = desconto concedido · un = produtos na campanha.</div>
+        </>
+      )}
+    </div>
+  )
+}
+
+function Calendario({ minhas, cupons, convites, onAbrirCampanha }) {
   const linhas = useMemo(() => {
     const hoje = new Date(); hoje.setHours(0, 0, 0, 0)
     const fimJanela = new Date(hoje); fimJanela.setDate(fimJanela.getDate() + 30)
     const span = fimJanela - hoje
-    const barra = (p, cor) => {
+    const barra = (p, cor, fonte) => {
       if (!p.start_date && !p.finish_date) return null
       const ini = p.start_date ? new Date(p.start_date) : hoje
       const fim = p.finish_date ? new Date(p.finish_date) : fimJanela
@@ -846,28 +905,34 @@ function Calendario({ minhas, cupons, convites }) {
       if (b <= hoje || a >= fimJanela) return null
       const left = Math.max(0, ((a - hoje) / span) * 100)
       const width = Math.max(4, Math.min(100 - left, ((b - a) / span) * 100))
-      return { left, width, nome: p.name || meta(p.type).label, cor }
+      return { left, width, nome: p.name || meta(p.type).label, cor, promo: p, fonte, ini: p.start_date, fim: p.finish_date }
     }
     const arr = []
-    minhas.forEach((m) => { const b = barra(m, 'var(--accent)'); if (b) arr.push(b) })
-    cupons.forEach((c) => { const b = barra(c, ML); if (b) arr.push(b) })
-    return arr
-  }, [minhas, cupons])
+    convites.forEach((c) => { const b = barra(c, ML, 'convite'); if (b) arr.push(b) })
+    minhas.forEach((m) => { const b = barra(m, 'var(--accent)', 'minha'); if (b) arr.push(b) })
+    cupons.forEach((c) => { const b = barra(c, BLUE, 'cupom'); if (b) arr.push(b) })
+    return arr.sort((x, y) => x.left - y.left)
+  }, [minhas, cupons, convites])
 
   return (
     <>
-      <Secao icon={Calendar} cor="var(--accent)" titulo="Calendário de campanhas" pill="próximos 30 dias · agendamento" pillCor={BLUE} />
+      <Secao icon={Calendar} cor="var(--accent)" titulo="Calendário de campanhas" pill="próximos 30 dias · clique para abrir" pillCor={BLUE} />
       <div className="rounded-2xl p-4 glass lift">
         {linhas.length === 0
           ? <div className="text-[11.5px] text-faint flex items-center gap-2"><Info size={14} /> Sem campanhas com data no período. Campanhas agendadas aparecem aqui numa linha do tempo.</div>
           : <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-3 text-[8.5px] text-faint mb-1 flex-wrap">
+                <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ background: ML }} /> Convite do ML</span>
+                <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ background: 'var(--accent)' }} /> Minha campanha</span>
+                <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ background: BLUE }} /> Cupom</span>
+              </div>
               {linhas.map((l, i) => (
-                <div key={i} className="grid items-center gap-2" style={{ gridTemplateColumns: '150px 1fr' }}>
-                  <div className="text-[11px] text-dim truncate">{l.nome}</div>
-                  <div className="relative h-6 rounded-lg overflow-hidden" style={{ background: 'rgba(0,0,0,.2)' }}>
-                    <div className="absolute rounded-md flex items-center px-2 text-[8.5px] font-extrabold text-white whitespace-nowrap" style={{ left: `${l.left}%`, width: `${l.width}%`, top: 4, height: 16, background: `linear-gradient(90deg, ${l.cor}, ${l.cor}cc)` }} />
+                <button key={i} onClick={() => onAbrirCampanha && onAbrirCampanha(l.promo, l.fonte)} className="grid items-center gap-2 text-left group" style={{ gridTemplateColumns: '150px 1fr' }}>
+                  <div className="text-[11px] text-dim truncate group-hover:text-fg flex items-center gap-1">{l.nome}<ChevronRight size={11} className="opacity-0 group-hover:opacity-100 flex-none" /></div>
+                  <div className="relative h-6 rounded-lg overflow-hidden" style={{ background: 'rgba(0,0,0,.2)' }} title={`${dcurta(l.ini) || '—'} → ${dcurta(l.fim) || '—'}`}>
+                    <div className="absolute rounded-md flex items-center px-2 text-[8.5px] font-extrabold text-white whitespace-nowrap group-hover:brightness-110" style={{ left: `${l.left}%`, width: `${l.width}%`, top: 4, height: 16, background: `linear-gradient(90deg, ${l.cor}, ${l.cor}cc)`, boxShadow: `0 2px 8px ${l.cor}55` }}>{l.width > 14 ? `${dcurta(l.ini) || ''}` : ''}</div>
                   </div>
-                </div>
+                </button>
               ))}
               <div className="flex items-center justify-between text-[8.5px] text-faint mt-1 px-[2px]"><span>hoje</span><span>+15d</span><span>+30d</span></div>
             </div>}
@@ -878,28 +943,14 @@ function Calendario({ minhas, cupons, convites }) {
 
 /* ================= INTELIGÊNCIA (prévia — Etapa 3) ================= */
 function Inteligencia({ notify }) {
-  const elast = [
-    { sku: 'Fio Nylon 0.50mm', dp: '−15%', du: '+62%', ot: '18% · máx lucro', cor: 'var(--ok)' },
-    { sku: 'Alicate Inox 6 em 1', dp: '−22%', du: '+34%', ot: '12% · máx lucro', cor: 'var(--ok)' },
-    { sku: 'Caixa Organizadora 30', dp: '−10%', du: '+8%', ot: 'pouco elástico', cor: 'var(--warn)' },
-    { sku: 'Kit Cristal 6mm Azul', dp: '−25%', du: '+90%', ot: '30% · máx lucro', cor: 'var(--ok)' },
-  ]
   return (
     <div className="mt-4">
-      <Secao icon={Activity} cor={PURPLE} titulo="Inteligência" pill="buybox real · elasticidade em breve" pillCor={PURPLE} />
+      <Secao icon={Activity} cor={PURPLE} titulo="Inteligência" pill="buybox real · price-to-win" pillCor={PURPLE} />
       <BuyboxTracker notify={notify} />
-      <div className="rounded-2xl p-4 glass lift mt-3">
-        <div className="text-[10px] uppercase tracking-wide text-faint font-extrabold flex items-center gap-2 mb-3"><Activity size={13} /> Elasticidade por SKU — desconto que maximiza lucro <span className="ml-1 text-[8.5px] px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(160,107,232,.16)', color: PURPLE }}>prévia</span></div>
-        <div className="grid gap-2 text-[9px] uppercase tracking-wide text-faint font-extrabold pb-1" style={{ gridTemplateColumns: '1.6fr .7fr .7fr 1fr' }}><span>SKU</span><span>Δ preço</span><span>Δ unid.</span><span>ótimo</span></div>
-        {elast.map((e, i) => (
-          <div key={i} className="grid items-center gap-2 py-2 text-[11px]" style={{ gridTemplateColumns: '1.6fr .7fr .7fr 1fr', borderTop: '1px solid var(--glass-border)' }}>
-            <span className="font-semibold truncate">{e.sku}</span>
-            <span className="num">{e.dp}</span>
-            <span className="num" style={{ color: e.cor }}>{e.du}</span>
-            <span className="text-[10px] font-extrabold" style={{ color: e.cor }}>{e.ot}</span>
-          </div>
-        ))}
-        <div className="text-[9.5px] text-faint mt-2 flex items-center gap-1.5"><Info size={12} /> Cruza unidades antes/depois (cache de pedidos) × Δpreço. Alimenta os agentes.</div>
+      <div className="rounded-2xl p-4 glass mt-3" style={{ border: '1px dashed var(--glass-border)' }}>
+        <div className="text-[10px] uppercase tracking-wide text-faint font-extrabold flex items-center gap-2 mb-2"><Activity size={13} style={{ color: PURPLE }} /> Elasticidade de preço por SKU <span className="text-[8.5px] px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(160,107,232,.16)', color: PURPLE }}>em construção</span></div>
+        <div className="text-[11.5px] text-dim leading-relaxed">Vai cruzar as <b style={{ color: 'var(--fg)' }}>unidades vendidas antes e depois</b> de cada mudança de preço (do cache de pedidos) com o <b style={{ color: 'var(--fg)' }}>Δ preço</b> para achar o desconto que maximiza o lucro de cada anúncio — e alimentar os agentes. Precisa de histórico de vendas acumulado; conforme o cache cresce, os SKUs elásticos aparecem aqui com <b style={{ color: 'var(--fg)' }}>dados reais</b>, sem estimativas fabricadas.</div>
+        <div className="text-[10px] text-faint mt-2.5 flex items-center gap-1.5"><Info size={12} /> Já reais e ativos: o <b style={{ color: PURPLE }}>rastreador de buybox</b> acima e os <b style={{ color: PURPLE }}>6 agentes</b> na aba Automação.</div>
       </div>
     </div>
   )
@@ -1149,20 +1200,72 @@ function Automacao({ notify }) {
 
 /* ================= ADS ================= */
 function Ads() {
-  const m = [
-    ['ROAS', '4,8x', 'var(--ok)'], ['ACOS', '18%', 'var(--warn)'], ['Gasto', 'R$ 620', 'var(--text)'],
-    ['GMV Ads', 'R$ 2.980', 'var(--text)'], ['CPC médio', 'R$ 0,74', 'var(--text)'],
-  ]
+  const [d, setD] = useState(null)
+  const [carr, setCarr] = useState(true)
+  useEffect(() => {
+    let vivo = true
+    api.mlAdsPainel(30).then((r) => { if (vivo) setD(r) }).catch(() => { if (vivo) setD({ habilitado: false, motivo: 'Não foi possível consultar o Product Ads agora.' }) }).finally(() => { if (vivo) setCarr(false) })
+    return () => { vivo = false }
+  }, [])
+  const roasCor = (v) => v == null ? 'var(--dim)' : v >= 4 ? 'var(--ok)' : v >= 2 ? 'var(--warn)' : 'var(--danger)'
+  const acosCor = (v) => v == null ? 'var(--dim)' : v <= 15 ? 'var(--ok)' : v <= 25 ? 'var(--warn)' : 'var(--danger)'
+  const t = d?.totais || {}
   return (
     <div className="mt-4">
-      <Secao icon={Target} cor={BLUE} titulo="Product Ads" pill="requer permissão Advertising · prévia" pillCor={BLUE} />
-      <div className="rounded-2xl p-4 flex items-center gap-6 flex-wrap" style={{ background: 'linear-gradient(160deg, rgba(91,141,239,.08), rgba(0,0,0,.15))', border: '1px solid rgba(91,141,239,.25)' }}>
-        {m.map(([l, v, c], i) => (
-          <div key={i} className="flex flex-col"><span className="text-[9px] uppercase tracking-wide text-faint font-extrabold">{l}</span><span className="text-[16px] font-extrabold num" style={{ color: c }}>{v}</span></div>
-        ))}
-        <div className="ml-auto flex gap-2"><Act icon={Target}>Otimizar lance por ROAS</Act><Act icon={Ban} danger>Pausar acima do ACOS</Act></div>
-      </div>
-      <div className="text-[10px] text-faint mt-2 flex items-center gap-1.5"><Info size={12} /> Métricas reais quando a permissão Advertising e o advertiser_id estiverem habilitados. Entra depois do núcleo de campanhas.</div>
+      <Secao icon={Target} cor={BLUE} titulo="Product Ads" pill={d?.habilitado ? `Mercado Ads · ${d.conta || 'conta'} · 30d` : 'Mercado Ads · publicidade patrocinada'} pillCor={BLUE} />
+      {carr ? (
+        <div>
+          <div className="grid grid-cols-3 md:grid-cols-6 gap-3 mb-3">{Array.from({ length: 6 }).map((_, i) => <div key={i} className="skel" style={{ height: 62, borderRadius: 14 }} />)}</div>
+          {Array.from({ length: 3 }).map((_, i) => <div key={i} className="skel mb-2" style={{ height: 70, borderRadius: 16 }} />)}
+        </div>
+      ) : !d?.habilitado ? (
+        <div className="rounded-2xl p-6 glass text-center" style={{ border: '1px dashed var(--glass-border)' }}>
+          <div className="w-12 h-12 rounded-2xl grid place-items-center mx-auto mb-3" style={{ background: 'rgba(91,141,239,.14)', color: BLUE }}><Target size={22} /></div>
+          <div className="text-[14px] font-bold mb-1" style={{ fontFamily: 'Fraunces, Georgia, serif' }}>Product Ads não está habilitado</div>
+          <div className="text-[11.5px] text-dim max-w-md mx-auto leading-relaxed">{d?.motivo || 'Esta conta ainda não tem a permissão Advertising / um advertiser de Product Ads.'} Ative o <b style={{ color: 'var(--fg)' }}>Mercado Ads</b> no painel de anúncios do Mercado Livre; assim que houver campanhas, os dados reais (ROAS, ACOS, gasto, GMV) aparecem aqui automaticamente — sem números fabricados.</div>
+          {d?.detalhe && <div className="text-[9px] text-faint mt-3 num">{d.detalhe}</div>}
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-3 md:grid-cols-6 gap-3 mb-3">
+            <BbKpi l="Gasto · 30d" v={brl(t.gasto || 0)} c="var(--fg)" />
+            <BbKpi l="GMV Ads" v={brl(t.gmv || 0)} c="var(--ok)" />
+            <BbKpi l="ROAS" v={t.roas != null ? `${t.roas}x` : '—'} c={roasCor(t.roas)} sub="retorno" />
+            <BbKpi l="ACOS" v={t.acos != null ? `${t.acos}%` : '—'} c={acosCor(t.acos)} sub="custo/venda" />
+            <BbKpi l="Cliques" v={(t.clicks || 0).toLocaleString('pt-BR')} c={BLUE} />
+            <BbKpi l="Impressões" v={(t.prints || 0).toLocaleString('pt-BR')} c={PURPLE} />
+          </div>
+          {d.erro_campanhas ? (
+            <div className="rounded-2xl p-4 glass text-[11px] text-faint flex items-start gap-2"><AlertTriangle size={14} className="mt-0.5 flex-none" style={{ color: 'var(--warn)' }} /> <span>Advertising habilitado (conta {d.conta}), mas não consegui listar as campanhas agora: <span className="num">{d.erro_campanhas}</span></span></div>
+          ) : d.campanhas.length === 0 ? (
+            <Vazio texto="Nenhuma campanha de Product Ads ativa no período." />
+          ) : (
+            <div className="flex flex-col gap-2">
+              {d.campanhas.map((c) => {
+                const st = (c.status || '').toLowerCase() === 'active'
+                return (
+                  <div key={c.id} className="rounded-2xl p-3 glass lift">
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="w-8 h-8 rounded-lg grid place-items-center flex-none" style={{ background: 'rgba(91,141,239,.14)', color: BLUE }}><Target size={15} /></div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[12.5px] font-semibold truncate">{c.nome || c.id}</div>
+                        <div className="text-[9px] text-faint">{c.strategy || 'campanha'}{c.budget != null ? ` · orçamento ${brl(c.budget)}/dia` : ''}{c.acos_target != null ? ` · ACOS-alvo ${c.acos_target}%` : ''}</div>
+                      </div>
+                      <span className="text-[8.5px] font-extrabold px-2 py-0.5 rounded-full flex-none" style={{ background: st ? 'rgba(47,217,141,.14)' : 'rgba(255,255,255,.08)', color: st ? 'var(--ok)' : 'var(--faint)' }}>{st ? 'ATIVA' : (c.status || '—').toUpperCase()}</span>
+                    </div>
+                    <div className="grid grid-cols-3 md:grid-cols-6 gap-1.5">
+                      {[['Gasto', brl(c.cost || 0), 'var(--fg)'], ['GMV', brl(c.gmv || 0), 'var(--ok)'], ['ROAS', c.roas != null ? `${c.roas}x` : '—', roasCor(c.roas)], ['ACOS', c.acos != null ? `${c.acos}%` : '—', acosCor(c.acos)], ['Cliques', (c.clicks || 0).toLocaleString('pt-BR'), BLUE], ['CPC', c.cpc != null ? brl(c.cpc) : '—', 'var(--dim)']].map(([l, v, cc], i) => (
+                        <div key={i} className="rounded-lg px-2 py-1.5" style={{ background: 'rgba(0,0,0,.22)' }}><div className="text-[7.5px] uppercase text-faint font-extrabold">{l}</div><div className="text-[11.5px] font-extrabold num" style={{ color: cc }}>{v}</div></div>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+          <div className="text-[9.5px] text-faint mt-2 flex items-center gap-1.5"><Info size={12} /> Dados reais do Mercado Ads (últimos 30 dias). Gestão de lance/orçamento entra na próxima fase.</div>
+        </>
+      )}
     </div>
   )
 }
@@ -1400,56 +1503,118 @@ function Participantes({ notify }) {
   const [carregando, setCarregando] = useState(false)
   const [q, setQ] = useState('')
   const [prod, setProd] = useState(null)
-  const carregar = async () => {
+  const [vista, setVista] = useState('produto')
+  const [expandido, setExpandido] = useState(() => new Set())
+  const carregar = async (forcar) => {
     setCarregando(true)
-    try { const r = await api.mlPromoParticipantes(); setDados(r) }
+    try { const r = await api.mlPromoParticipantes(forcar); setDados(r) }
     catch (e) { notify && notify(traduzErroML(e.message), 'danger') }
     finally { setCarregando(false) }
   }
-  useEffect(() => { carregar() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { carregar(false) }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const ql = q.trim().toLowerCase()
-  const lista = (dados?.produtos || []).filter((p) => !ql || (`${p.titulo} ${p.sku || ''}`).toLowerCase().includes(ql))
+  const listaProd = (dados?.produtos || []).filter((p) => !ql || (`${p.titulo} ${p.sku || ''}`).toLowerCase().includes(ql))
+  const listaCamp = (dados?.campanhas || []).filter((c) => !ql || (c.nome || '').toLowerCase().includes(ql))
+  const totais = dados?.totais || {}
+  const toggleExp = (id) => { const n = new Set(expandido); n.has(id) ? n.delete(id) : n.add(id); setExpandido(n) }
+  const prodDaCampanha = (cid) => (dados?.produtos || []).filter((p) => p.campanhas.some((c) => c.id === cid))
   return (
     <div className="mt-4">
-      <Secao icon={Boxes} cor="var(--accent)" titulo="Produtos participantes" pill="em quais campanhas cada anúncio está" pillCor="var(--accent)" right={
-        <button onClick={carregar} disabled={carregando} className="text-[11px] font-bold px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5 disabled:opacity-50" style={{ background: 'rgba(214,0,127,.14)', color: 'var(--accent)', border: '1px solid rgba(214,0,127,.3)' }}>{carregando ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Atualizar</button>
-      } />
-      {dados && (
-        <div className="grid grid-cols-3 gap-3 mb-3">
-          <BbKpi l="Produtos em campanhas" v={dados.total_produtos} c="var(--accent)" />
-          <BbKpi l="Campanhas varridas" v={dados.promocoes_varridas} c={BLUE} />
-          <BbKpi l="Vínculos totais" v={(dados.produtos || []).reduce((a, p) => a + p.n, 0)} c="var(--ok)" sub="produto × campanha" />
+      <Secao icon={Boxes} cor="var(--accent)" titulo="Participantes" pill="produtos e campanhas em promoção" pillCor="var(--accent)" right={
+        <div className="flex items-center gap-2">
+          {dados?.cache && <span className="text-[9px] text-faint inline-flex items-center gap-1"><Clock size={10} /> em cache</span>}
+          <button onClick={() => carregar(true)} disabled={carregando} className="text-[11px] font-bold px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5 disabled:opacity-50" style={{ background: 'rgba(214,0,127,.14)', color: 'var(--accent)', border: '1px solid rgba(214,0,127,.3)' }}>{carregando ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Atualizar</button>
         </div>
-      )}
-      <div className="relative mb-3">
-        <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filtrar por produto ou SKU…" className="w-full text-[12.5px] pl-9 pr-3 py-2.5 rounded-xl bg-transparent" style={{ border: '1px solid var(--glass-border)' }} />
+      } />
+      {carregando && !dados
+        ? <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="skel" style={{ height: 62, borderRadius: 14 }} />)}</div>
+        : dados && (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+            <BbKpi l="Produtos em campanhas" v={dados.total_produtos} c="var(--accent)" sub={`${(dados.produtos || []).reduce((a, p) => a + p.n, 0)} vínculos`} />
+            <BbKpi l="Campanhas com itens" v={totais.campanhas ?? 0} c={BLUE} sub={`de ${dados.promocoes_varridas} varridas`} />
+            <BbKpi l="Você recebe · total" v={brl(totais.voce_recebe || 0)} c="var(--ok)" sub="líquido estimado" />
+            <BbKpi l="Desconto concedido" v={brl(totais.desconto || 0)} c="var(--warn)" sub="o quanto abre mão" />
+          </div>
+        )}
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
+        <div className="flex gap-1 p-1 rounded-xl flex-none" style={{ background: 'rgba(0,0,0,.28)', border: '1px solid var(--glass-border)' }}>
+          {[['produto', 'Por produto', Boxes], ['campanha', 'Por campanha', Tag]].map(([id, lb, Ic]) => (
+            <button key={id} onClick={() => setVista(id)} className="text-[11px] font-bold px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5 transition-colors" style={vista === id ? { background: 'linear-gradient(135deg, rgba(214,0,127,.9), rgba(214,0,127,.55))', color: '#fff' } : { color: 'var(--dim)' }}><Ic size={12} /> {lb}</button>
+          ))}
+        </div>
+        <div className="relative flex-1 min-w-[180px]">
+          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={vista === 'produto' ? 'Filtrar por produto ou SKU…' : 'Filtrar por campanha…'} className="w-full text-[12.5px] pl-9 pr-3 py-2.5 rounded-xl bg-transparent" style={{ border: '1px solid var(--glass-border)' }} />
+        </div>
       </div>
       {carregando && !dados ? (
         <div>{Array.from({ length: 4 }).map((_, i) => <div key={i} className="skel mb-2" style={{ height: 66, borderRadius: 16 }} />)}</div>
-      ) : !dados || lista.length === 0 ? (
-        <Vazio texto={dados ? (ql ? `Nenhum produto para “${q}”.` : 'Nenhum produto participando de campanhas no momento. Adira itens nos convites/campanhas para vê-los aqui.') : 'Clique em Atualizar para varrer as campanhas.'} />
-      ) : (
-        <div className="flex flex-col gap-2">
-          {lista.map((p) => (
-            <div key={p.item_id} onClick={() => setProd(p.item_id)} className="rounded-2xl p-3 glass lift flex items-center gap-3 cursor-pointer">
-              {p.imagem ? <img src={p.imagem} alt="" className="w-11 h-11 rounded-lg object-cover flex-none" style={{ border: '1px solid var(--glass-border)' }} /> : <div className="w-11 h-11 rounded-lg grid place-items-center flex-none" style={{ background: 'rgba(255,255,255,.05)' }}><Boxes size={17} className="text-faint" /></div>}
-              <div className="min-w-0 flex-1">
-                <div className="text-[12.5px] font-semibold truncate">{p.titulo}</div>
-                <div className="text-[9.5px] text-faint num truncate mb-1">{p.sku || p.item_id}{p.preco != null ? ` · ${brl(p.preco)}` : ''}</div>
-                <div className="flex items-center gap-1 flex-wrap">
-                  {p.campanhas.slice(0, 4).map((c, i) => <span key={i} className="text-[8.5px] font-bold px-1.5 py-0.5 rounded-full truncate" style={{ background: `${meta(c.type).cor}1e`, color: meta(c.type).cor, maxWidth: 160 }}>{c.nome || meta(c.type).label}</span>)}
-                  {p.campanhas.length > 4 && <span className="text-[8.5px] text-faint">+{p.campanhas.length - 4}</span>}
+      ) : !dados ? (
+        <Vazio texto="Clique em Atualizar para varrer as campanhas." />
+      ) : vista === 'produto' ? (
+        listaProd.length === 0 ? <Vazio texto={ql ? `Nenhum produto para “${q}”.` : 'Nenhum produto participando de campanhas no momento. Adira itens nos convites/campanhas para vê-los aqui.'} /> : (
+          <div className="flex flex-col gap-2">
+            {listaProd.map((p) => (
+              <div key={p.item_id} onClick={() => setProd(p.item_id)} className="rounded-2xl p-3 glass lift flex items-center gap-3 cursor-pointer">
+                {p.imagem ? <img src={p.imagem} alt="" className="w-11 h-11 rounded-lg object-cover flex-none" style={{ border: '1px solid var(--glass-border)' }} /> : <div className="w-11 h-11 rounded-lg grid place-items-center flex-none" style={{ background: 'rgba(255,255,255,.05)' }}><Boxes size={17} className="text-faint" /></div>}
+                <div className="min-w-0 flex-1">
+                  <div className="text-[12.5px] font-semibold truncate">{p.titulo}</div>
+                  <div className="text-[9.5px] text-faint num truncate mb-1">{p.sku || p.item_id}{p.preco != null ? ` · ${brl(p.preco)}` : ''}</div>
+                  <div className="flex items-center gap-1 flex-wrap">
+                    {p.campanhas.slice(0, 4).map((c, i) => <span key={i} className="text-[8.5px] font-bold px-1.5 py-0.5 rounded-full truncate" style={{ background: `${meta(c.type).cor}1e`, color: meta(c.type).cor, maxWidth: 160 }}>{c.nome || meta(c.type).label}</span>)}
+                    {p.campanhas.length > 4 && <span className="text-[8.5px] text-faint">+{p.campanhas.length - 4}</span>}
+                  </div>
                 </div>
+                <div className="flex-none text-right">
+                  <div className="text-[16px] font-extrabold num" style={{ color: 'var(--accent)' }}>{p.n}</div>
+                  <div className="text-[8px] uppercase text-faint font-extrabold">campanhas</div>
+                </div>
+                <ChevronRight size={16} className="text-faint flex-none" />
               </div>
-              <div className="flex-none text-right">
-                <div className="text-[16px] font-extrabold num" style={{ color: 'var(--accent)' }}>{p.n}</div>
-                <div className="text-[8px] uppercase text-faint font-extrabold">campanhas</div>
-              </div>
-              <ChevronRight size={16} className="text-faint flex-none" />
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )
+      ) : (
+        listaCamp.length === 0 ? <Vazio texto={ql ? `Nenhuma campanha para “${q}”.` : 'Nenhuma campanha com itens participando ainda.'} /> : (
+          <div className="flex flex-col gap-2">
+            {listaCamp.map((c) => {
+              const aberto = expandido.has(c.id)
+              const Ic = meta(c.type).icon
+              const prods = aberto ? prodDaCampanha(c.id) : []
+              return (
+                <div key={c.id} className="rounded-2xl glass overflow-hidden">
+                  <button onClick={() => toggleExp(c.id)} className="w-full p-3 flex items-center gap-3 text-left">
+                    <div className="w-11 h-11 rounded-xl grid place-items-center flex-none" style={{ background: `${meta(c.type).cor}1e`, color: meta(c.type).cor }}><Ic size={18} /></div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[12.5px] font-semibold truncate">{c.nome || meta(c.type).label}</div>
+                      <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                        <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: `${meta(c.type).cor}1e`, color: meta(c.type).cor }}>{meta(c.type).label}</span>
+                        <span className="text-[9px] num inline-flex items-center gap-0.5" style={{ color: 'var(--ok)' }}><CircleDollarSign size={9} /> {brl(c.voce_recebe)}</span>
+                        <span className="text-[9px] num" style={{ color: 'var(--warn)' }}>−{brl(c.desconto)} desc.</span>
+                      </div>
+                    </div>
+                    <div className="flex-none text-right">
+                      <div className="text-[16px] font-extrabold num" style={{ color: 'var(--accent)' }}>{c.n}</div>
+                      <div className="text-[8px] uppercase text-faint font-extrabold">produtos</div>
+                    </div>
+                    <ChevronDown size={16} className="text-faint flex-none" style={{ transform: aberto ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }} />
+                  </button>
+                  {aberto && (
+                    <div className="px-3 pb-3 flex flex-col gap-1" style={{ borderTop: '1px solid var(--glass-border)' }}>
+                      {prods.length === 0 ? <div className="text-[10.5px] text-faint py-2">Os produtos desta campanha não vieram na varredura atual.</div> : prods.slice(0, 60).map((p) => (
+                        <button key={p.item_id} onClick={() => setProd(p.item_id)} className="flex items-center gap-2.5 p-2 mt-1 rounded-lg text-left lift" style={{ background: 'rgba(0,0,0,.18)' }}>
+                          {p.imagem ? <img src={p.imagem} alt="" className="w-8 h-8 rounded-md object-cover flex-none" style={{ border: '1px solid var(--glass-border)' }} /> : <div className="w-8 h-8 rounded-md grid place-items-center flex-none" style={{ background: 'rgba(255,255,255,.05)' }}><Boxes size={13} className="text-faint" /></div>}
+                          <div className="min-w-0 flex-1"><div className="text-[11.5px] truncate">{p.titulo}</div><div className="text-[8.5px] text-faint num truncate">{p.sku || p.item_id}{p.preco != null ? ` · ${brl(p.preco)}` : ''}</div></div>
+                          <ChevronRight size={13} className="text-faint flex-none" />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )
       )}
       {prod && <ProdutoCampanhasDrawer itemId={prod} onClose={() => setProd(null)} notify={notify} />}
     </div>
@@ -1459,11 +1624,31 @@ function Participantes({ notify }) {
 function ProdutoCampanhasDrawer({ itemId, onClose, notify }) {
   const [d, setD] = useState(null)
   const [carr, setCarr] = useState(true)
-  useEffect(() => {
-    let vivo = true
-    api.mlItemPromocoes(itemId).then((r) => { if (vivo) setD(r) }).catch((e) => { if (vivo) { setD(null); notify && notify(traduzErroML(e.message), 'danger') } }).finally(() => { if (vivo) setCarr(false) })
-    return () => { vivo = false }
-  }, [itemId])
+  const [acao, setAcao] = useState(null)
+  const carregar = useCallback(async (silencioso) => {
+    if (!silencioso) setCarr(true)
+    try { const r = await api.mlItemPromocoes(itemId); setD(r) }
+    catch (e) { if (!silencioso) { setD(null); notify && notify(traduzErroML(e.message), 'danger') } }
+    finally { setCarr(false) }
+  }, [itemId, notify])
+  useEffect(() => { carregar() }, [carregar])
+  const participar = async (c) => {
+    if (!c.acima_piso && !window.confirm(`Este preço (${brl(c.preco_final)}) fica ABAIXO do seu piso (${brl(c.piso)}). Participar mesmo assim?`)) return
+    setAcao(c.id)
+    try {
+      const body = { promotion_id: c.id, promotion_type: c.type, deal_price: c.preco_final, permitir_abaixo_piso: !c.acima_piso }
+      if (TIPOS_OFFER_ID.has(c.type) && c.offer_id) body.offer_id = c.offer_id
+      await api.mlPromoAderir(itemId, body)
+      notify && notify('Participação confirmada no Mercado Livre.', 'ok'); await carregar(true)
+    } catch (e) { notify && notify(traduzErroML(e.message), 'danger') } finally { setAcao(null) }
+  }
+  const sair = async (c) => {
+    setAcao(c.id)
+    try {
+      await api.mlPromoRemoverItem(itemId, c.type, c.id, TIPOS_OFFER_ID.has(c.type) ? c.offer_id : null)
+      notify && notify('Você deixou de participar da campanha.', 'ok'); await carregar(true)
+    } catch (e) { notify && notify(traduzErroML(e.message), 'danger') } finally { setAcao(null) }
+  }
   const ST = { active: { t: 'ATIVA', c: 'var(--ok)' }, started: { t: 'ATIVA', c: 'var(--ok)' }, pending: { t: 'PROGRAMADA', c: BLUE }, candidate: { t: 'DISPONÍVEL', c: 'var(--warn)' } }
   return createPortal(
     <div className="fixed inset-0 z-[100] flex justify-end" style={{ background: 'rgba(0,0,0,.55)' }} onClick={(e) => { e.stopPropagation(); onClose() }}>
@@ -1506,6 +1691,13 @@ function ProdutoCampanhasDrawer({ itemId, onClose, notify }) {
                     </div>
                     {coop > 0 && <div className="text-[9px] mt-1.5 num" style={{ color: BLUE }}>cofinanciado: ML {Math.round(c.meli_percentage || 0)}% · você {Math.round(c.seller_percentage || 0)}%</div>}
                     {!c.acima_piso && c.preco_final != null && c.piso != null && <div className="text-[9px] mt-1 flex items-center gap-1" style={{ color: 'var(--danger)' }}><AlertTriangle size={10} /> abaixo do piso ({brl(c.piso)})</div>}
+                    <div className="mt-2 flex justify-end">
+                      {part ? (
+                        <button onClick={() => sair(c)} disabled={acao === c.id} className="text-[10.5px] font-bold px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5 disabled:opacity-50" style={{ border: '1px solid rgba(255,122,122,.4)', color: 'var(--danger)' }}>{acao === c.id ? <Loader2 size={12} className="animate-spin" /> : <Ban size={12} />} Deixar de participar</button>
+                      ) : (c.preco_final != null && (
+                        <button onClick={() => participar(c)} disabled={acao === c.id} className="text-[10.5px] font-bold px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5 text-white disabled:opacity-50" style={{ background: c.acima_piso ? 'var(--accent)' : 'var(--warn)' }}>{acao === c.id ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />} {c.acima_piso ? 'Participar' : 'Participar mesmo assim'}</button>
+                      ))}
+                    </div>
                   </div>
                 )
               })}
