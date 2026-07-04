@@ -236,7 +236,8 @@ export default function Promocoes() {
       {estado === 'carregando' && !painel && <SkeletonPromocoes />}
 
       {painel && (aba === 'visao' || aba === 'minhas' || aba === 'convites' || aba === 'cupons') && (
-        <>
+        <div className={picker ? 'grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(400px,560px)] gap-4 items-start' : ''}>
+        <div className="min-w-0">
           {aba === 'visao' && (
             <>
               <div className="grid grid-cols-6 gap-3 mt-4">
@@ -261,7 +262,13 @@ export default function Promocoes() {
           {aba === 'minhas' && <SecMinhas minhas={minhas} onAcao={emBreve} onEncerrar={encerrarCampanha} onAddItens={abrirAddItens} onSincronizar={sincronizarPedidos} notify={notify} full />}
           {aba === 'convites' && <SecConvites convites={convites} onAderir={abrirAderir} onAutoAderir={aderirAutoConvite} onSair={sairConvite} onAplicarAutomaticos={aplicarAutomaticos} autoRodando={autoRodando} onContagem={reportContagem} full />}
           {aba === 'cupons' && <SecCupons cupons={cupons} onAcao={emBreve} onEncerrar={encerrarCampanha} full />}
-        </>
+        </div>
+        {picker && (
+          <div className="xl:sticky xl:top-4">
+            <SeletorItens key={picker.promotionId} modo={picker.modo} promotionId={picker.promotionId} promotionType={picker.promotionType} promoNome={picker.promoNome} inicio={picker.inicio} fim={picker.fim} onClose={() => setPicker(null)} onOk={() => { setPicker(null); carregar() }} notify={notify} />
+          </div>
+        )}
+        </div>
       )}
 
       {aba === 'participantes' && <Blindagem><Participantes notify={notify} /></Blindagem>}
@@ -271,7 +278,6 @@ export default function Promocoes() {
 
       {modal === 'campanha' && <NovaCampanhaModal onClose={() => setModal(null)} onOk={() => { setModal(null); carregar() }} notify={notify} />}
       {modal === 'cupom' && <NovoCupomModal onClose={() => setModal(null)} onOk={() => { setModal(null); carregar() }} notify={notify} />}
-      {picker && <SeletorItens modo={picker.modo} promotionId={picker.promotionId} promotionType={picker.promotionType} promoNome={picker.promoNome} inicio={picker.inicio} fim={picker.fim} onClose={() => setPicker(null)} onOk={() => { setPicker(null); carregar() }} notify={notify} />}
     </div>
   )
 }
@@ -1075,10 +1081,11 @@ const BB_ST = {
   compartilhando: { c: 'var(--warn)', t: 'dividindo' },
 }
 
-function BbKpi({ l, v, c, sub }) {
+function BbKpi({ l, v, c, sub, icon: Ic }) {
   return (
-    <div className="rounded-xl px-2.5 py-2" style={{ background: `${c}12`, border: `1px solid ${c}2e` }}>
-      <div className="text-[8px] uppercase tracking-wide text-faint font-extrabold">{l}</div>
+    <div className="rounded-xl px-2.5 py-2 relative overflow-hidden" style={{ background: `linear-gradient(150deg, ${c}16, rgba(0,0,0,.22))`, border: `1px solid ${c}2e` }}>
+      {Ic && <Ic size={26} className="absolute -right-1 -bottom-1 opacity-[0.14]" style={{ color: c }} />}
+      <div className="text-[8px] uppercase tracking-wide text-faint font-extrabold flex items-center gap-1">{Ic && <Ic size={10} style={{ color: c }} />}{l}</div>
       <div className="text-[18px] font-extrabold num" style={{ color: c }}>{v}</div>
       {sub && <div className="text-[8px] text-faint">{sub}</div>}
     </div>
@@ -1671,14 +1678,16 @@ function Participantes({ notify }) {
   const [sel, setSel] = useState(null)
   const [vista, setVista] = useState('produto')
   const [ordem, setOrdem] = useState('campanhas')
+  const [dias, setDias] = useState(30)
+  const [mes, setMes] = useState('')
   const [expandido, setExpandido] = useState(() => new Set())
-  const carregar = async (forcar) => {
+  const carregar = async (forcar, d = dias, m = mes) => {
     setCarregando(true)
-    try { const r = await api.mlPromoParticipantes(forcar); setDados(r) }
+    try { const r = await api.mlPromoParticipantes(forcar, d, m || null); setDados(r) }
     catch (e) { notify && notify(traduzErroML(e.message), 'danger') }
     finally { setCarregando(false) }
   }
-  useEffect(() => { carregar(false) }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { carregar(false) }, [dias, mes]) // eslint-disable-line react-hooks/exhaustive-deps
   const ql = q.trim().toLowerCase()
   const produtos = dados?.produtos || []
   const campanhas = dados?.campanhas || []
@@ -1704,15 +1713,30 @@ function Participantes({ notify }) {
         </div>
       } />
 
+      {/* período das vendas */}
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
+        <span className="text-[9px] uppercase tracking-wide text-faint font-extrabold flex items-center gap-1"><Calendar size={11} style={{ color: PURPLE }} /> Vendas no período</span>
+        <div className="flex gap-1 p-1 rounded-xl" style={{ background: 'rgba(0,0,0,.28)', border: '1px solid var(--glass-border)' }}>
+          {[7, 15, 30, 60, 90].map((d) => (
+            <button key={d} onClick={() => { setMes(''); setDias(d) }} className="text-[10px] font-bold px-2.5 py-1 rounded-lg transition-colors" style={!mes && dias === d ? { background: 'linear-gradient(135deg, rgba(160,107,232,.85), rgba(160,107,232,.5))', color: '#fff' } : { color: 'var(--dim)' }}>{d}d</button>
+          ))}
+        </div>
+        <select value={mes} onChange={(e) => setMes(e.target.value)} className="text-[10.5px] font-bold px-2.5 py-1.5 rounded-xl bg-transparent" style={{ border: `1px solid ${mes ? 'rgba(160,107,232,.5)' : 'var(--glass-border)'}`, color: mes ? '#cfaef5' : 'var(--dim)', background: 'var(--surface)' }}>
+          <option value="">Mês específico…</option>
+          {(() => { const ops = []; const dHoje = new Date(); for (let i = 0; i < 12; i++) { const d = new Date(dHoje.getFullYear(), dHoje.getMonth() - i, 1); const v = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; ops.push(<option key={v} value={v}>{d.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}</option>) } return ops })()}
+        </select>
+        {dados?.janela && <span className="text-[9px] font-extrabold px-2 py-0.5 rounded-full" style={{ background: 'rgba(160,107,232,.14)', color: '#cfaef5' }}>janela: {dados.janela}</span>}
+      </div>
+
       {carregando && !dados
         ? <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="skel" style={{ height: 62, borderRadius: 14 }} />)}</div>
         : dados && (
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-3">
-            <BbKpi l="Produtos em campanhas" v={dados.total_produtos ?? 0} c="var(--accent)" sub={`${produtos.reduce((a, p) => a + (p.n || 0), 0)} vínculos`} />
-            <BbKpi l="Campanhas com itens" v={totais.campanhas ?? 0} c={BLUE} sub={`de ${dados.promocoes_varridas ?? 0} varridas`} />
-            <BbKpi l="Você recebe · total" v={brl(totais.voce_recebe || 0)} c="var(--ok)" sub="líquido estimado" />
-            <BbKpi l="Desconto concedido" v={brl(totais.desconto || 0)} c="var(--warn)" sub="o quanto abre mão" />
-            <BbKpi l="Vendas · 30d" v={totais.vendas_30d ?? 0} c={PURPLE} sub={totais.cache_pedidos ? brl(totais.receita_30d || 0) : 'sincronize os pedidos'} />
+            <BbKpi icon={Boxes} l="Produtos em campanhas" v={dados.total_produtos ?? 0} c="var(--accent)" sub={`${produtos.reduce((a, p) => a + (p.n || 0), 0)} vínculos`} />
+            <BbKpi icon={Tag} l="Campanhas com itens" v={totais.campanhas ?? 0} c={BLUE} sub={`de ${dados.promocoes_varridas ?? 0} varridas`} />
+            <BbKpi icon={CircleDollarSign} l="Você recebe · total" v={brl(totais.voce_recebe || 0)} c="var(--ok)" sub="líquido estimado" />
+            <BbKpi icon={TrendingDown} l="Desconto concedido" v={brl(totais.desconto || 0)} c="var(--warn)" sub="o quanto abre mão" />
+            <BbKpi icon={TrendingUp} l={`Vendas · ${dados.janela || '30d'}`} v={totais.vendas_30d ?? 0} c={PURPLE} sub={totais.cache_pedidos ? brl(totais.receita_30d || 0) : 'sincronize os pedidos'} />
           </div>
         )}
 
@@ -1722,6 +1746,63 @@ function Participantes({ notify }) {
           <span><b>Vendas por produto indisponíveis:</b> o cache de pedidos está vazio. Clique em <b>“Sincronizar pedidos”</b> (topo da Central) para trazer o histórico do ML — as unidades vendidas e a receita de cada produto participante aparecem aqui.</span>
         </div>
       )}
+      {/* radar de eficiência — durante × antes */}
+      {dados && totais.cache_pedidos && (() => {
+        const comLift = campanhas.filter((c) => c.lift && c.lift.status !== 'sem_dados')
+        if (!comLift.length) return null
+        const lr = totais.lift || {}
+        const maxAbs = Math.max(20, ...comLift.map((c) => Math.abs(c.lift.pct ?? 100)))
+        const VER = {
+          acelerou: { t: 'ACELEROU', c: 'var(--ok)' }, neutra: { t: 'NEUTRA', c: 'var(--warn)' },
+          revisar: { t: 'REVISAR', c: 'var(--danger)' }, novo_giro: { t: 'NOVO GIRO', c: PURPLE },
+        }
+        const ordenadas = [...comLift].sort((a, b) => (b.lift.pct ?? 999) - (a.lift.pct ?? 999)).slice(0, 8)
+        return (
+          <div className="rounded-2xl p-4 mb-3" style={{ border: '1px solid transparent', background: 'linear-gradient(180deg,var(--surface),#160c13) padding-box, linear-gradient(155deg, rgba(160,107,232,.55), rgba(214,0,127,.15) 50%, rgba(255,255,255,.08)) border-box' }}>
+            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+              <span className="text-[10px] uppercase tracking-wide font-extrabold flex items-center gap-1.5" style={{ color: '#cfaef5' }}><Gauge size={13} /> Radar de eficiência — o desconto está comprando giro?</span>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {lr.aceleraram > 0 && <span className="text-[8.5px] font-extrabold px-2 py-0.5 rounded-full" style={{ background: 'rgba(47,217,141,.14)', color: 'var(--ok)' }}>▲ {lr.aceleraram} aceleraram</span>}
+                {lr.novo_giro > 0 && <span className="text-[8.5px] font-extrabold px-2 py-0.5 rounded-full" style={{ background: 'rgba(160,107,232,.16)', color: '#cfaef5' }}>{lr.novo_giro} novo giro</span>}
+                {lr.neutras > 0 && <span className="text-[8.5px] font-extrabold px-2 py-0.5 rounded-full" style={{ background: 'rgba(224,162,60,.14)', color: 'var(--warn)' }}>{lr.neutras} neutras</span>}
+                {lr.revisar > 0 && <span className="text-[8.5px] font-extrabold px-2 py-0.5 rounded-full" style={{ background: 'rgba(255,122,122,.14)', color: 'var(--danger)' }}>▼ {lr.revisar} revisar</span>}
+              </div>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              {ordenadas.map((c) => {
+                const L = c.lift; const v = VER[L.status] || VER.neutra
+                const pct = L.pct
+                const w = pct == null ? 100 : Math.min(100, (Math.abs(pct) / maxAbs) * 100)
+                return (
+                  <div key={c.id} className="flex items-center gap-2">
+                    <span className="text-[10px] truncate flex-none text-dim" style={{ width: 128 }} title={c.nome}>{c.nome || meta(c.type).label}</span>
+                    <div className="flex-1 flex items-center h-5 relative" style={{ background: 'rgba(255,255,255,.04)', borderRadius: 6 }}>
+                      <div className="absolute left-1/2 top-0 bottom-0" style={{ width: 1, background: 'rgba(255,255,255,.18)' }} />
+                      {pct == null ? (
+                        <div className="absolute left-1/2 h-3.5 rounded-r flex items-center pl-1.5" style={{ width: '46%', top: 3, background: 'linear-gradient(90deg, rgba(160,107,232,.7), rgba(160,107,232,.25))' }}>
+                          <span className="text-[8px] font-extrabold text-white num">{L.un_durante} un do zero</span>
+                        </div>
+                      ) : pct >= 0 ? (
+                        <div className="absolute left-1/2 h-3.5 rounded-r flex items-center justify-end pr-1" style={{ width: `${w / 2}%`, top: 3, background: 'linear-gradient(90deg, rgba(47,217,141,.35), var(--ok))' }}>
+                          <span className="text-[8px] font-extrabold num" style={{ color: '#04140c' }}>+{pct}%</span>
+                        </div>
+                      ) : (
+                        <div className="absolute h-3.5 rounded-l flex items-center pl-1" style={{ right: '50%', width: `${w / 2}%`, top: 3, background: 'linear-gradient(270deg, rgba(255,122,122,.35), var(--danger))' }}>
+                          <span className="text-[8px] font-extrabold num" style={{ color: '#1a0505' }}>{pct}%</span>
+                        </div>
+                      )}
+                    </div>
+                    <span className="text-[8.5px] num text-faint flex-none text-right" style={{ width: 86 }}>{L.un_antes}→{L.un_durante} un · {L.dur_dias}d</span>
+                    <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full flex-none text-center" style={{ width: 74, background: `${v.c}1c`, color: v.c }}>{v.t}</span>
+                  </div>
+                )
+              })}
+            </div>
+            <div className="text-[9px] text-faint mt-2 flex items-center gap-1"><Info size={10} /> Compara unidades vendidas DURANTE a campanha × período anterior igual (dados reais do cache). Verde = o desconto comprou giro; vermelho = você abre mão de margem sem vender mais.</div>
+          </div>
+        )
+      })()}
+
       {carregando && !dados
         ? <div className="skel mb-3" style={{ height: 150, borderRadius: 16 }} />
         : topCamp.length > 0 && (
@@ -1806,8 +1887,13 @@ function Participantes({ notify }) {
                           {p.desconto_max_pct > 0 && <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(224,162,60,.16)', color: 'var(--warn)' }}>até −{p.desconto_max_pct}%</span>}
                           {p.estoque != null && <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: p.estoque <= 5 ? 'rgba(255,122,122,.14)' : 'rgba(255,255,255,.07)', color: p.estoque <= 5 ? 'var(--danger)' : 'var(--dim)' }}>{p.estoque} un</span>}
                           {dados?.totais?.cache_pedidos && (p.vendas_30d > 0
-                            ? <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full inline-flex items-center gap-0.5" style={{ background: 'rgba(47,217,141,.14)', color: 'var(--ok)' }}><TrendingUp size={8} /> {p.vendas_30d} vendidos · 30d</span>
-                            : <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(255,255,255,.07)', color: 'var(--faint)' }}>sem venda 30d</span>)}
+                            ? <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full inline-flex items-center gap-0.5" style={{ background: 'rgba(47,217,141,.14)', color: 'var(--ok)' }}><TrendingUp size={8} /> {p.vendas_30d} vendidos{dados.janela ? ` · ${dados.janela}` : ''}</span>
+                            : <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(255,255,255,.07)', color: 'var(--faint)' }}>sem venda{dados.janela ? ` · ${dados.janela}` : ''}</span>)}
+                          {p.logistic_type === 'fulfillment' && <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(242,194,0,.16)', color: ML }}>FULL</span>}
+                          {p.logistic_type === 'self_service' && <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(47,217,141,.12)', color: 'var(--ok)' }}>FLEX</span>}
+                          {p.frete_gratis && <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(91,141,239,.14)', color: BLUE }}>frete grátis</span>}
+                          {p.catalogo && <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(160,107,232,.14)', color: '#cfaef5' }}>catálogo</span>}
+                          {p.saude != null && <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: p.saude >= 0.8 ? 'rgba(47,217,141,.12)' : p.saude >= 0.5 ? 'rgba(224,162,60,.14)' : 'rgba(255,122,122,.14)', color: p.saude >= 0.8 ? 'var(--ok)' : p.saude >= 0.5 ? 'var(--warn)' : 'var(--danger)' }}>saúde {Math.round(p.saude * 100)}%</span>}
                         </div>
                         <div className="flex items-center gap-1 flex-wrap">
                           {(p.campanhas || []).slice(0, 4).map((c, i) => <span key={i} className="text-[8.5px] font-bold px-1.5 py-0.5 rounded-full truncate" style={{ background: `${meta(c.type).cor}1e`, color: meta(c.type).cor, maxWidth: 160 }}>{c.nome || meta(c.type).label}</span>)}
@@ -1840,6 +1926,9 @@ function Participantes({ notify }) {
                               <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: `${meta(c.type).cor}1e`, color: meta(c.type).cor }}>{meta(c.type).label}</span>
                               <span className="text-[9px] num inline-flex items-center gap-0.5" style={{ color: 'var(--ok)' }}><CircleDollarSign size={9} /> {brl(c.voce_recebe)}</span>
                               <span className="text-[9px] num" style={{ color: 'var(--warn)' }}>−{brl(c.desconto)} desc.</span>
+                              {c.lift && c.lift.status !== 'sem_dados' && (c.lift.pct != null
+                                ? <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: c.lift.pct >= 15 ? 'rgba(47,217,141,.14)' : c.lift.pct <= -15 ? 'rgba(255,122,122,.14)' : 'rgba(224,162,60,.14)', color: c.lift.pct >= 15 ? 'var(--ok)' : c.lift.pct <= -15 ? 'var(--danger)' : 'var(--warn)' }}>{c.lift.pct >= 0 ? '▲ +' : '▼ '}{c.lift.pct}% giro</span>
+                                : <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(160,107,232,.16)', color: '#cfaef5' }}>novo giro</span>)}
                             </div>
                           </div>
                           <div className="flex-none text-right">
@@ -2093,9 +2182,9 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, inicio, fim
     else notify(`${alvos.length - falhas.length} ok · ${falhas.length} com erro.`, falhas.length === alvos.length ? 'danger' : 'warn')
   }
 
-  return createPortal(
-    <div className="fixed inset-0 z-[100] flex justify-end" style={{ background: 'rgba(0,0,0,.55)' }} onClick={aplicando ? undefined : (e) => { e.stopPropagation(); onClose() }}>
-      <div onClick={(e) => e.stopPropagation()} className="h-full w-full drawer-in flex flex-col" style={{ maxWidth: 640, border: '1px solid transparent', background: 'linear-gradient(180deg,var(--surface),#160c13) padding-box, linear-gradient(155deg, rgba(214,0,127,.6), rgba(214,0,127,.06) 42%, rgba(255,255,255,.10)) border-box', boxShadow: '-24px 0 70px rgba(0,0,0,.55)' }}>
+  return (
+    <div className="rounded-2xl overflow-hidden card-in" style={{ border: '1px solid transparent', background: 'linear-gradient(180deg,var(--surface),#160c13) padding-box, linear-gradient(155deg, rgba(214,0,127,.65), rgba(214,0,127,.06) 42%, rgba(255,255,255,.10)) border-box', boxShadow: '0 20px 60px rgba(0,0,0,.5)' }}>
+      <div className="flex flex-col" style={{ maxHeight: 'calc(100vh - 40px)' }}>
         {/* header */}
         <div className="flex items-center gap-2.5 px-4 py-3 flex-none" style={{ borderBottom: '1px solid var(--glass-border)' }}>
           <div className="w-9 h-9 rounded-xl grid place-items-center flex-none" style={{ background: 'linear-gradient(145deg, rgba(214,0,127,.95), rgba(168,0,99,.95))', color: '#fff', boxShadow: '0 4px 14px rgba(214,0,127,.35)' }}><Layers size={17} /></div>
@@ -2118,10 +2207,10 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, inicio, fim
             ) : (
               <>
                 <div className="grid grid-cols-4 gap-2">
-                  <BbKpi l={modo === 'convite' ? 'Elegíveis' : 'No catálogo'} v={meta ? meta.total : lista.length} c="var(--accent)" />
-                  <BbKpi l="Participando" v={participando} c="var(--ok)" />
-                  <BbKpi l="Selecionados" v={nSel} c={nSel > 0 ? 'var(--accent)' : 'var(--dim)'} sub={valorSel > 0 ? brl(valorSel) : 'nenhum'} />
-                  <BbKpi l={modo === 'convite' ? 'Válido até' : 'Duração'} v={dcurta(fim) || '—'} c="var(--warn)" sub={inicio ? `de ${dcurta(inicio)}` : null} />
+                  <BbKpi icon={Layers} l={modo === 'convite' ? 'Elegíveis' : 'No catálogo'} v={meta ? meta.total : lista.length} c="var(--accent)" />
+                  <BbKpi icon={Check} l="Participando" v={participando} c="var(--ok)" />
+                  <BbKpi icon={SlidersHorizontal} l="Selecionados" v={nSel} c={nSel > 0 ? 'var(--accent)' : 'var(--dim)'} sub={valorSel > 0 ? brl(valorSel) : 'nenhum'} />
+                  <BbKpi icon={Calendar} l={modo === 'convite' ? 'Válido até' : 'Duração'} v={dcurta(fim) || '—'} c="var(--warn)" sub={inicio ? `de ${dcurta(inicio)}` : null} />
                 </div>
                 {lista.length > 0 && (participando + comMargem + furaCount) > 0 && (() => {
                   const tot = Math.max(1, participando + comMargem + furaCount)
@@ -2282,7 +2371,8 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, inicio, fim
           </div>
         </div>
       </div>
-    </div>, document.body)
+    </div>
+  )
 }
 
 /* ================= modais de criação (portal, fundo sólido) ================= */

@@ -136,7 +136,7 @@ export const api = {
   mlPromoPromocaoItens: (id, tipo) => req(`/api/mercadolivre/promocoes/promocao/${encodeURIComponent(id)}/itens?promotion_type=${encodeURIComponent(tipo)}`),
   mlPromoContagem: (id, tipo) => req(`/api/mercadolivre/promocoes/promocao/${encodeURIComponent(id)}/contagem?promotion_type=${encodeURIComponent(tipo)}`),
   mlItemPromocoes: (itemId) => req(`/api/mercadolivre/promocoes/item/${encodeURIComponent(itemId)}/promocoes`),
-  mlPromoParticipantes: (forcar) => req('/api/mercadolivre/promocoes/participantes' + (forcar ? '?forcar=true' : '')),
+  mlPromoParticipantes: (forcar, dias, mes) => req(`/api/mercadolivre/promocoes/participantes?forcar=${forcar ? 'true' : 'false'}${mes ? `&mes=${mes}` : dias ? `&dias=${dias}` : ''}`),
   mlAdsPainel: (dias = 30) => req(`/api/mercadolivre/ads/painel?dias=${dias}`),
   mlPromoAderirAuto: (id, tipo, desconto = 15) => req(`/api/mercadolivre/promocoes/promocao/${encodeURIComponent(id)}/aderir-auto?promotion_type=${encodeURIComponent(tipo)}&desconto_pct=${desconto}`, { method: 'POST' }),
   mlPromoMetricas: (id, tipo, inicio, fim) => req(`/api/mercadolivre/promocoes/promocao/${encodeURIComponent(id)}/metricas?${new URLSearchParams(Object.entries({ promotion_type: tipo, inicio: inicio || '', fim: fim || '' }).filter(([, v]) => v !== '')).toString()}`),
