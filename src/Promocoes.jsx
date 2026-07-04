@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Tag, Percent, Ticket, Boxes, Flame, Sparkles, Zap, Cpu, Scale, Target,
@@ -50,6 +50,25 @@ const isoDe = (offsetDias, hora = '00:00:00') => {
 const pctTempo = (ini, fim) => {
   try { const a = new Date(ini), b = new Date(fim), n = new Date(); if (b <= a) return 0
     return Math.max(0, Math.min(100, ((n - a) / (b - a)) * 100)) } catch { return 0 }
+}
+
+class Blindagem extends React.Component {
+  constructor(props) { super(props); this.state = { erro: null } }
+  static getDerivedStateFromError(e) { return { erro: e } }
+  componentDidCatch(e) { console.error('Promoções:', e) }
+  render() {
+    if (this.state.erro) {
+      return (
+        <div className="rounded-2xl p-6 mt-4 text-center" style={{ background: 'rgba(255,122,122,.06)', border: '1px solid rgba(255,122,122,.3)' }}>
+          <AlertTriangle size={22} className="mx-auto mb-2" style={{ color: 'var(--danger)' }} />
+          <div className="text-[13px] font-bold mb-1">Algo deu errado neste painel</div>
+          <div className="text-[11px] text-dim mb-3">O restante da Central continua funcionando. Detalhe técnico: <span className="num">{String(this.state.erro?.message || this.state.erro).slice(0, 140)}</span></div>
+          <button onClick={() => this.setState({ erro: null })} className="text-[11px] font-bold px-4 py-2 rounded-lg text-white" style={{ background: 'var(--accent)' }}>Tentar de novo</button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
 }
 
 export default function Promocoes() {
@@ -230,6 +249,7 @@ export default function Promocoes() {
               </div>
               <InsightsPromo convites={convites} contagens={contagens} cont={cont} />
               <GanhosPorCampanha />
+              <AndamentoCampanhas convites={convites} minhas={minhas} />
               <Distribuicao convites={convites.length} minhas={minhas.length} cupons={cupons.length} />
               <Simulador notify={notify} recarregar={carregar} />
               <SecConvites convites={convites} onAderir={abrirAderir} onAutoAderir={aderirAutoConvite} onSair={sairConvite} onAplicarAutomaticos={aplicarAutomaticos} autoRodando={autoRodando} onContagem={reportContagem} />
@@ -244,10 +264,10 @@ export default function Promocoes() {
         </>
       )}
 
-      {aba === 'participantes' && <Participantes notify={notify} />}
-          {aba === 'inteligencia' && <Inteligencia notify={notify} />}
-      {aba === 'automacao' && <Automacao notify={notify} />}
-      {aba === 'ads' && <Ads />}
+      {aba === 'participantes' && <Blindagem><Participantes notify={notify} /></Blindagem>}
+          {aba === 'inteligencia' && <Blindagem><Inteligencia notify={notify} /></Blindagem>}
+      {aba === 'automacao' && <Blindagem><Automacao notify={notify} /></Blindagem>}
+      {aba === 'ads' && <Blindagem><Ads /></Blindagem>}
 
       {modal === 'campanha' && <NovaCampanhaModal onClose={() => setModal(null)} onOk={() => { setModal(null); carregar() }} notify={notify} />}
       {modal === 'cupom' && <NovoCupomModal onClose={() => setModal(null)} onOk={() => { setModal(null); carregar() }} notify={notify} />}
@@ -465,12 +485,77 @@ function ConviteCard({ p, onAderir, onAutoAderir, onSair, onContagem, modo, onSe
 
 /* ================= MINHAS CAMPANHAS ================= */
 function SecMinhas({ minhas, onAcao, onEncerrar, onAddItens, onSincronizar, notify, full }) {
+  const [sel, setSel] = useState(null)
+  const [mets, setMets] = useState({})
+  useEffect(() => {
+    let vivo = true
+    const alvo = minhas.slice(0, 10)
+    alvo.forEach((m) => {
+      api.mlPromoMetricas(m.id, m.type, m.start_date, m.finish_date)
+        .then((r) => { if (vivo) setMets((prev) => ({ ...prev, [m.id]: r })) })
+        .catch(() => {})
+    })
+    return () => { vivo = false }
+  }, [minhas])
+  const vals = Object.values(mets)
+  const carrAgg = minhas.length > 0 && vals.length === 0
+  const agg = {
+    liquido: vals.reduce((a, m) => a + (m?.liquido_total || 0), 0),
+    lucro: vals.reduce((a, m) => a + (m?.lucro_total || 0), 0),
+    itens: vals.reduce((a, m) => a + (m?.itens || 0), 0),
+    piso: vals.reduce((a, m) => a + (m?.abaixo_piso || 0), 0),
+  }
+  const topLiq = minhas.filter((m) => mets[m.id]?.liquido_total > 0)
+    .sort((a, b) => (mets[b.id]?.liquido_total || 0) - (mets[a.id]?.liquido_total || 0)).slice(0, 5)
+  const maxLiq = Math.max(1, ...topLiq.map((m) => mets[m.id]?.liquido_total || 0))
+  const aberto = sel != null
   return (
     <>
       <Secao icon={Tag} cor="var(--accent)" titulo="Minhas campanhas" pill="você cria" pillCor="var(--accent)" />
+      {minhas.length > 0 && (carrAgg
+        ? <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="skel" style={{ height: 62, borderRadius: 14 }} />)}</div>
+        : (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+            <BbKpi l="Campanhas ativas" v={minhas.filter((m) => /started|active/.test(m.status || '')).length} c="var(--ok)" sub={`${minhas.length} no total`} />
+            <BbKpi l="Itens em campanha" v={agg.itens} c="var(--accent)" />
+            <BbKpi l="Líquido real" v={brl(agg.liquido)} c="var(--ok)" sub="net_proceeds" />
+            <BbKpi l="Abaixo do piso" v={agg.piso} c={agg.piso > 0 ? 'var(--danger)' : 'var(--ok)'} sub={agg.piso > 0 ? 'furam a margem' : 'protegido'} />
+          </div>
+        ))}
+      {topLiq.length > 0 && (
+        <div className="rounded-2xl p-4 glass mb-3">
+          <div className="text-[10px] uppercase tracking-wide text-faint font-extrabold flex items-center gap-1.5 mb-3"><BarChart3 size={12} style={{ color: 'var(--ok)' }} /> Líquido real por campanha</div>
+          <div className="flex flex-col gap-1.5">
+            {topLiq.map((m) => {
+              const v = mets[m.id]?.liquido_total || 0
+              return (
+                <button key={m.id} onClick={() => setSel(m)} className="flex items-center gap-2 text-left group">
+                  <span className="text-[10.5px] truncate flex-none group-hover:text-fg" style={{ width: 150 }} title={m.name}>{m.name || meta(m.type).label}</span>
+                  <div className="flex-1 h-5 rounded-md overflow-hidden" style={{ background: 'rgba(255,255,255,.05)' }}>
+                    <div className="h-full rounded-md flex items-center justify-end pr-1.5 group-hover:brightness-110" style={{ width: `${Math.max(9, (v / maxLiq) * 100)}%`, background: `linear-gradient(90deg, ${meta(m.type).cor}55, ${meta(m.type).cor})` }}>
+                      <span className="text-[9px] font-extrabold num text-white">{brl(v)}</span>
+                    </div>
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
       {minhas.length === 0
         ? <Vazio texto="Você ainda não tem campanhas próprias. Crie uma Campanha de %, um Desconto individual ou um Desconto por quantidade — sempre com a trava de margem no Preço Bling." />
-        : minhas.map((m, i) => <CampanhaCard key={m.id} p={m} onAcao={onAcao} onEncerrar={onEncerrar} onAddItens={onAddItens} onSincronizar={onSincronizar} notify={notify} idx={i} />)}
+        : (
+          <div className={aberto ? 'grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(380px,540px)] gap-4 items-start' : ''}>
+            <div>
+              {minhas.map((m, i) => <CampanhaCard key={m.id} p={m} onAcao={onAcao} onEncerrar={onEncerrar} onAddItens={onAddItens} onDesempenho={(pp) => setSel(pp)} notify={notify} idx={i} />)}
+            </div>
+            {aberto && (
+              <div className="xl:sticky xl:top-4">
+                <DesempenhoDrawer key={sel.id} p={sel} onClose={() => setSel(null)} onSincronizar={onSincronizar} notify={notify} />
+              </div>
+            )}
+          </div>
+        )}
     </>
   )
 }
@@ -487,7 +572,7 @@ const INS = {
   info: { c: 'var(--dim)', Icon: Info },
 }
 
-function CampanhaCard({ p, onAcao, onEncerrar, onAddItens, onSincronizar, notify, idx = 0 }) {
+function CampanhaCard({ p, onAcao, onEncerrar, onAddItens, onDesempenho, notify, idx = 0 }) {
   const m = meta(p.type); const Ic = m.icon
   const st = stInfo(p.status)
   const ini = dcurta(p.start_date), fim = dcurta(p.finish_date)
@@ -496,7 +581,7 @@ function CampanhaCard({ p, onAcao, onEncerrar, onAddItens, onSincronizar, notify
   const restam = diasAte(p.finish_date)
   const [met, setMet] = useState(null)
   const [carrMet, setCarrMet] = useState(true)
-  const [drawer, setDrawer] = useState(false)
+  const setDrawer = () => onDesempenho && onDesempenho(p)
 
   useEffect(() => {
     let vivo = true
@@ -552,7 +637,6 @@ function CampanhaCard({ p, onAcao, onEncerrar, onAddItens, onSincronizar, notify
         <Act icon={Gauge} onClick={() => onAcao('Simular')}>Simular</Act>
         <Act icon={Trash2} danger onClick={() => onEncerrar && onEncerrar(p)}>Encerrar</Act>
       </div>
-      {drawer && <DesempenhoDrawer met={met} carregando={carrMet} p={p} onClose={() => setDrawer(false)} onSincronizar={onSincronizar} notify={notify} />}
     </div>
   )
 }
@@ -892,6 +976,35 @@ function GanhosPorCampanha() {
   )
 }
 
+function AndamentoCampanhas({ convites, minhas }) {
+  const ativas = [...convites, ...minhas]
+    .filter((p) => /started|active/.test(p.status || '') && p.start_date && p.finish_date)
+    .map((p) => ({ ...p, pct: Math.round(pctTempo(p.start_date, p.finish_date)), rest: diasAte(p.finish_date) }))
+    .sort((a, b) => b.pct - a.pct).slice(0, 8)
+  if (!ativas.length) return null
+  return (
+    <div className="rounded-2xl p-4 mt-3 glass">
+      <div className="text-[10px] uppercase tracking-wide text-faint font-extrabold flex items-center gap-1.5 mb-3"><Gauge size={12} style={{ color: BLUE }} /> Andamento das campanhas ativas <span className="text-faint">· % do período decorrido</span></div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-5 gap-y-2.5">
+        {ativas.map((p, i) => {
+          const cor = p.pct >= 85 ? 'var(--danger)' : p.pct >= 60 ? 'var(--warn)' : 'var(--ok)'
+          return (
+            <div key={i}>
+              <div className="flex items-center justify-between text-[10.5px] mb-1">
+                <span className="truncate" style={{ maxWidth: '65%' }} title={p.name}>{p.name || meta(p.type).label}</span>
+                <span className="num text-faint">{p.rest != null && p.rest >= 0 ? `${p.rest}d restantes` : 'encerrando'} · <b style={{ color: cor }}>{p.pct}%</b></span>
+              </div>
+              <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,.08)' }}>
+                <div style={{ width: `${p.pct}%`, height: '100%', background: `linear-gradient(90deg, ${cor}, ${cor}99)`, transition: 'width .4s' }} />
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function Calendario({ minhas, cupons, convites, onAbrirCampanha }) {
   const linhas = useMemo(() => {
     const hoje = new Date(); hoje.setHours(0, 0, 0, 0)
@@ -1027,12 +1140,19 @@ function BuyboxTracker({ notify }) {
 
       {dados && (
         <>
-          <div className="grid grid-cols-4 gap-2.5 mb-3">
+          <div className="grid grid-cols-5 gap-2.5 mb-3">
             <BbKpi l="Perdendo" v={rs.perdendo || 0} c="var(--danger)" />
             <BbKpi l="Recuperável" v={rs.recuperavel || 0} c="var(--ok)" sub="acima do piso" />
             <BbKpi l="Dividindo" v={rs.compartilhando || 0} c="var(--warn)" />
             <BbKpi l="No topo" v={rs.ganhando || 0} c="var(--ok)" />
+            <BbKpi l="Sem catálogo" v={rs.sem_catalogo || 0} c="var(--dim)" sub="buybox não se aplica" />
           </div>
+          {(rs.sem_catalogo || 0) > 0 && (rs.perdendo || 0) + (rs.ganhando || 0) + (rs.compartilhando || 0) === 0 && (
+            <div className="rounded-xl p-3 mb-3 text-[10.5px] leading-relaxed flex items-start gap-2" style={{ background: 'rgba(91,141,239,.08)', border: '1px solid rgba(91,141,239,.25)' }}>
+              <Info size={14} className="flex-none mt-0.5" style={{ color: BLUE }} />
+              <span><b>Por que não apareceu nada?</b> A disputa de buybox só existe em <b>anúncios de catálogo</b> do ML (vários vendedores no mesmo produto). Os anúncios verificados nesta página são <b>anúncios comuns</b> — não disputam buybox. Clique em “Verificar mais” para varrer o restante; anúncios de catálogo aparecem aqui com o preço para recuperar o topo.</span>
+            </div>
+          )}
           <div className="text-[9.5px] text-faint mb-2">Verificados {dados.verificados_total || dados.verificados} de {dados.total_catalogo} anúncios ativos (dos mais caros aos mais baratos).</div>
           {dados.itens.length === 0 ? (
             <div className="text-[11px] text-faint p-4 text-center">Nenhum item {soPerdendo ? 'perdendo o buybox' : 'em concorrência'} nesta faixa. {dados.tem_mais ? 'Verifique mais abaixo.' : ''}</div>
@@ -1314,7 +1434,17 @@ function Sparkline({ serie }) {
   )
 }
 
-function DesempenhoDrawer({ met, carregando, p, onClose, onSincronizar, notify }) {
+function DesempenhoDrawer({ p, onClose, onSincronizar, notify }) {
+  const [met, setMet] = useState(null)
+  const [carregando, setCarregando] = useState(true)
+  useEffect(() => {
+    let vivo = true
+    setCarregando(true); setMet(null)
+    api.mlPromoMetricas(p.id, p.type, p.start_date, p.finish_date)
+      .then((r) => { if (vivo) setMet(r) }).catch(() => { if (vivo) setMet(null) })
+      .finally(() => { if (vivo) setCarregando(false) })
+    return () => { vivo = false }
+  }, [p.id, p.type, p.start_date, p.finish_date])
   const m = meta(p.type); const Ic = m.icon
   const vi = dcurta(p.start_date), vf = dcurta(p.finish_date); const rest = diasAte(p.finish_date)
   const sd = met ? (SAUDE[met.saude] || SAUDE.atencao) : null
@@ -1342,9 +1472,9 @@ function DesempenhoDrawer({ met, carregando, p, onClose, onSincronizar, notify }
     } catch (e) { notify && notify(traduzErroML(e.message), 'danger') }
     finally { setAddingId(null) }
   }
-  return createPortal(
-    <div className="fixed inset-0 z-[100] flex justify-end" style={{ background: 'rgba(0,0,0,.55)' }} onClick={(e) => { e.stopPropagation(); onClose() }}>
-      <div onClick={(e) => e.stopPropagation()} className="h-full w-full drawer-in flex flex-col" style={{ maxWidth: 560, border: '1px solid transparent', background: 'linear-gradient(180deg,var(--surface),#160c13) padding-box, linear-gradient(155deg, rgba(214,0,127,.6), rgba(214,0,127,.06) 42%, rgba(255,255,255,.10)) border-box', boxShadow: '-24px 0 70px rgba(0,0,0,.55)' }}>
+  return (
+    <div className="rounded-2xl overflow-hidden card-in flex flex-col" style={{ border: '1px solid transparent', background: 'linear-gradient(180deg,var(--surface),#160c13) padding-box, linear-gradient(155deg, rgba(214,0,127,.65), rgba(214,0,127,.06) 42%, rgba(255,255,255,.10)) border-box', boxShadow: '0 20px 60px rgba(0,0,0,.5)' }}>
+      <div className="flex flex-col" style={{ maxHeight: 'calc(100vh - 40px)' }}>
         {/* header */}
         <div className="flex items-center gap-2 px-4 py-3 flex-none" style={{ borderBottom: '1px solid var(--glass-border)' }}>
           <div className="w-8 h-8 rounded-lg grid place-items-center flex-none" style={{ background: `${m.cor}22`, color: m.cor }}><Ic size={16} /></div>
@@ -1506,7 +1636,8 @@ function DesempenhoDrawer({ met, carregando, p, onClose, onSincronizar, notify }
           )}
         </div>
       </div>
-    </div>, document.body)
+    </div>
+  )
 }
 
 /* ================= tradução de erros do ML ================= */
@@ -1620,7 +1751,14 @@ function Participantes({ notify }) {
                       {p.imagem ? <img src={p.imagem} alt="" className="w-11 h-11 rounded-lg object-cover flex-none" style={{ border: '1px solid var(--glass-border)' }} /> : <div className="w-11 h-11 rounded-lg grid place-items-center flex-none" style={{ background: 'rgba(255,255,255,.05)' }}><Boxes size={17} className="text-faint" /></div>}
                       <div className="min-w-0 flex-1">
                         <div className="text-[12.5px] font-semibold truncate">{p.titulo}</div>
-                        <div className="text-[9.5px] text-faint num truncate mb-1">{p.sku || p.item_id}{p.preco != null ? ` · ${brl(p.preco)}` : ''}</div>
+                        <div className="text-[9.5px] text-faint num truncate mb-1 flex items-center gap-1.5 flex-wrap">
+                          <span>{p.sku || p.item_id}</span>
+                          {p.preco != null && (p.desconto_max_pct > 0 && p.preco_promo != null
+                            ? <span><s className="text-faint">{brl(p.preco)}</s> <b style={{ color: 'var(--ok)' }}>{brl(p.preco_promo)}</b></span>
+                            : <span>{brl(p.preco)}</span>)}
+                          {p.desconto_max_pct > 0 && <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(224,162,60,.16)', color: 'var(--warn)' }}>até −{p.desconto_max_pct}%</span>}
+                          {p.estoque != null && <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: p.estoque <= 5 ? 'rgba(255,122,122,.14)' : 'rgba(255,255,255,.07)', color: p.estoque <= 5 ? 'var(--danger)' : 'var(--dim)' }}>{p.estoque} un</span>}
+                        </div>
                         <div className="flex items-center gap-1 flex-wrap">
                           {(p.campanhas || []).slice(0, 4).map((c, i) => <span key={i} className="text-[8.5px] font-bold px-1.5 py-0.5 rounded-full truncate" style={{ background: `${meta(c.type).cor}1e`, color: meta(c.type).cor, maxWidth: 160 }}>{c.nome || meta(c.type).label}</span>)}
                           {(p.campanhas || []).length > 4 && <span className="text-[8.5px] text-faint">+{p.campanhas.length - 4}</span>}
