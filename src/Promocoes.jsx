@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import {
   Tag, Percent, Ticket, Boxes, Flame, Sparkles, Zap, Cpu, Scale, Target,
   Landmark, Gauge, Wallet, Shield, Power, Ban, TrendingUp, TrendingDown, Layers,
-  Calendar, Clock, Plus, ChevronRight, Crown, Activity, Loader2, RefreshCw, Plug,
+  Calendar, Clock, Plus, ChevronRight, ChevronDown, Crown, Activity, Loader2, RefreshCw, Plug,
   Info, Gift, ArrowRight, SlidersHorizontal, Search, CircleDollarSign, BarChart3, X, Check, Trash2, AlertTriangle,
 } from 'lucide-react'
 import { api } from './api'
@@ -1155,7 +1155,15 @@ function BuyboxTracker({ notify }) {
           )}
           <div className="text-[9.5px] text-faint mb-2">Verificados {dados.verificados_total || dados.verificados} de {dados.total_catalogo} anúncios ativos (dos mais caros aos mais baratos).</div>
           {dados.itens.length === 0 ? (
-            <div className="text-[11px] text-faint p-4 text-center">Nenhum item {soPerdendo ? 'perdendo o buybox' : 'em concorrência'} nesta faixa. {dados.tem_mais ? 'Verifique mais abaixo.' : ''}</div>
+            (rs.ganhando || 0) > 0 && soPerdendo ? (
+              <div className="rounded-xl p-4 text-center" style={{ background: 'rgba(47,217,141,.07)', border: '1px solid rgba(47,217,141,.3)' }}>
+                <Crown size={20} className="mx-auto mb-1.5" style={{ color: 'var(--ok)' }} />
+                <div className="text-[12.5px] font-bold" style={{ color: 'var(--ok)' }}>Você está NO TOPO do catálogo em {rs.ganhando} anúncio{rs.ganhando > 1 ? 's' : ''} desta faixa</div>
+                <div className="text-[10.5px] text-dim mt-1">Nenhum perdendo o buybox aqui. Clique em <b>“todos”</b> para ver os que estão ganhando{dados.tem_mais ? ', ou “Verificar mais” para varrer o restante do catálogo' : ''}.</div>
+              </div>
+            ) : (
+              <div className="text-[11px] text-faint p-4 text-center">Nenhum item {soPerdendo ? 'perdendo o buybox' : 'em concorrência de catálogo'} nesta faixa. {dados.tem_mais ? 'Verifique mais abaixo.' : ''}</div>
+            )
           ) : (
             <div className="flex flex-col gap-1.5">
               {dados.itens.map((it) => { const si = BB_ST[it.status] || BB_ST.perdendo; return (
@@ -1662,6 +1670,7 @@ function Participantes({ notify }) {
   const [q, setQ] = useState('')
   const [sel, setSel] = useState(null)
   const [vista, setVista] = useState('produto')
+  const [ordem, setOrdem] = useState('campanhas')
   const [expandido, setExpandido] = useState(() => new Set())
   const carregar = async (forcar) => {
     setCarregando(true)
@@ -1673,13 +1682,17 @@ function Participantes({ notify }) {
   const ql = q.trim().toLowerCase()
   const produtos = dados?.produtos || []
   const campanhas = dados?.campanhas || []
-  const listaProd = produtos.filter((p) => !ql || (`${p.titulo || ''} ${p.sku || ''}`).toLowerCase().includes(ql))
+  const listaProd = produtos
+    .filter((p) => !ql || (`${p.titulo || ''} ${p.sku || ''}`).toLowerCase().includes(ql))
+    .sort((a, b) => ordem === 'vendas' ? (b.vendas_30d || 0) - (a.vendas_30d || 0) : (b.n || 0) - (a.n || 0))
   const listaCamp = campanhas.filter((c) => !ql || (c.nome || '').toLowerCase().includes(ql))
   const totais = dados?.totais || {}
   const toggleExp = (id) => { const n = new Set(expandido); n.has(id) ? n.delete(id) : n.add(id); setExpandido(n) }
   const prodDaCampanha = (cid) => produtos.filter((p) => (p.campanhas || []).some((c) => c && c.id === cid))
   const topCamp = [...campanhas].filter((c) => (c.n || 0) > 0).sort((a, b) => (b.voce_recebe || 0) - (a.voce_recebe || 0)).slice(0, 6)
   const maxRec = Math.max(1, ...topCamp.map((c) => c.voce_recebe || 0))
+  const topVend = totais.cache_pedidos ? [...produtos].filter((p) => (p.vendas_30d || 0) > 0).sort((a, b) => b.vendas_30d - a.vendas_30d).slice(0, 6) : []
+  const maxVend = Math.max(1, ...topVend.map((p) => p.vendas_30d || 0))
   const aberto = sel != null
 
   return (
@@ -1694,33 +1707,60 @@ function Participantes({ notify }) {
       {carregando && !dados
         ? <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="skel" style={{ height: 62, borderRadius: 14 }} />)}</div>
         : dados && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-3">
             <BbKpi l="Produtos em campanhas" v={dados.total_produtos ?? 0} c="var(--accent)" sub={`${produtos.reduce((a, p) => a + (p.n || 0), 0)} vínculos`} />
             <BbKpi l="Campanhas com itens" v={totais.campanhas ?? 0} c={BLUE} sub={`de ${dados.promocoes_varridas ?? 0} varridas`} />
             <BbKpi l="Você recebe · total" v={brl(totais.voce_recebe || 0)} c="var(--ok)" sub="líquido estimado" />
             <BbKpi l="Desconto concedido" v={brl(totais.desconto || 0)} c="var(--warn)" sub="o quanto abre mão" />
+            <BbKpi l="Vendas · 30d" v={totais.vendas_30d ?? 0} c={PURPLE} sub={totais.cache_pedidos ? brl(totais.receita_30d || 0) : 'sincronize os pedidos'} />
           </div>
         )}
 
+      {dados && !totais.cache_pedidos && (
+        <div className="rounded-xl p-3 mb-3 text-[10.5px] leading-relaxed flex items-start gap-2" style={{ background: 'rgba(160,107,232,.08)', border: '1px solid rgba(160,107,232,.25)' }}>
+          <Info size={14} className="flex-none mt-0.5" style={{ color: PURPLE }} />
+          <span><b>Vendas por produto indisponíveis:</b> o cache de pedidos está vazio. Clique em <b>“Sincronizar pedidos”</b> (topo da Central) para trazer o histórico do ML — as unidades vendidas e a receita de cada produto participante aparecem aqui.</span>
+        </div>
+      )}
       {carregando && !dados
         ? <div className="skel mb-3" style={{ height: 150, borderRadius: 16 }} />
         : topCamp.length > 0 && (
-          <div className="rounded-2xl p-4 glass mb-3">
-            <div className="text-[10px] uppercase tracking-wide text-faint font-extrabold flex items-center gap-1.5 mb-3"><BarChart3 size={12} style={{ color: 'var(--ok)' }} /> Você recebe por campanha <span className="text-faint">· top {topCamp.length}</span></div>
-            <div className="flex flex-col gap-1.5">
-              {topCamp.map((c) => (
-                <div key={c.id} className="flex items-center gap-2">
-                  <span className="text-[10.5px] truncate flex-none" style={{ width: 150 }} title={c.nome}>{c.nome || meta(c.type).label}</span>
-                  <div className="flex-1 h-5 rounded-md overflow-hidden relative" style={{ background: 'rgba(255,255,255,.05)' }}>
-                    <div className="h-full rounded-md flex items-center justify-end pr-1.5" style={{ width: `${Math.max(9, ((c.voce_recebe || 0) / maxRec) * 100)}%`, background: `linear-gradient(90deg, ${meta(c.type).cor}55, ${meta(c.type).cor})` }}>
-                      <span className="text-[9px] font-extrabold num text-white">{brl(c.voce_recebe)}</span>
+          <div className={`grid grid-cols-1 ${topVend.length > 0 ? 'lg:grid-cols-2' : ''} gap-3 mb-3`}>
+            <div className="rounded-2xl p-4 glass">
+              <div className="text-[10px] uppercase tracking-wide text-faint font-extrabold flex items-center gap-1.5 mb-3"><BarChart3 size={12} style={{ color: 'var(--ok)' }} /> Você recebe por campanha <span className="text-faint">· top {topCamp.length}</span></div>
+              <div className="flex flex-col gap-1.5">
+                {topCamp.map((c) => (
+                  <div key={c.id} className="flex items-center gap-2">
+                    <span className="text-[10.5px] truncate flex-none" style={{ width: 130 }} title={c.nome}>{c.nome || meta(c.type).label}</span>
+                    <div className="flex-1 h-5 rounded-md overflow-hidden relative" style={{ background: 'rgba(255,255,255,.05)' }}>
+                      <div className="h-full rounded-md flex items-center justify-end pr-1.5" style={{ width: `${Math.max(9, ((c.voce_recebe || 0) / maxRec) * 100)}%`, background: `linear-gradient(90deg, ${meta(c.type).cor}55, ${meta(c.type).cor})` }}>
+                        <span className="text-[9px] font-extrabold num text-white">{brl(c.voce_recebe)}</span>
+                      </div>
                     </div>
+                    <span className="text-[9px] num flex-none text-right" style={{ width: 56, color: 'var(--warn)' }}>−{brl(c.desconto)}</span>
+                    <span className="text-[9px] text-faint num flex-none text-right" style={{ width: 26 }}>{c.n}un</span>
                   </div>
-                  <span className="text-[9px] num flex-none text-right" style={{ width: 60, color: 'var(--warn)' }}>−{brl(c.desconto)}</span>
-                  <span className="text-[9px] text-faint num flex-none text-right" style={{ width: 28 }}>{c.n}un</span>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
+            {topVend.length > 0 && (
+              <div className="rounded-2xl p-4 glass">
+                <div className="text-[10px] uppercase tracking-wide text-faint font-extrabold flex items-center gap-1.5 mb-3"><TrendingUp size={12} style={{ color: PURPLE }} /> Mais vendidos em campanha <span className="text-faint">· 30 dias · cache de pedidos</span></div>
+                <div className="flex flex-col gap-1.5">
+                  {topVend.map((p2) => (
+                    <button key={p2.item_id} onClick={() => { setVista('produto'); setSel(p2.item_id) }} className="flex items-center gap-2 text-left group">
+                      <span className="text-[10.5px] truncate flex-none group-hover:text-fg" style={{ width: 130 }} title={p2.titulo}>{p2.titulo}</span>
+                      <div className="flex-1 h-5 rounded-md overflow-hidden" style={{ background: 'rgba(255,255,255,.05)' }}>
+                        <div className="h-full rounded-md flex items-center justify-end pr-1.5 group-hover:brightness-110" style={{ width: `${Math.max(9, ((p2.vendas_30d || 0) / maxVend) * 100)}%`, background: 'linear-gradient(90deg, rgba(160,107,232,.4), #a06be8)' }}>
+                          <span className="text-[9px] font-extrabold num text-white">{p2.vendas_30d} un</span>
+                        </div>
+                      </div>
+                      <span className="text-[9px] num flex-none text-right" style={{ width: 62, color: 'var(--ok)' }}>{brl(p2.receita_30d)}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -1734,6 +1774,13 @@ function Participantes({ notify }) {
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={vista === 'produto' ? 'Filtrar por produto ou SKU…' : 'Filtrar por campanha…'} className="w-full text-[12.5px] pl-9 pr-3 py-2.5 rounded-xl bg-transparent" style={{ border: '1px solid var(--glass-border)' }} />
         </div>
+        {vista === 'produto' && totais.cache_pedidos && (
+          <div className="flex gap-1 p-1 rounded-xl flex-none" style={{ background: 'rgba(0,0,0,.28)', border: '1px solid var(--glass-border)' }}>
+            {[['campanhas', 'Mais campanhas'], ['vendas', 'Mais vendidos']].map(([id, lb]) => (
+              <button key={id} onClick={() => setOrdem(id)} className="text-[10px] font-bold px-2.5 py-1.5 rounded-lg transition-colors" style={ordem === id ? { background: 'rgba(160,107,232,.25)', color: '#cfaef5' } : { color: 'var(--dim)' }}>{lb}</button>
+            ))}
+          </div>
+        )}
       </div>
 
       {carregando && !dados ? (
@@ -1758,6 +1805,9 @@ function Participantes({ notify }) {
                             : <span>{brl(p.preco)}</span>)}
                           {p.desconto_max_pct > 0 && <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(224,162,60,.16)', color: 'var(--warn)' }}>até −{p.desconto_max_pct}%</span>}
                           {p.estoque != null && <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: p.estoque <= 5 ? 'rgba(255,122,122,.14)' : 'rgba(255,255,255,.07)', color: p.estoque <= 5 ? 'var(--danger)' : 'var(--dim)' }}>{p.estoque} un</span>}
+                          {dados?.totais?.cache_pedidos && (p.vendas_30d > 0
+                            ? <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full inline-flex items-center gap-0.5" style={{ background: 'rgba(47,217,141,.14)', color: 'var(--ok)' }}><TrendingUp size={8} /> {p.vendas_30d} vendidos · 30d</span>
+                            : <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(255,255,255,.07)', color: 'var(--faint)' }}>sem venda 30d</span>)}
                         </div>
                         <div className="flex items-center gap-1 flex-wrap">
                           {(p.campanhas || []).slice(0, 4).map((c, i) => <span key={i} className="text-[8.5px] font-bold px-1.5 py-0.5 rounded-full truncate" style={{ background: `${meta(c.type).cor}1e`, color: meta(c.type).cor, maxWidth: 160 }}>{c.nome || meta(c.type).label}</span>)}
@@ -1868,6 +1918,12 @@ function ProdutoCampanhasDrawer({ itemId, onClose, notify, onMudou }) {
         <button onClick={onClose} className="text-faint hover:text-fg flex-none"><X size={18} /></button>
       </div>
       <div className="px-4 py-3">
+        {d && d.vendas_30d != null && (
+          <div className="flex justify-between items-center rounded-xl px-3 py-2.5 mb-3" style={{ background: d.vendas_30d > 0 ? 'rgba(160,107,232,.1)' : 'rgba(255,255,255,.04)', border: `1px solid ${d.vendas_30d > 0 ? 'rgba(160,107,232,.35)' : 'var(--glass-border)'}` }}>
+            <span className="text-[11.5px] font-bold flex items-center gap-1.5" style={{ color: d.vendas_30d > 0 ? '#cfaef5' : 'var(--faint)' }}><TrendingUp size={13} /> Desempenho de vendas · 30d</span>
+            <span className="num text-[12.5px] font-extrabold" style={{ color: d.vendas_30d > 0 ? '#cfaef5' : 'var(--faint)' }}>{d.vendas_30d > 0 ? <>{d.vendas_30d} un · <span style={{ color: 'var(--ok)' }}>{brl(d.receita_30d)}</span></> : 'sem vendas no período'}</span>
+          </div>
+        )}
         <div className="text-[9.5px] uppercase tracking-wide text-faint font-bold mb-2 flex items-center gap-1.5"><Tag size={12} style={{ color: 'var(--accent)' }} /> Campanhas do anúncio{d ? ` (${proms.length})` : ''}{d && d.participando > 0 ? ` · ${d.participando} participando` : ''}</div>
         {carr ? (
           <div>{Array.from({ length: 4 }).map((_, i) => <div key={i} className="skel mb-2" style={{ height: 118, borderRadius: 14 }} />)}</div>
@@ -2050,27 +2106,71 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, inicio, fim
           <button onClick={onClose} disabled={aplicando} className="text-faint hover:text-fg disabled:opacity-40 flex-none"><X size={18} /></button>
         </div>
 
-        {/* dashboard da promoção */}
+        {/* dashboard da promoção — cockpit */}
         <div className="px-4 pt-3 flex-none">
           <div className="rounded-2xl p-3" style={{ background: 'linear-gradient(158deg,rgba(255,255,255,.05),rgba(0,0,0,.20))', border: '1px solid var(--glass-border)' }}>
             <div className="text-[9.5px] uppercase tracking-wide text-faint font-bold mb-2.5 flex items-center gap-1.5"><Activity size={12} style={{ color: 'var(--accent)' }} /> Resumo da promoção</div>
-            <div className="grid grid-cols-4 gap-2">
-              <BbKpi l={modo === 'convite' ? 'Elegíveis' : 'No catálogo'} v={meta ? meta.total : lista.length} c="var(--accent)" />
-              <BbKpi l="Participando" v={participando} c="var(--ok)" />
-              <BbKpi l="Selecionados" v={nSel} c={nSel > 0 ? 'var(--accent)' : 'var(--dim)'} sub={valorSel > 0 ? brl(valorSel) : 'nenhum'} />
-              <BbKpi l={modo === 'convite' ? 'Válido até' : 'Duração'} v={dcurta(fim) || '—'} c="var(--warn)" sub={inicio ? `de ${dcurta(inicio)}` : null} />
-            </div>
-            {voceRecebeTotal > 0 && (
-              <div className="flex justify-between items-center rounded-xl px-3 py-2.5 mt-2.5" style={{ background: 'rgba(47,217,141,.08)', border: '1px solid rgba(47,217,141,.3)' }}>
-                <span className="text-[12px] font-bold flex items-center gap-1.5" style={{ color: 'var(--ok)' }}><CircleDollarSign size={13} /> Você recebe (participando)</span>
-                <span className="num font-bold" style={{ fontSize: 16, color: 'var(--ok)' }}>{brl(voceRecebeTotal)}{descMedioPart > 0 ? <span style={{ fontSize: 11 }}> · −{descMedioPart}% méd no ML</span> : ''}</span>
-              </div>
-            )}
-            {(comMargem > 0 || furaCount > 0) && (
-              <div className="flex items-center gap-2 mt-2.5 flex-wrap">
-                {comMargem > 0 && <span className="text-[10px] font-bold px-2.5 py-1 rounded-full inline-flex items-center gap-1" style={{ background: 'rgba(214,0,127,.12)', color: 'var(--accent)' }}><Check size={11} /> {comMargem} cabem acima do piso</span>}
-                {furaCount > 0 && <span className="text-[10px] font-bold px-2.5 py-1 rounded-full inline-flex items-center gap-1" style={{ background: 'rgba(255,122,122,.1)', color: 'var(--danger)' }}><AlertTriangle size={11} /> {furaCount} furam o piso</span>}
-              </div>
+            {carregando && !itens ? (
+              <>
+                <div className="grid grid-cols-4 gap-2">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="skel" style={{ height: 52, borderRadius: 12 }} />)}</div>
+                <div className="skel mt-2.5" style={{ height: 40, borderRadius: 12 }} />
+              </>
+            ) : (
+              <>
+                <div className="grid grid-cols-4 gap-2">
+                  <BbKpi l={modo === 'convite' ? 'Elegíveis' : 'No catálogo'} v={meta ? meta.total : lista.length} c="var(--accent)" />
+                  <BbKpi l="Participando" v={participando} c="var(--ok)" />
+                  <BbKpi l="Selecionados" v={nSel} c={nSel > 0 ? 'var(--accent)' : 'var(--dim)'} sub={valorSel > 0 ? brl(valorSel) : 'nenhum'} />
+                  <BbKpi l={modo === 'convite' ? 'Válido até' : 'Duração'} v={dcurta(fim) || '—'} c="var(--warn)" sub={inicio ? `de ${dcurta(inicio)}` : null} />
+                </div>
+                {lista.length > 0 && (participando + comMargem + furaCount) > 0 && (() => {
+                  const tot = Math.max(1, participando + comMargem + furaCount)
+                  const seg = [
+                    { n: participando, c: 'var(--ok)', l: 'participando' },
+                    { n: comMargem, c: 'var(--accent)', l: 'com margem' },
+                    { n: furaCount, c: 'var(--danger)', l: 'furam o piso' },
+                  ].filter((x) => x.n > 0)
+                  return (
+                    <div className="mt-2.5">
+                      <div className="flex h-2 rounded-full overflow-hidden gap-[2px]" style={{ background: 'rgba(255,255,255,.05)' }}>
+                        {seg.map((x, i) => <div key={i} style={{ width: `${(x.n / tot) * 100}%`, background: x.c }} title={`${x.n} ${x.l}`} />)}
+                      </div>
+                      <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+                        {seg.map((x, i) => <span key={i} className="text-[9px] font-bold inline-flex items-center gap-1" style={{ color: x.c }}><span className="w-1.5 h-1.5 rounded-full inline-block" style={{ background: x.c }} /> {x.n} {x.l}</span>)}
+                      </div>
+                    </div>
+                  )
+                })()}
+                {voceRecebeTotal > 0 && (
+                  <div className="flex justify-between items-center rounded-xl px-3 py-2.5 mt-2.5" style={{ background: 'rgba(47,217,141,.08)', border: '1px solid rgba(47,217,141,.3)' }}>
+                    <span className="text-[12px] font-bold flex items-center gap-1.5" style={{ color: 'var(--ok)' }}><CircleDollarSign size={13} /> Você recebe (participando)</span>
+                    <span className="num font-bold" style={{ fontSize: 16, color: 'var(--ok)' }}>{brl(voceRecebeTotal)}{descMedioPart > 0 ? <span style={{ fontSize: 11 }}> · −{descMedioPart}% méd no ML</span> : ''}</span>
+                  </div>
+                )}
+                {(() => {
+                  const tops = lista.filter((it) => { const o = it.preco || it.original_price; const pr = it.price ?? it.suggested_discounted_price ?? it.min_discounted_price; return o && pr && pr < o })
+                    .map((it) => { const o = it.preco || it.original_price; const pr = it.price ?? it.suggested_discounted_price ?? it.min_discounted_price; return { t: it.titulo || it.item_id, d: Math.round((1 - pr / o) * 100), part: isParticipando(it) } })
+                    .sort((a, b) => b.d - a.d).slice(0, 4)
+                  const mx = Math.max(1, ...tops.map((x) => x.d))
+                  return tops.length > 1 ? (
+                    <div className="mt-2.5">
+                      <div className="text-[8.5px] uppercase tracking-wide text-faint font-extrabold mb-1.5 flex items-center gap-1"><TrendingDown size={10} style={{ color: 'var(--warn)' }} /> Maiores descontos {modo === 'convite' ? 'do convite' : ''}</div>
+                      <div className="flex flex-col gap-1">
+                        {tops.map((x, i) => (
+                          <div key={i} className="flex items-center gap-2">
+                            <span className="text-[9.5px] truncate flex-none text-dim" style={{ width: 130 }} title={x.t}>{x.t}</span>
+                            <div className="flex-1 h-3.5 rounded overflow-hidden" style={{ background: 'rgba(255,255,255,.05)' }}>
+                              <div className="h-full rounded flex items-center justify-end pr-1" style={{ width: `${Math.max(12, (x.d / mx) * 100)}%`, background: x.part ? 'linear-gradient(90deg, rgba(47,217,141,.4), var(--ok))' : 'linear-gradient(90deg, rgba(224,162,60,.4), var(--warn))' }}>
+                                <span className="text-[8px] font-extrabold num" style={{ color: '#0d0d0d' }}>−{x.d}%</span>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null
+                })()}
+              </>
             )}
           </div>
         </div>
