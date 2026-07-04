@@ -134,6 +134,7 @@ export const api = {
   mlPromoItens: ({ q, limit, offset, apenas_ativos } = {}) => req(`/api/mercadolivre/promocoes/itens?${new URLSearchParams(Object.entries({ q: q || '', limit: limit ?? 30, offset: offset ?? 0, apenas_ativos: apenas_ativos === false ? 'false' : 'true' }).filter(([, v]) => v !== '')).toString()}`),
   mlPromoPromocaoItens: (id, tipo) => req(`/api/mercadolivre/promocoes/promocao/${encodeURIComponent(id)}/itens?promotion_type=${encodeURIComponent(tipo)}`),
   mlPromoContagem: (id, tipo) => req(`/api/mercadolivre/promocoes/promocao/${encodeURIComponent(id)}/contagem?promotion_type=${encodeURIComponent(tipo)}`),
+  mlPromoAderirAuto: (id, tipo, desconto = 15) => req(`/api/mercadolivre/promocoes/promocao/${encodeURIComponent(id)}/aderir-auto?promotion_type=${encodeURIComponent(tipo)}&desconto_pct=${desconto}`, { method: 'POST' }),
   mlPromoMetricas: (id, tipo, inicio, fim) => req(`/api/mercadolivre/promocoes/promocao/${encodeURIComponent(id)}/metricas?${new URLSearchParams(Object.entries({ promotion_type: tipo, inicio: inicio || '', fim: fim || '' }).filter(([, v]) => v !== '')).toString()}`),
   mlPedidosBackfill: (dias = 90) => req(`/api/mercadolivre/pedidos/cache/backfill?dias=${dias}`, { method: 'POST' }),
   mlPedidosCacheStatus: () => req('/api/mercadolivre/pedidos/cache/status'),

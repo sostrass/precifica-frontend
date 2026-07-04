@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from 'react'
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Tag, Percent, Ticket, Boxes, Flame, Sparkles, Zap, Cpu, Scale, Target,
@@ -76,6 +76,39 @@ export default function Promocoes() {
   const [picker, setPicker] = useState(null)
   const abrirAddItens = (p) => setPicker({ modo: 'campanha', promotionId: p.id, promotionType: p.type, promoNome: p.name || p.type, inicio: p.start_date, fim: p.finish_date })
   const abrirAderir = (p) => setPicker({ modo: 'convite', promotionId: p.id, promotionType: p.type, promoNome: p.name || p.type, inicio: p.start_date, fim: p.finish_date })
+
+  const [autoRodando, setAutoRodando] = useState(false)
+  const _resumoAuto = (r) => {
+    const parts = [`${r.aderidos} aderido(s)`]
+    if (r.ignorados_piso) parts.push(`${r.ignorados_piso} abaixo do piso`)
+    if (r.sem_preco_bling) parts.push(`${r.sem_preco_bling} sem Preço Bling`)
+    if (r.ja_participando) parts.push(`${r.ja_participando} já participando`)
+    if (r.falhas && r.falhas.length) parts.push(`${r.falhas.length} falha(s)`)
+    return parts.join(' · ')
+  }
+  const aderirAutoConvite = async (p) => {
+    try {
+      const r = await api.mlPromoAderirAuto(p.id, p.type, 15)
+      notify(`${p.name || p.type}: ${_resumoAuto(r)}.`, r.aderidos > 0 ? 'ok' : 'warn')
+      carregar()
+    } catch (e) { notify(traduzErroML(e.message), 'danger') }
+  }
+  const aplicarAutomaticos = async (alvos) => {
+    if (!alvos || !alvos.length) { notify('Nenhum convite em modo automático.', 'warn'); return }
+    setAutoRodando(true)
+    const t = { aderidos: 0, ignorados_piso: 0, sem_preco_bling: 0, ja_participando: 0, falhas: 0, convites: 0 }
+    for (const c of alvos) {
+      try {
+        const r = await api.mlPromoAderirAuto(c.id, c.type, 15)
+        t.aderidos += r.aderidos || 0; t.ignorados_piso += r.ignorados_piso || 0
+        t.sem_preco_bling += r.sem_preco_bling || 0; t.ja_participando += r.ja_participando || 0
+        t.falhas += (r.falhas ? r.falhas.length : 0); t.convites += 1
+      } catch { t.falhas += 1 }
+    }
+    setAutoRodando(false)
+    notify(`Automáticos em ${t.convites} convite(s): ${t.aderidos} aderido(s) · ${t.ignorados_piso} abaixo do piso · ${t.sem_preco_bling} sem Bling${t.falhas ? ` · ${t.falhas} falha(s)` : ''}.`, t.aderidos > 0 ? 'ok' : 'warn')
+    carregar()
+  }
 
   const toggleExclusaoSeller = async () => {
     setBusyExcl(true)
@@ -184,14 +217,14 @@ export default function Promocoes() {
               </div>
               <Distribuicao convites={convites.length} minhas={minhas.length} cupons={cupons.length} />
               <Simulador notify={notify} recarregar={carregar} />
-              <SecConvites convites={convites} onAderir={abrirAderir} />
+              <SecConvites convites={convites} onAderir={abrirAderir} onAutoAderir={aderirAutoConvite} onAplicarAutomaticos={aplicarAutomaticos} autoRodando={autoRodando} />
               <SecMinhas minhas={minhas} onAcao={emBreve} onEncerrar={encerrarCampanha} onAddItens={abrirAddItens} onSincronizar={sincronizarPedidos} notify={notify} />
               <SecCupons cupons={cupons} onAcao={emBreve} onEncerrar={encerrarCampanha} />
               <Calendario minhas={minhas} cupons={cupons} convites={convites} />
             </>
           )}
           {aba === 'minhas' && <SecMinhas minhas={minhas} onAcao={emBreve} onEncerrar={encerrarCampanha} onAddItens={abrirAddItens} onSincronizar={sincronizarPedidos} notify={notify} full />}
-          {aba === 'convites' && <SecConvites convites={convites} onAderir={abrirAderir} full />}
+          {aba === 'convites' && <SecConvites convites={convites} onAderir={abrirAderir} onAutoAderir={aderirAutoConvite} onAplicarAutomaticos={aplicarAutomaticos} autoRodando={autoRodando} full />}
           {aba === 'cupons' && <SecCupons cupons={cupons} onAcao={emBreve} onEncerrar={encerrarCampanha} full />}
         </>
       )}
@@ -300,23 +333,52 @@ function Chip({ children, cor }) {
 }
 
 /* ================= CONVITES ================= */
-function SecConvites({ convites, onAderir, full }) {
+function SecConvites({ convites, onAderir, onAutoAderir, onAplicarAutomaticos, autoRodando, full }) {
+  const [modos, setModos] = useState(() => { try { return JSON.parse(localStorage.getItem('promo_convite_modo') || '{}') } catch { return {} } })
+  const [aoAbrir, setAoAbrir] = useState(() => localStorage.getItem('promo_convite_ao_abrir') === '1')
+  const setModo = (id, mo) => { setModos((m) => ({ ...m, [id]: mo })); setModoConviteLS(id, mo) }
+  const modoDe = (id) => modos[id] || 'manual'
+  const alvosAuto = convites.filter((c) => modoDe(c.id) === 'auto')
+  const nAuto = alvosAuto.length
+  const jaRodou = useRef(false)
+  useEffect(() => {
+    if (aoAbrir && nAuto > 0 && !jaRodou.current && !autoRodando) {
+      jaRodou.current = true
+      onAplicarAutomaticos(alvosAuto)
+    }
+  }, [aoAbrir, nAuto]) // eslint-disable-line react-hooks/exhaustive-deps
+  const toggleAoAbrir = () => { const v = !aoAbrir; setAoAbrir(v); localStorage.setItem('promo_convite_ao_abrir', v ? '1' : '0') }
   return (
     <>
-      <Secao icon={Zap} cor={ML} titulo="Convites do Mercado Livre" pill="você adere · 1 clique" pillCor={ML} />
+      <Secao icon={Zap} cor={ML} titulo="Convites do Mercado Livre" pill="manual ou automático" pillCor={ML} right={convites.length > 0 ? (
+        <div className="flex items-center gap-2.5">
+          <label className="flex items-center gap-1.5 text-[10px] text-dim cursor-pointer" title="Ao abrir a aba, adere sozinho os convites marcados como automático (sempre acima do piso)">
+            <input type="checkbox" checked={aoAbrir} onChange={toggleAoAbrir} style={{ accentColor: '#2FD98D' }} /> aplicar ao abrir
+          </label>
+          <button onClick={() => onAplicarAutomaticos(alvosAuto)} disabled={autoRodando || nAuto === 0} className="text-[11px] font-bold px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5 disabled:opacity-50" style={nAuto > 0 ? { background: 'linear-gradient(135deg, var(--ok), #27c07d)', color: '#08130d' } : { background: 'rgba(255,255,255,.08)', color: 'var(--faint)' }}>
+            {autoRodando ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />} Aplicar automáticos ({nAuto})
+          </button>
+        </div>
+      ) : null} />
+      {nAuto > 0 && <div className="text-[10px] text-faint mb-2 flex items-center gap-1.5"><Shield size={12} style={{ color: 'var(--ok)' }} /> {nAuto} convite(s) em automático — aderem sozinhos os itens elegíveis a −15% acima do piso; nunca furam a margem.</div>}
       {convites.length === 0
         ? <Vazio texto="Nenhum convite do ML no momento. Eles aparecem aqui quando o Mercado Livre te convida — Oferta Relâmpago, Oferta do Dia, coparticipação, Price Matching, PIX, etc." />
-        : <div className="grid grid-cols-3 gap-3">{convites.map((c, i) => <ConviteCard key={c.id} p={c} onAderir={onAderir} idx={i} />)}</div>}
+        : <div className="grid grid-cols-3 gap-3">{convites.map((c, i) => <ConviteCard key={c.id} p={c} onAderir={onAderir} onAutoAderir={onAutoAderir} modo={modoDe(c.id)} onSetModo={(mo) => setModo(c.id, mo)} idx={i} />)}</div>}
     </>
   )
 }
-function ConviteCard({ p, onAderir, idx = 0 }) {
+const getModoConvite = (id) => { try { return (JSON.parse(localStorage.getItem('promo_convite_modo') || '{}'))[id] || 'manual' } catch { return 'manual' } }
+const setModoConviteLS = (id, modo) => { try { const m = JSON.parse(localStorage.getItem('promo_convite_modo') || '{}'); m[id] = modo; localStorage.setItem('promo_convite_modo', JSON.stringify(m)) } catch { /* noop */ } }
+
+function ConviteCard({ p, onAderir, onAutoAderir, modo, onSetModo, idx = 0 }) {
   const m = meta(p.type); const Ic = m.icon
   const ben = p.benefits || {}
   const cofin = ben.type === 'REBATE' ? `ML ${ben.meli_percent ?? '—'}% + você ${ben.seller_percent ?? '—'}%` : null
   const ddl = dcurta(p.deadline_date); const dd = diasAte(p.deadline_date)
   const vi = dcurta(p.start_date), vf = dcurta(p.finish_date)
   const [cont, setCont] = useState(null)
+  const [autoBusy, setAutoBusy] = useState(false)
+  const rodarAuto = async () => { setAutoBusy(true); try { await onAutoAderir(p) } finally { setAutoBusy(false) } }
   useEffect(() => {
     let vivo = true
     api.mlPromoContagem(p.id, p.type).then((r) => { if (vivo) setCont(r) }).catch(() => {})
@@ -339,8 +401,17 @@ function ConviteCard({ p, onAderir, idx = 0 }) {
       </div>
       <div className="flex items-center gap-2 mt-3">
         {ddl && <span className="text-[9.5px] font-extrabold px-2 py-1 rounded-lg inline-flex items-center gap-1.5" style={{ background: 'rgba(224,162,60,.14)', color: 'var(--warn)' }}><Clock size={11} /> {dd != null && dd >= 0 ? `${dd}d` : ddl}</span>}
-        <button onClick={() => onAderir(p)} className="ml-auto text-[10.5px] font-bold px-3 py-1.5 rounded-lg inline-flex items-center gap-1" style={{ background: 'linear-gradient(135deg, #F2C200, #d9a400)', color: '#3a2c00' }}>Aderir <ChevronRight size={12} /></button>
+        <div className="ml-auto flex items-center gap-1.5">
+          <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--glass-border)' }} title="Manual: você escolhe os itens · Automático: adere sozinho os itens acima do piso">
+            <button onClick={() => onSetModo('manual')} className="text-[9px] font-extrabold px-2 py-1" style={modo === 'manual' ? { background: 'var(--accent)', color: '#fff' } : { background: 'transparent', color: 'var(--dim)' }}>Manual</button>
+            <button onClick={() => onSetModo('auto')} className="text-[9px] font-extrabold px-2 py-1" style={modo === 'auto' ? { background: 'var(--ok)', color: '#08130d' } : { background: 'transparent', color: 'var(--dim)' }}>Auto</button>
+          </div>
+          {modo === 'auto'
+            ? <button onClick={rodarAuto} disabled={autoBusy} className="text-[10.5px] font-bold px-3 py-1.5 rounded-lg inline-flex items-center gap-1 disabled:opacity-50" style={{ background: 'linear-gradient(135deg, var(--ok), #27c07d)', color: '#08130d' }}>{autoBusy ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />} Aderir auto</button>
+            : <button onClick={() => onAderir(p)} className="text-[10.5px] font-bold px-3 py-1.5 rounded-lg inline-flex items-center gap-1" style={{ background: 'linear-gradient(135deg, #F2C200, #d9a400)', color: '#3a2c00' }}>Aderir <ChevronRight size={12} /></button>}
+        </div>
       </div>
+      {modo === 'auto' && <div className="text-[9px] mt-1.5 flex items-center gap-1" style={{ color: 'var(--ok)' }}><Shield size={10} /> Automático: adere os itens elegíveis a −15% acima do piso; nunca fura a margem.</div>}
     </div>
   )
 }
