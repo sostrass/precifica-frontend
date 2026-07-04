@@ -78,6 +78,10 @@ export default function Promocoes() {
   const abrirAderir = (p) => setPicker({ modo: 'convite', promotionId: p.id, promotionType: p.type, promoNome: p.name || p.type, inicio: p.start_date, fim: p.finish_date })
 
   const [autoRodando, setAutoRodando] = useState(false)
+  const [contagens, setContagens] = useState({})
+  const reportContagem = useCallback((id, total, participando) => {
+    setContagens((m) => (m[id] && m[id].total === total && m[id].participando === participando ? m : { ...m, [id]: { total, participando } }))
+  }, [])
   const _resumoAuto = (r) => {
     const parts = [`${r.aderidos} aderido(s)`]
     if (r.ignorados_piso) parts.push(`${r.ignorados_piso} abaixo do piso`)
@@ -90,6 +94,14 @@ export default function Promocoes() {
     try {
       const r = await api.mlPromoAderirAuto(p.id, p.type, 15)
       notify(`${p.name || p.type}: ${_resumoAuto(r)}.`, r.aderidos > 0 ? 'ok' : 'warn')
+      carregar()
+    } catch (e) { notify(traduzErroML(e.message), 'danger') }
+  }
+  const sairConvite = async (p) => {
+    if (!window.confirm(`Deixar de aderir "${p.name || p.type}"? Isso remove seus itens que estão participando desta promoção.`)) return
+    try {
+      const r = await api.mlPromoSair(p.id, p.type)
+      notify(`${p.name || p.type}: ${r.removidos} item(ns) removido(s)${r.falhas && r.falhas.length ? ` · ${r.falhas.length} falha(s)` : ''}.`, r.removidos > 0 ? 'ok' : 'warn')
       carregar()
     } catch (e) { notify(traduzErroML(e.message), 'danger') }
   }
@@ -212,19 +224,20 @@ export default function Promocoes() {
                 <Kpi icon={Zap} label="Convites do ML" valor={cont.convites ?? 0} sub="oportunidades" subcor={ML} />
                 <Kpi icon={Gift} label="Coparticipados" valor={cont.coparticipadas ?? 0} sub="ML subsidia parte" hero />
                 <Kpi icon={Ticket} label="Cupons" valor={cupons.length} sub="ativos / agendados" />
-                <Kpi icon={CircleDollarSign} label="Líquido real" valor="em breve" sub="net_proceeds · Etapa 3" prof />
+                <Kpi icon={Layers} label="Itens participando" valor={Object.values(contagens).reduce((a, c) => a + (c.participando || 0), 0)} sub={`de ${Object.values(contagens).reduce((a, c) => a + (c.total || 0), 0)} elegíveis`} prof />
                 <Kpi icon={Shield} label="Governança" valor={painel.exclusao_ativa == null ? '—' : painel.exclusao_ativa ? 'ON' : 'OFF'} sub="exclusão do ML" />
               </div>
+              <InsightsPromo convites={convites} contagens={contagens} cont={cont} />
               <Distribuicao convites={convites.length} minhas={minhas.length} cupons={cupons.length} />
               <Simulador notify={notify} recarregar={carregar} />
-              <SecConvites convites={convites} onAderir={abrirAderir} onAutoAderir={aderirAutoConvite} onAplicarAutomaticos={aplicarAutomaticos} autoRodando={autoRodando} />
+              <SecConvites convites={convites} onAderir={abrirAderir} onAutoAderir={aderirAutoConvite} onSair={sairConvite} onAplicarAutomaticos={aplicarAutomaticos} autoRodando={autoRodando} onContagem={reportContagem} />
               <SecMinhas minhas={minhas} onAcao={emBreve} onEncerrar={encerrarCampanha} onAddItens={abrirAddItens} onSincronizar={sincronizarPedidos} notify={notify} />
               <SecCupons cupons={cupons} onAcao={emBreve} onEncerrar={encerrarCampanha} />
               <Calendario minhas={minhas} cupons={cupons} convites={convites} />
             </>
           )}
           {aba === 'minhas' && <SecMinhas minhas={minhas} onAcao={emBreve} onEncerrar={encerrarCampanha} onAddItens={abrirAddItens} onSincronizar={sincronizarPedidos} notify={notify} full />}
-          {aba === 'convites' && <SecConvites convites={convites} onAderir={abrirAderir} onAutoAderir={aderirAutoConvite} onAplicarAutomaticos={aplicarAutomaticos} autoRodando={autoRodando} full />}
+          {aba === 'convites' && <SecConvites convites={convites} onAderir={abrirAderir} onAutoAderir={aderirAutoConvite} onSair={sairConvite} onAplicarAutomaticos={aplicarAutomaticos} autoRodando={autoRodando} onContagem={reportContagem} full />}
           {aba === 'cupons' && <SecCupons cupons={cupons} onAcao={emBreve} onEncerrar={encerrarCampanha} full />}
         </>
       )}
@@ -333,7 +346,35 @@ function Chip({ children, cor }) {
 }
 
 /* ================= CONVITES ================= */
-function SecConvites({ convites, onAderir, onAutoAderir, onAplicarAutomaticos, autoRodando, full }) {
+
+function InsightsPromo({ convites, contagens, cont }) {
+  const totPart = Object.values(contagens).reduce((a, c) => a + (c.participando || 0), 0)
+  const totEleg = Object.values(contagens).reduce((a, c) => a + (c.total || 0), 0)
+  const expirando = convites.filter((c) => { const d = diasAte(c.deadline_date); return d != null && d >= 0 && d <= 3 }).length
+  let nAuto = 0
+  try { const m = JSON.parse(localStorage.getItem('promo_convite_modo') || '{}'); nAuto = convites.filter((c) => m[c.id] === 'auto').length } catch { /* noop */ }
+  const semParticipar = convites.filter((c) => { const cc = contagens[c.id]; return cc && cc.total > 0 && cc.participando === 0 }).length
+  const ins = [
+    { ic: Layers, cor: 'var(--accent)', tit: `${totPart} itens participando`, det: totEleg > 0 ? `de ${totEleg} elegíveis em ${convites.length} convites` : 'aderidos nos convites do ML' },
+    { ic: Gift, cor: BLUE, tit: `${cont.coparticipadas ?? 0} coparticipados`, det: 'o ML subsidia parte do desconto — priorize estes' },
+    { ic: Clock, cor: 'var(--warn)', tit: `${expirando} expira${expirando === 1 ? '' : 'm'} em ≤3 dias`, det: expirando > 0 ? 'adira antes do prazo de adesão fechar' : 'nenhum convite perto do prazo' },
+    { ic: Zap, cor: 'var(--ok)', tit: `${nAuto} em automático`, det: semParticipar > 0 ? `${semParticipar} convite(s) ainda sem itens seus` : 'aderem sozinhos, sempre acima do piso' },
+  ]
+  return (
+    <div className="grid grid-cols-4 gap-3 mt-3">
+      {ins.map((x, i) => (
+        <div key={i} className="rounded-2xl p-3 glass lift flex items-center gap-3 card-in" style={{ animationDelay: `${i * 40}ms` }}>
+          <div className="w-9 h-9 rounded-xl grid place-items-center flex-none" style={{ background: `${x.cor}1e`, color: x.cor }}><x.ic size={17} /></div>
+          <div className="min-w-0">
+            <div className="text-[13px] font-extrabold truncate num" style={{ color: x.cor }}>{x.tit}</div>
+            <div className="text-[9.5px] text-faint leading-snug">{x.det}</div>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+function SecConvites({ convites, onAderir, onAutoAderir, onSair, onAplicarAutomaticos, autoRodando, onContagem, full }) {
   const [modos, setModos] = useState(() => { try { return JSON.parse(localStorage.getItem('promo_convite_modo') || '{}') } catch { return {} } })
   const [aoAbrir, setAoAbrir] = useState(() => localStorage.getItem('promo_convite_ao_abrir') === '1')
   const setModo = (id, mo) => { setModos((m) => ({ ...m, [id]: mo })); setModoConviteLS(id, mo) }
@@ -363,14 +404,14 @@ function SecConvites({ convites, onAderir, onAutoAderir, onAplicarAutomaticos, a
       {nAuto > 0 && <div className="text-[10px] text-faint mb-2 flex items-center gap-1.5"><Shield size={12} style={{ color: 'var(--ok)' }} /> {nAuto} convite(s) em automático — aderem sozinhos os itens elegíveis a −15% acima do piso; nunca furam a margem.</div>}
       {convites.length === 0
         ? <Vazio texto="Nenhum convite do ML no momento. Eles aparecem aqui quando o Mercado Livre te convida — Oferta Relâmpago, Oferta do Dia, coparticipação, Price Matching, PIX, etc." />
-        : <div className="grid grid-cols-3 gap-3">{convites.map((c, i) => <ConviteCard key={c.id} p={c} onAderir={onAderir} onAutoAderir={onAutoAderir} modo={modoDe(c.id)} onSetModo={(mo) => setModo(c.id, mo)} idx={i} />)}</div>}
+        : <div className="grid grid-cols-3 gap-3">{convites.map((c, i) => <ConviteCard key={c.id} p={c} onAderir={onAderir} onAutoAderir={onAutoAderir} onSair={onSair} onContagem={onContagem} modo={modoDe(c.id)} onSetModo={(mo) => setModo(c.id, mo)} idx={i} />)}</div>}
     </>
   )
 }
 const getModoConvite = (id) => { try { return (JSON.parse(localStorage.getItem('promo_convite_modo') || '{}'))[id] || 'manual' } catch { return 'manual' } }
 const setModoConviteLS = (id, modo) => { try { const m = JSON.parse(localStorage.getItem('promo_convite_modo') || '{}'); m[id] = modo; localStorage.setItem('promo_convite_modo', JSON.stringify(m)) } catch { /* noop */ } }
 
-function ConviteCard({ p, onAderir, onAutoAderir, modo, onSetModo, idx = 0 }) {
+function ConviteCard({ p, onAderir, onAutoAderir, onSair, onContagem, modo, onSetModo, idx = 0 }) {
   const m = meta(p.type); const Ic = m.icon
   const ben = p.benefits || {}
   const cofin = ben.type === 'REBATE' ? `ML ${ben.meli_percent ?? '—'}% + você ${ben.seller_percent ?? '—'}%` : null
@@ -378,12 +419,14 @@ function ConviteCard({ p, onAderir, onAutoAderir, modo, onSetModo, idx = 0 }) {
   const vi = dcurta(p.start_date), vf = dcurta(p.finish_date)
   const [cont, setCont] = useState(null)
   const [autoBusy, setAutoBusy] = useState(false)
+  const [sairBusy, setSairBusy] = useState(false)
   const rodarAuto = async () => { setAutoBusy(true); try { await onAutoAderir(p) } finally { setAutoBusy(false) } }
+  const rodarSair = async () => { setSairBusy(true); try { await onSair(p) } finally { setSairBusy(false) } }
   useEffect(() => {
     let vivo = true
-    api.mlPromoContagem(p.id, p.type).then((r) => { if (vivo) setCont(r) }).catch(() => {})
+    api.mlPromoContagem(p.id, p.type).then((r) => { if (vivo) { setCont(r); onContagem && onContagem(p.id, r.total || 0, r.participando || 0) } }).catch(() => {})
     return () => { vivo = false }
-  }, [p.id, p.type])
+  }, [p.id, p.type]) // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="rounded-2xl p-3.5 relative overflow-hidden lift card-in" style={{ background: `linear-gradient(160deg, ${m.cor}14, rgba(0,0,0,.14))`, border: `1px solid ${m.cor}33`, animationDelay: `${idx * 45}ms` }}>
       <div className="absolute top-0 left-0 right-0 h-[3px]" style={{ background: `linear-gradient(90deg, ${m.cor}, transparent)` }} />
@@ -412,6 +455,7 @@ function ConviteCard({ p, onAderir, onAutoAderir, modo, onSetModo, idx = 0 }) {
         </div>
       </div>
       {modo === 'auto' && <div className="text-[9px] mt-1.5 flex items-center gap-1" style={{ color: 'var(--ok)' }}><Shield size={10} /> Automático: adere os itens elegíveis a −15% acima do piso; nunca fura a margem.</div>}
+      {cont && cont.participando > 0 && <button onClick={rodarSair} disabled={sairBusy} className="text-[9.5px] font-bold mt-2 inline-flex items-center gap-1 px-2.5 py-1 rounded-lg disabled:opacity-50" style={{ background: 'rgba(255,122,122,.12)', color: 'var(--danger)', border: '1px solid rgba(255,122,122,.3)' }}>{sairBusy ? <Loader2 size={10} className="animate-spin" /> : <Ban size={10} />} Deixar de aderir ({cont.participando})</button>}
     </div>
   )
 }
@@ -1167,7 +1211,7 @@ function DesempenhoDrawer({ met, carregando, p, onClose, onSincronizar, notify }
     finally { setAddingId(null) }
   }
   return createPortal(
-    <div className="fixed inset-0 z-[80] flex justify-end" style={{ background: 'rgba(0,0,0,.55)' }} onClick={(e) => { e.stopPropagation(); onClose() }}>
+    <div className="fixed inset-0 z-[100] flex justify-end" style={{ background: 'rgba(0,0,0,.55)' }} onClick={(e) => { e.stopPropagation(); onClose() }}>
       <div onClick={(e) => e.stopPropagation()} className="h-full w-full card-in flex flex-col" style={{ maxWidth: 560, background: 'var(--surface)', borderLeft: '1px solid var(--glass-border)', boxShadow: '-20px 0 60px rgba(0,0,0,.5)' }}>
         {/* header */}
         <div className="flex items-center gap-2 px-4 py-3 flex-none" style={{ borderBottom: '1px solid var(--glass-border)' }}>
@@ -1361,6 +1405,7 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, inicio, fim
   const [carregandoMais, setCarregandoMais] = useState(false)
   const [meta, setMeta] = useState(null)
   const [permitirAbaixo, setPermitirAbaixo] = useState(false)
+  const [saindo, setSaindo] = useState(false)
 
   const carregar = useCallback(async (busca = '') => {
     setCarregando(true); setErro(''); setSel(new Set())
@@ -1392,18 +1437,20 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, inicio, fim
 
   const dealDe = (it) => {
     if (modo === 'convite') {
-      // O desconto vem da barra; grampeia na banda do ML quando há (semântica oficial:
-      // max_discounted_price = MENOR preço permitido = piso da banda; min_discounted_price = MAIOR preço = teto).
-      let dp = (it.original_price || it.preco || 0) * (1 - pct / 100)
-      if (it.max_discounted_price != null) dp = Math.max(dp, it.max_discounted_price)
-      if (it.min_discounted_price != null) dp = Math.min(dp, it.min_discounted_price)
+      // Convite: quem define o desconto é o Mercado Livre. Usamos o preço ofertado pela plataforma
+      // (sugerido -> menor desconto permitido -> maior desconto -> original). Sem barra manual.
+      const dp = (it.suggested_discounted_price != null ? it.suggested_discounted_price
+        : it.min_discounted_price != null ? it.min_discounted_price
+          : it.max_discounted_price != null ? it.max_discounted_price
+            : it.original_price) || 0
       return Math.round(dp * 100) / 100
     }
     const dp = (it.preco || 0) * (1 - pct / 100)
     return Math.round(dp * 100) / 100
   }
   const furaPiso = (it) => it.piso_preco != null && dealDe(it) < it.piso_preco - 0.005
-  const podeSel = (it) => permitirAbaixo || !furaPiso(it)
+  const isParticipando = (it) => ['active', 'started', 'enabled'].includes((it.status || '').toLowerCase())
+  const podeSel = (it) => !isParticipando(it) && (permitirAbaixo || !furaPiso(it))
   const toggle = (it) => { if (!podeSel(it)) return; setSel((s) => { const n = new Set(s); n.has(it.item_id) ? n.delete(it.item_id) : n.add(it.item_id); return n }) }
   const lista = itens || []
   const ql = q.trim().toLowerCase()
@@ -1418,6 +1465,16 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, inicio, fim
   const nSel = lista.filter((i) => sel.has(i.item_id) && podeSel(i)).length
   const participando = lista.filter((i) => ['active', 'started', 'enabled'].includes((i.status || '').toLowerCase())).length
   const valorSel = lista.filter((i) => sel.has(i.item_id)).reduce((acc, i) => acc + (dealDe(i) || 0), 0)
+  const sairDaPromo = async () => {
+    if (!window.confirm(`Deixar de aderir? Remove os ${participando} item(ns) que estão participando desta promoção.`)) return
+    setSaindo(true)
+    try {
+      const r = await api.mlPromoSair(promotionId, promotionType)
+      notify && notify(`${r.removidos} item(ns) removido(s).`, r.removidos > 0 ? 'ok' : 'warn')
+      onOk && onOk()
+    } catch (e) { notify && notify(traduzErroML(e.message), 'danger') }
+    finally { setSaindo(false) }
+  }
 
   const aplicar = async () => {
     const alvos = lista.filter((i) => sel.has(i.item_id) && podeSel(i))
@@ -1451,7 +1508,7 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, inicio, fim
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-[80] flex justify-end" style={{ background: 'rgba(0,0,0,.55)' }} onClick={aplicando ? undefined : (e) => { e.stopPropagation(); onClose() }}>
+    <div className="fixed inset-0 z-[100] flex justify-end" style={{ background: 'rgba(0,0,0,.55)' }} onClick={aplicando ? undefined : (e) => { e.stopPropagation(); onClose() }}>
       <div onClick={(e) => e.stopPropagation()} className="h-full w-full card-in flex flex-col" style={{ maxWidth: 640, background: 'var(--surface)', borderLeft: '1px solid var(--glass-border)', boxShadow: '-20px 0 60px rgba(0,0,0,.5)' }}>
         {/* header */}
         <div className="flex items-center gap-2 px-4 py-3 flex-none" style={{ borderBottom: '1px solid var(--glass-border)' }}>
@@ -1477,15 +1534,17 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, inicio, fim
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
             <input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && modo !== 'convite' && carregar(q)} placeholder={modo === 'convite' ? 'Filtrar itens do convite…' : 'Buscar por título, SKU ou ID… (Enter)'} className="w-full text-[12px] pl-9 pr-3 py-2 rounded-xl bg-transparent text-fg placeholder:text-faint" style={{ border: '1px solid var(--glass-border)' }} />
           </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-[9.5px] text-faint font-extrabold uppercase tracking-wide">Desconto</span>
-            {[10, 15, 20, 25, 30].map((d) => (
-              <button key={d} onClick={() => setPct(d)} className="text-[11px] font-bold px-2.5 py-1 rounded-full num transition-colors" style={pct === d ? { background: 'var(--accent)', color: '#fff' } : { background: 'rgba(255,255,255,.06)', color: 'var(--dim)', border: '1px solid var(--glass-border)' }}>{d}%</button>
-            ))}
-            <input type="range" min={5} max={40} step={1} value={pct} onChange={(e) => setPct(Number(e.target.value))} className="flex-1 min-w-[120px]" style={{ accentColor: '#d6007f' }} />
-            <span className="text-[11px] font-extrabold num" style={{ color: 'var(--accent)' }}>{pct}%</span>
-          </div>
-          {modo === 'convite' && <div className="text-[10px] text-faint mt-1.5 flex items-start gap-1.5"><Info size={12} className="flex-none mt-0.5" /> Ajuste o desconto na barra. Em convites com banda (ex.: Relâmpago) o preço é encaixado no mín–máx do ML; nunca abaixo do piso.</div>}
+          {modo !== 'convite' && (
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-[9.5px] text-faint font-extrabold uppercase tracking-wide">Desconto</span>
+              {[10, 15, 20, 25, 30].map((d) => (
+                <button key={d} onClick={() => setPct(d)} className="text-[11px] font-bold px-2.5 py-1 rounded-full num transition-colors" style={pct === d ? { background: 'var(--accent)', color: '#fff' } : { background: 'rgba(255,255,255,.06)', color: 'var(--dim)', border: '1px solid var(--glass-border)' }}>{d}%</button>
+              ))}
+              <input type="range" min={5} max={40} step={1} value={pct} onChange={(e) => setPct(Number(e.target.value))} className="flex-1 min-w-[120px]" style={{ accentColor: '#d6007f' }} />
+              <span className="text-[11px] font-extrabold num" style={{ color: 'var(--accent)' }}>{pct}%</span>
+            </div>
+          )}
+          {modo === 'convite' && <div className="text-[10px] text-faint mt-1.5 flex items-start gap-1.5"><Info size={12} className="flex-none mt-0.5" /> Convites usam o desconto do <b>Mercado Livre</b> — o preço de cada item é definido pela plataforma. Você só escolhe <b>quais participam</b>; nunca abaixo do piso.</div>}
           {semBling > 0 && <div className="text-[10px] mt-1.5 flex items-start gap-1.5" style={{ color: 'var(--warn)' }}><AlertTriangle size={12} className="flex-none mt-0.5" /> {semBling} {semBling === 1 ? 'item sem' : 'itens sem'} Preço Bling — sem trava de margem. Cadastre o custo/Preço Bling no Bling para proteger a margem.</div>}
           {abaixoTotal > 0 && (
             <div className="mt-2 rounded-xl p-2.5" style={{ background: permitirAbaixo ? 'rgba(255,122,122,.12)' : 'rgba(224,162,60,.1)', border: `1px solid ${permitirAbaixo ? 'rgba(255,122,122,.35)' : 'rgba(224,162,60,.3)'}` }}>
@@ -1511,28 +1570,30 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, inicio, fim
             <div className="text-[12px] text-faint p-6 text-center">{modo === 'convite' ? 'Nenhum item elegível neste convite.' : 'Nenhum anúncio ativo encontrado.'}</div>
           ) : !listaExibida.length ? (
             <div className="text-[12px] text-faint p-6 text-center">Nenhum resultado para “{q}”.</div>
-          ) : (<>{listaExibida.map((it) => {
+          ) : (<>{[...listaExibida].sort((a, b) => (isParticipando(b) ? 1 : 0) - (isParticipando(a) ? 1 : 0)).map((it) => {
             const dp = dealDe(it); const fura = furaPiso(it); const sb = it.piso_preco == null
             const folga = it.piso_preco != null ? dp - it.piso_preco : null
-            const on = sel.has(it.item_id)
+            const on = sel.has(it.item_id); const part = isParticipando(it)
             return (
-              <div key={it.item_id} onClick={() => toggle(it)} className="flex items-center gap-3 px-3 py-2 rounded-xl mb-1 cursor-pointer" style={{ background: on ? 'rgba(214,0,127,.08)' : 'transparent', border: '1px solid ' + (on ? 'rgba(214,0,127,.3)' : 'transparent'), opacity: (fura && !permitirAbaixo) ? 0.55 : 1 }}>
-                <div className="w-5 h-5 rounded-md grid place-items-center flex-none" style={{ border: '1.5px solid ' + (on ? 'var(--accent)' : 'var(--glass-border)'), background: on ? 'var(--accent)' : 'transparent' }}>{on && <Check size={13} color="#fff" />}</div>
+              <div key={it.item_id} onClick={() => { if (!part) toggle(it) }} className="flex items-center gap-3 px-3 py-2 rounded-xl mb-1" style={{ background: part ? 'rgba(47,217,141,.08)' : on ? 'rgba(214,0,127,.08)' : 'transparent', border: '1px solid ' + (part ? 'rgba(47,217,141,.3)' : on ? 'rgba(214,0,127,.3)' : 'transparent'), boxShadow: part ? 'inset 3px 0 0 var(--ok)' : 'none', opacity: (fura && !permitirAbaixo && !part) ? 0.55 : 1, cursor: part ? 'default' : 'pointer' }}>
+                {part
+                  ? <div className="w-5 h-5 rounded-md grid place-items-center flex-none" style={{ background: 'var(--ok)' }} title="Já participando"><Check size={13} color="#08130d" /></div>
+                  : <div className="w-5 h-5 rounded-md grid place-items-center flex-none" style={{ border: '1.5px solid ' + (on ? 'var(--accent)' : 'var(--glass-border)'), background: on ? 'var(--accent)' : 'transparent' }}>{on && <Check size={13} color="#fff" />}</div>}
                 {it.imagem ? <img src={it.imagem} alt="" className="w-10 h-10 rounded-lg object-cover flex-none" style={{ border: '1px solid var(--glass-border)' }} /> : <div className="w-10 h-10 rounded-lg grid place-items-center flex-none" style={{ background: 'rgba(255,255,255,.05)' }}><Boxes size={16} className="text-faint" /></div>}
                 <div className="min-w-0 flex-1">
-                  <div className="text-[12px] font-semibold truncate">{it.titulo || it.item_id}</div>
-                  <div className="text-[10px] text-faint num truncate">{it.sku || it.item_id}{it.estoque != null ? ` · ${it.estoque} un` : ''}{it.em_promocao ? ' · já em promoção' : ''}</div>
+                  <div className="text-[12px] font-semibold truncate flex items-center gap-1.5"><span className="truncate">{it.titulo || it.item_id}</span>{part && <span className="text-[7.5px] font-extrabold px-1.5 py-0.5 rounded-full flex-none tracking-wide" style={{ background: 'rgba(47,217,141,.18)', color: 'var(--ok)' }}>PARTICIPANDO</span>}</div>
+                  <div className="text-[10px] text-faint num truncate">{it.sku || it.item_id}{it.estoque != null ? ` · ${it.estoque} un` : ''}{it.em_promocao && !part ? ' · já em promoção' : ''}</div>
                 </div>
                 <div className="text-right flex-none">
                   <div className="text-[10px] text-faint num">de {brl(it.preco || it.original_price)}</div>
                   <div className="text-[12.5px] font-extrabold num" style={{ color: fura ? 'var(--danger)' : 'var(--ok)' }}>{brl(dp)}</div>
                 </div>
                 <div className="flex-none text-right" style={{ width: 128 }}>
-                  {sb ? <span className="text-[9px] text-faint">sem Preço Bling</span>
-                    : fura ? <span className="text-[9px] font-extrabold" style={{ color: 'var(--danger)' }}>fura o piso {brl(it.piso_preco)}</span>
-                      : <span className="text-[9px] font-extrabold" style={{ color: 'var(--ok)' }}>folga {brl(folga)}</span>}
-                  {modo === 'convite' && it.min_discounted_price != null && <div className="text-[8.5px] text-faint num">ML exige {it.max_discounted_price != null ? `${brl(it.max_discounted_price)}–` : 'até '}{brl(it.min_discounted_price)}</div>}
-                  {modo === 'convite' && it.suggested_discounted_price != null && <div className="text-[8.5px] num" style={{ color: '#F2C200' }}>sugerido {brl(it.suggested_discounted_price)}</div>}
+                  {part ? <span className="text-[9px] font-extrabold" style={{ color: 'var(--ok)' }}>ativo no ML</span>
+                    : sb ? <span className="text-[9px] text-faint">sem Preço Bling</span>
+                      : fura ? <span className="text-[9px] font-extrabold" style={{ color: 'var(--danger)' }}>fura o piso {brl(it.piso_preco)}</span>
+                        : <span className="text-[9px] font-extrabold" style={{ color: 'var(--ok)' }}>folga {brl(folga)}</span>}
+                  {modo === 'convite' && !part && it.min_discounted_price != null && <div className="text-[8.5px] text-faint num">preço do ML {brl(it.suggested_discounted_price != null ? it.suggested_discounted_price : it.min_discounted_price)}</div>}
                 </div>
               </div>
             )
@@ -1553,6 +1614,7 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, inicio, fim
             <button onClick={() => setSel((prev) => new Set([...prev, ...elegiveisVis.map((i) => i.item_id)]))} disabled={aplicando || !elegiveisVis.length} className="text-[10.5px] px-2.5 py-1 rounded-lg glass text-dim hover:text-fg disabled:opacity-40">Selecionar todos ({elegiveisVis.length})</button>
             {(() => { const cm = listaExibida.filter((i) => i.preco_bling != null && !furaPiso(i)); return cm.length > 0 && cm.length !== elegiveisVis.length ? <button onClick={() => setSel((prev) => new Set([...prev, ...cm.map((i) => i.item_id)]))} disabled={aplicando} className="text-[10.5px] px-2.5 py-1 rounded-lg hover:opacity-90" style={{ background: 'rgba(47,217,141,.12)', border: '1px solid rgba(47,217,141,.3)', color: 'var(--ok)' }}>Só com margem ({cm.length})</button> : null })()}
             {sel.size > 0 && <button onClick={() => setSel(new Set())} disabled={aplicando} className="text-[10.5px] px-2.5 py-1 rounded-lg glass text-dim hover:text-fg">Limpar</button>}
+            {modo === 'convite' && participando > 0 && <button onClick={sairDaPromo} disabled={saindo || aplicando} className="text-[10.5px] px-2.5 py-1 rounded-lg inline-flex items-center gap-1 disabled:opacity-40" style={{ background: 'rgba(255,122,122,.12)', border: '1px solid rgba(255,122,122,.3)', color: 'var(--danger)' }}>{saindo ? <Loader2 size={11} className="animate-spin" /> : <Ban size={11} />} Deixar de aderir ({participando})</button>}
             <div className="text-[10.5px] text-dim ml-1"><b className="num" style={{ color: 'var(--fg)' }}>{nSel}</b> selecionado{nSel === 1 ? '' : 's'}{ignorados > 0 && <span className="text-faint"> · {ignorados} abaixo do piso ignorado{ignorados === 1 ? '' : 's'}</span>}{permitirAbaixo && abaixoTotal > 0 && <span style={{ color: 'var(--danger)' }}> · {abaixoTotal} liberado{abaixoTotal === 1 ? '' : 's'} abaixo do piso</span>}</div>
             <button onClick={aplicar} disabled={aplicando || nSel === 0} className="ml-auto text-[12px] font-bold px-4 py-2 rounded-xl text-white inline-flex items-center gap-1.5 disabled:opacity-40" style={{ background: 'linear-gradient(135deg, var(--accent), #a80063)' }}>{aplicando ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} {modo === 'convite' ? 'Aderir' : 'Adicionar'} {nSel > 0 ? `(${nSel})` : ''}</button>
           </div>
@@ -1567,14 +1629,14 @@ const inputSty = { border: '1px solid var(--glass-border)' }
 
 function Modal({ title, icon: Ic, onClose, children }) {
   return createPortal(
-    <div className="fixed inset-0 z-[80] grid place-items-center p-4" style={{ background: 'rgba(0,0,0,.62)' }} onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} className="rounded-2xl w-full card-in" style={{ maxWidth: 470, background: 'var(--surface)', border: '1px solid var(--glass-border)', boxShadow: 'var(--shadow)' }}>
-        <div className="flex items-center gap-2 px-4 py-3" style={{ borderBottom: '1px solid var(--glass-border)' }}>
-          {Ic && <div className="w-7 h-7 rounded-lg grid place-items-center flex-none" style={{ background: 'rgba(214,0,127,.16)', color: 'var(--accent)' }}><Ic size={15} /></div>}
-          <span className="text-[14px] font-bold" style={{ fontFamily: 'Fraunces, Georgia, serif' }}>{title}</span>
+    <div className="fixed inset-0 z-[100] flex justify-end" style={{ background: 'rgba(0,0,0,.55)' }} onClick={(e) => { e.stopPropagation(); onClose() }}>
+      <div onClick={(e) => e.stopPropagation()} className="h-full w-full card-in flex flex-col" style={{ maxWidth: 480, background: 'var(--surface)', borderLeft: '1px solid var(--glass-border)', boxShadow: '-20px 0 60px rgba(0,0,0,.5)' }}>
+        <div className="flex items-center gap-2 px-4 py-3 flex-none" style={{ borderBottom: '1px solid var(--glass-border)' }}>
+          {Ic && <div className="w-8 h-8 rounded-lg grid place-items-center flex-none" style={{ background: 'rgba(214,0,127,.16)', color: 'var(--accent)' }}><Ic size={16} /></div>}
+          <span className="text-[15px] font-bold" style={{ fontFamily: 'Fraunces, Georgia, serif' }}>{title}</span>
           <button onClick={onClose} className="ml-auto text-faint hover:text-fg"><X size={18} /></button>
         </div>
-        <div className="p-4">{children}</div>
+        <div className="p-4 flex-1 overflow-y-auto">{children}</div>
       </div>
     </div>, document.body)
 }
