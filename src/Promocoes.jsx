@@ -1212,7 +1212,7 @@ function DesempenhoDrawer({ met, carregando, p, onClose, onSincronizar, notify }
   }
   return createPortal(
     <div className="fixed inset-0 z-[100] flex justify-end" style={{ background: 'rgba(0,0,0,.55)' }} onClick={(e) => { e.stopPropagation(); onClose() }}>
-      <div onClick={(e) => e.stopPropagation()} className="h-full w-full card-in flex flex-col" style={{ maxWidth: 560, background: 'var(--surface)', borderLeft: '1px solid var(--glass-border)', boxShadow: '-20px 0 60px rgba(0,0,0,.5)' }}>
+      <div onClick={(e) => e.stopPropagation()} className="h-full w-full drawer-in flex flex-col" style={{ maxWidth: 560, background: 'var(--surface)', borderLeft: '1px solid var(--glass-border)', boxShadow: '-20px 0 60px rgba(0,0,0,.5)' }}>
         {/* header */}
         <div className="flex items-center gap-2 px-4 py-3 flex-none" style={{ borderBottom: '1px solid var(--glass-border)' }}>
           <div className="w-8 h-8 rounded-lg grid place-items-center flex-none" style={{ background: `${m.cor}22`, color: m.cor }}><Ic size={16} /></div>
@@ -1465,6 +1465,12 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, inicio, fim
   const nSel = lista.filter((i) => sel.has(i.item_id) && podeSel(i)).length
   const participando = lista.filter((i) => ['active', 'started', 'enabled'].includes((i.status || '').toLowerCase())).length
   const valorSel = lista.filter((i) => sel.has(i.item_id)).reduce((acc, i) => acc + (dealDe(i) || 0), 0)
+  const participandoItens = lista.filter(isParticipando)
+  const voceRecebeTotal = participandoItens.reduce((a, it) => a + (it.net_proceeds || 0), 0)
+  const descsPart = participandoItens.map((it) => { const cp = (it.meli_percentage || 0) + (it.seller_percentage || 0); const ref = it.preco || it.original_price; return cp > 0 ? cp : (ref && it.price != null && it.price < ref ? (1 - it.price / ref) * 100 : 0) }).filter((d) => d > 0)
+  const descMedioPart = descsPart.length ? Math.round(descsPart.reduce((a, d) => a + d, 0) / descsPart.length) : 0
+  const comMargem = lista.filter((it) => !isParticipando(it) && it.piso_preco != null && !furaPiso(it)).length
+  const furaCount = lista.filter((it) => !isParticipando(it) && furaPiso(it)).length
   const sairDaPromo = async () => {
     if (!window.confirm(`Deixar de aderir? Remove os ${participando} item(ns) que estão participando desta promoção.`)) return
     setSaindo(true)
@@ -1509,7 +1515,7 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, inicio, fim
 
   return createPortal(
     <div className="fixed inset-0 z-[100] flex justify-end" style={{ background: 'rgba(0,0,0,.55)' }} onClick={aplicando ? undefined : (e) => { e.stopPropagation(); onClose() }}>
-      <div onClick={(e) => e.stopPropagation()} className="h-full w-full card-in flex flex-col" style={{ maxWidth: 640, background: 'var(--surface)', borderLeft: '1px solid var(--glass-border)', boxShadow: '-20px 0 60px rgba(0,0,0,.5)' }}>
+      <div onClick={(e) => e.stopPropagation()} className="h-full w-full drawer-in flex flex-col" style={{ maxWidth: 640, background: 'var(--surface)', borderLeft: '1px solid var(--glass-border)', boxShadow: '-20px 0 60px rgba(0,0,0,.5)' }}>
         {/* header */}
         <div className="flex items-center gap-2 px-4 py-3 flex-none" style={{ borderBottom: '1px solid var(--glass-border)' }}>
           <div className="w-7 h-7 rounded-lg grid place-items-center flex-none" style={{ background: 'rgba(214,0,127,.16)', color: 'var(--accent)' }}><Layers size={15} /></div>
@@ -1528,6 +1534,16 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, inicio, fim
           <BbKpi l={modo === 'convite' ? 'Válido até' : 'Duração'} v={dcurta(fim) || '—'} c="var(--warn)" sub={inicio ? `de ${dcurta(inicio)}` : null} />
         </div>
 
+        {/* insights */}
+        {lista.length > 0 && (voceRecebeTotal > 0 || descMedioPart > 0 || comMargem > 0 || furaCount > 0) && (
+          <div className="flex items-center gap-2 px-4 pt-2.5 flex-none flex-wrap">
+            {voceRecebeTotal > 0 && <span className="text-[10px] font-bold px-2.5 py-1 rounded-full inline-flex items-center gap-1" style={{ background: 'rgba(47,217,141,.12)', color: 'var(--ok)' }}><CircleDollarSign size={11} /> você recebe {brl(voceRecebeTotal)} no total</span>}
+            {descMedioPart > 0 && <span className="text-[10px] font-bold px-2.5 py-1 rounded-full inline-flex items-center gap-1" style={{ background: 'rgba(91,141,239,.12)', color: BLUE }}><TrendingDown size={11} /> desconto médio {descMedioPart}% no ML</span>}
+            {comMargem > 0 && <span className="text-[10px] font-bold px-2.5 py-1 rounded-full inline-flex items-center gap-1" style={{ background: 'rgba(214,0,127,.12)', color: 'var(--accent)' }}><Check size={11} /> {comMargem} cabem acima do piso</span>}
+            {furaCount > 0 && <span className="text-[10px] font-bold px-2.5 py-1 rounded-full inline-flex items-center gap-1" style={{ background: 'rgba(255,122,122,.1)', color: 'var(--danger)' }}><AlertTriangle size={11} /> {furaCount} furam o piso</span>}
+          </div>
+        )}
+
         {/* controles */}
         <div className="px-4 pt-3 pb-2 flex-none">
           <div className="relative mb-2">
@@ -1544,7 +1560,7 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, inicio, fim
               <span className="text-[11px] font-extrabold num" style={{ color: 'var(--accent)' }}>{pct}%</span>
             </div>
           )}
-          {modo === 'convite' && <div className="text-[10px] text-faint mt-1.5 flex items-start gap-1.5"><Info size={12} className="flex-none mt-0.5" /> Convites usam o desconto do <b>Mercado Livre</b> — o preço de cada item é definido pela plataforma. Você só escolhe <b>quais participam</b>; nunca abaixo do piso.</div>}
+          {modo === 'convite' && <div className="text-[10px] text-faint mt-1.5 flex items-start gap-1.5"><Info size={12} className="flex-none mt-0.5" /> <span>Convites usam o desconto do <b style={{ color: 'var(--fg)' }}>Mercado Livre</b> — o preço de cada item é definido pela plataforma. Você só escolhe <b style={{ color: 'var(--fg)' }}>quais participam</b>; nunca abaixo do piso.</span></div>}
           {semBling > 0 && <div className="text-[10px] mt-1.5 flex items-start gap-1.5" style={{ color: 'var(--warn)' }}><AlertTriangle size={12} className="flex-none mt-0.5" /> {semBling} {semBling === 1 ? 'item sem' : 'itens sem'} Preço Bling — sem trava de margem. Cadastre o custo/Preço Bling no Bling para proteger a margem.</div>}
           {abaixoTotal > 0 && (
             <div className="mt-2 rounded-xl p-2.5" style={{ background: permitirAbaixo ? 'rgba(255,122,122,.12)' : 'rgba(224,162,60,.1)', border: `1px solid ${permitirAbaixo ? 'rgba(255,122,122,.35)' : 'rgba(224,162,60,.3)'}` }}>
@@ -1574,6 +1590,10 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, inicio, fim
             const dp = dealDe(it); const fura = furaPiso(it); const sb = it.piso_preco == null
             const folga = it.piso_preco != null ? dp - it.piso_preco : null
             const on = sel.has(it.item_id); const part = isParticipando(it)
+            const coop = (it.meli_percentage || 0) + (it.seller_percentage || 0)
+            const refOrig = it.preco || it.original_price
+            const descPart = coop > 0 ? Math.round(coop) : (refOrig && it.price != null && it.price < refOrig ? Math.round((1 - it.price / refOrig) * 100) : 0)
+            const precoFinal = (it.price != null && refOrig && it.price < refOrig) ? it.price : (refOrig && descPart ? Math.round(refOrig * (1 - descPart / 100) * 100) / 100 : (it.price != null ? it.price : dp))
             return (
               <div key={it.item_id} onClick={() => { if (!part) toggle(it) }} className="flex items-center gap-3 px-3 py-2 rounded-xl mb-1" style={{ background: part ? 'rgba(47,217,141,.08)' : on ? 'rgba(214,0,127,.08)' : 'transparent', border: '1px solid ' + (part ? 'rgba(47,217,141,.3)' : on ? 'rgba(214,0,127,.3)' : 'transparent'), boxShadow: part ? 'inset 3px 0 0 var(--ok)' : 'none', opacity: (fura && !permitirAbaixo && !part) ? 0.55 : 1, cursor: part ? 'default' : 'pointer' }}>
                 {part
@@ -1585,14 +1605,24 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, inicio, fim
                   <div className="text-[10px] text-faint num truncate">{it.sku || it.item_id}{it.estoque != null ? ` · ${it.estoque} un` : ''}{it.em_promocao && !part ? ' · já em promoção' : ''}</div>
                 </div>
                 <div className="text-right flex-none">
-                  <div className="text-[10px] text-faint num">de {brl(it.preco || it.original_price)}</div>
-                  <div className="text-[12.5px] font-extrabold num" style={{ color: fura ? 'var(--danger)' : 'var(--ok)' }}>{brl(dp)}</div>
+                  {part ? (<>
+                    <div className="text-[10px] text-faint num">{refOrig && refOrig > precoFinal ? `de ${brl(refOrig)}` : 'preço no ML'}</div>
+                    <div className="text-[12.5px] font-extrabold num" style={{ color: 'var(--ok)' }}>{brl(precoFinal)}</div>
+                  </>) : (<>
+                    <div className="text-[10px] text-faint num">de {brl(it.preco || it.original_price)}</div>
+                    <div className="text-[12.5px] font-extrabold num" style={{ color: fura ? 'var(--danger)' : 'var(--ok)' }}>{brl(dp)}</div>
+                  </>)}
                 </div>
-                <div className="flex-none text-right" style={{ width: 128 }}>
-                  {part ? <span className="text-[9px] font-extrabold" style={{ color: 'var(--ok)' }}>ativo no ML</span>
-                    : sb ? <span className="text-[9px] text-faint">sem Preço Bling</span>
-                      : fura ? <span className="text-[9px] font-extrabold" style={{ color: 'var(--danger)' }}>fura o piso {brl(it.piso_preco)}</span>
-                        : <span className="text-[9px] font-extrabold" style={{ color: 'var(--ok)' }}>folga {brl(folga)}</span>}
+                <div className="flex-none text-right" style={{ width: 138 }}>
+                  {part ? (<>
+                    {descPart > 0
+                      ? <span className="text-[9.5px] font-extrabold" style={{ color: 'var(--ok)' }}>−{descPart}% no ML</span>
+                      : <span className="text-[9px] font-extrabold" style={{ color: 'var(--warn)' }}>sem desconto ativo</span>}
+                    {it.net_proceeds != null && <div className="text-[8.5px] num" style={{ color: 'var(--ok)' }}>você recebe {brl(it.net_proceeds)}</div>}
+                    {coop > 0 && it.meli_percentage != null && <div className="text-[8.5px] num" style={{ color: BLUE }}>ML {Math.round(it.meli_percentage)}% + você {Math.round(it.seller_percentage || 0)}%</div>}
+                  </>) : sb ? <span className="text-[9px] text-faint">sem Preço Bling</span>
+                    : fura ? <span className="text-[9px] font-extrabold" style={{ color: 'var(--danger)' }}>fura o piso {brl(it.piso_preco)}</span>
+                      : <span className="text-[9px] font-extrabold" style={{ color: 'var(--ok)' }}>folga {brl(folga)}</span>}
                   {modo === 'convite' && !part && it.min_discounted_price != null && <div className="text-[8.5px] text-faint num">preço do ML {brl(it.suggested_discounted_price != null ? it.suggested_discounted_price : it.min_discounted_price)}</div>}
                 </div>
               </div>
@@ -1630,7 +1660,7 @@ const inputSty = { border: '1px solid var(--glass-border)' }
 function Modal({ title, icon: Ic, onClose, children }) {
   return createPortal(
     <div className="fixed inset-0 z-[100] flex justify-end" style={{ background: 'rgba(0,0,0,.55)' }} onClick={(e) => { e.stopPropagation(); onClose() }}>
-      <div onClick={(e) => e.stopPropagation()} className="h-full w-full card-in flex flex-col" style={{ maxWidth: 480, background: 'var(--surface)', borderLeft: '1px solid var(--glass-border)', boxShadow: '-20px 0 60px rgba(0,0,0,.5)' }}>
+      <div onClick={(e) => e.stopPropagation()} className="h-full w-full drawer-in flex flex-col" style={{ maxWidth: 480, background: 'var(--surface)', borderLeft: '1px solid var(--glass-border)', boxShadow: '-20px 0 60px rgba(0,0,0,.5)' }}>
         <div className="flex items-center gap-2 px-4 py-3 flex-none" style={{ borderBottom: '1px solid var(--glass-border)' }}>
           {Ic && <div className="w-8 h-8 rounded-lg grid place-items-center flex-none" style={{ background: 'rgba(214,0,127,.16)', color: 'var(--accent)' }}><Ic size={16} /></div>}
           <span className="text-[15px] font-bold" style={{ fontFamily: 'Fraunces, Georgia, serif' }}>{title}</span>
