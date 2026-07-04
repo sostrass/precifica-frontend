@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react'
-import { createPortal } from 'react-dom'
 import {
   Tag, Percent, Ticket, Boxes, Flame, Sparkles, Zap, Cpu, Scale, Target,
   Landmark, Gauge, Wallet, Shield, Power, Ban, TrendingUp, TrendingDown, Layers,
@@ -195,8 +194,8 @@ export default function Promocoes() {
           <button onClick={carregar} className="text-xs px-2.5 py-2 rounded-lg glass text-dim hover:text-fg inline-flex items-center gap-1.5"><RefreshCw size={14} className={estado === 'carregando' ? 'animate-spin' : ''} /> Atualizar</button>
           <button onClick={() => setAba('inteligencia')} className="text-xs px-3 py-2 rounded-lg glass text-dim hover:text-fg inline-flex items-center gap-1.5"><Calendar size={14} /> Calendário</button>
           <button onClick={sincronizarPedidos} disabled={busySync} title="Buscar pedidos no ML para liberar a análise de vendas por campanha" className="text-xs px-3 py-2 rounded-lg glass text-dim hover:text-fg inline-flex items-center gap-1.5 disabled:opacity-50">{busySync ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Sincronizar pedidos</button>
-          <button onClick={() => setModal('cupom')} className="text-xs px-3 py-2 rounded-lg glass text-dim hover:text-fg inline-flex items-center gap-1.5"><Ticket size={14} /> Novo cupom</button>
-          <button onClick={() => setModal('campanha')} className="text-xs px-3 py-2 rounded-lg inline-flex items-center gap-1.5 text-white font-semibold" style={{ background: 'linear-gradient(135deg, var(--accent), #a80063)' }}><Plus size={14} /> Nova campanha</button>
+          <button onClick={() => { setModal('cupom'); if (!['visao', 'minhas', 'convites', 'cupons'].includes(aba)) setAba('cupons') }} className="text-xs px-3 py-2 rounded-lg glass text-dim hover:text-fg inline-flex items-center gap-1.5"><Ticket size={14} /> Novo cupom</button>
+          <button onClick={() => { setModal('campanha'); if (!['visao', 'minhas', 'convites', 'cupons'].includes(aba)) setAba('minhas') }} className="text-xs px-3 py-2 rounded-lg inline-flex items-center gap-1.5 text-white font-semibold" style={{ background: 'linear-gradient(135deg, var(--accent), #a80063)' }}><Plus size={14} /> Nova campanha</button>
         </div>
       </div>
       <div className="h-px my-3" style={{ background: 'linear-gradient(90deg, var(--accent), transparent 60%)' }} />
@@ -210,7 +209,7 @@ export default function Promocoes() {
           ['participantes', 'Participantes', Boxes, null],
           ['cupons', 'Cupons', Ticket, cupons.length],
           ['inteligencia', 'Inteligência', Activity, null],
-          ['automacao', 'Automação', Cpu, 6],
+          ['automacao', 'Automação', Cpu, AGENTES.length],
           ['ads', 'Ads', Target, null],
         ].map(([id, lb, Ic, n]) => (
           <button key={id} onClick={() => setAba(id)} className="inline-flex items-center gap-2 text-xs font-semibold px-3 py-2 rounded-xl transition-colors"
@@ -236,7 +235,7 @@ export default function Promocoes() {
       {estado === 'carregando' && !painel && <SkeletonPromocoes />}
 
       {painel && (aba === 'visao' || aba === 'minhas' || aba === 'convites' || aba === 'cupons') && (
-        <div className={picker ? 'grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(400px,560px)] gap-4 items-start' : ''}>
+        <div className={(picker || modal) ? 'grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(400px,560px)] gap-4 items-start' : ''}>
         <div className="min-w-0">
           {aba === 'visao' && (
             <>
@@ -263,9 +262,11 @@ export default function Promocoes() {
           {aba === 'convites' && <SecConvites convites={convites} onAderir={abrirAderir} onAutoAderir={aderirAutoConvite} onSair={sairConvite} onAplicarAutomaticos={aplicarAutomaticos} autoRodando={autoRodando} onContagem={reportContagem} full />}
           {aba === 'cupons' && <SecCupons cupons={cupons} onAcao={emBreve} onEncerrar={encerrarCampanha} full />}
         </div>
-        {picker && (
+        {(picker || modal) && (
           <div className="xl:sticky xl:top-4">
-            <SeletorItens key={picker.promotionId} modo={picker.modo} promotionId={picker.promotionId} promotionType={picker.promotionType} promoNome={picker.promoNome} inicio={picker.inicio} fim={picker.fim} onClose={() => setPicker(null)} onOk={() => { setPicker(null); carregar() }} notify={notify} />
+            {picker && <SeletorItens key={picker.promotionId} modo={picker.modo} promotionId={picker.promotionId} promotionType={picker.promotionType} promoNome={picker.promoNome} inicio={picker.inicio} fim={picker.fim} onClose={() => setPicker(null)} onOk={() => { setPicker(null); carregar() }} notify={notify} />}
+            {!picker && modal === 'campanha' && <NovaCampanhaModal onClose={() => setModal(null)} onOk={() => { setModal(null); carregar() }} notify={notify} />}
+            {!picker && modal === 'cupom' && <NovoCupomModal onClose={() => setModal(null)} onOk={() => { setModal(null); carregar() }} notify={notify} />}
           </div>
         )}
         </div>
@@ -276,8 +277,6 @@ export default function Promocoes() {
       {aba === 'automacao' && <Blindagem><Automacao notify={notify} /></Blindagem>}
       {aba === 'ads' && <Blindagem><Ads /></Blindagem>}
 
-      {modal === 'campanha' && <NovaCampanhaModal onClose={() => setModal(null)} onOk={() => { setModal(null); carregar() }} notify={notify} />}
-      {modal === 'cupom' && <NovoCupomModal onClose={() => setModal(null)} onOk={() => { setModal(null); carregar() }} notify={notify} />}
     </div>
   )
 }
@@ -673,33 +672,98 @@ function Act({ icon: Ic, children, danger, onClick }) {
 
 /* ================= CUPONS ================= */
 function SecCupons({ cupons, onAcao, onEncerrar, full }) {
+  const ativos = cupons.filter((c) => /started|active/.test(c.status || ''))
+  const agendados = cupons.filter((c) => (c.status || '') === 'pending')
+  const encerrados = cupons.filter((c) => /finished|closed/.test(c.status || ''))
+  const comOrc = cupons.filter((c) => c.budget != null && c.budget > 0)
+  const orcTotal = comOrc.reduce((a, c) => a + (c.budget || 0), 0)
+  const restTotal = comOrc.reduce((a, c) => a + (c.remaining_budget != null ? c.remaining_budget : c.budget || 0), 0)
+  const usadoTotal = orcTotal - restTotal
+  const resgTotal = cupons.reduce((a, c) => a + (c.used || 0), 0)
+  const valorDe = (c) => c.fixed_percentage != null ? `${Math.round(c.fixed_percentage)}%` : c.fixed_amount != null ? brl(c.fixed_amount) : null
+  const distrib = [
+    { l: 'Ativos', n: ativos.length, c: 'var(--ok)' },
+    { l: 'Agendados', n: agendados.length, c: BLUE },
+    { l: 'Encerrados', n: encerrados.length, c: 'var(--faint)' },
+  ].filter((x) => x.n > 0)
+  const maxD = Math.max(1, ...distrib.map((x) => x.n))
   return (
     <>
       <Secao icon={Ticket} cor={ML} titulo="Cupons" pill="com código · público · frete grátis" pillCor={ML} />
+      {cupons.length > 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-3">
+          <BbKpi icon={Ticket} l="Cupons" v={cupons.length} c={ML} sub={`${ativos.length} ativos`} />
+          <BbKpi icon={Check} l="Ativos agora" v={ativos.length} c="var(--ok)" sub={`${agendados.length} agendados`} />
+          <BbKpi icon={Wallet} l="Orçamento" v={comOrc.length ? brl(orcTotal) : '—'} c={BLUE} sub={comOrc.length ? '100% seu' : 'sem dado do ML'} />
+          <BbKpi icon={CircleDollarSign} l="Consumido" v={comOrc.length ? brl(usadoTotal) : '—'} c="var(--warn)" sub={comOrc.length ? `${brl(restTotal)} restam` : '—'} />
+          <BbKpi icon={Gift} l="Resgatados" v={resgTotal || (cupons.some((c) => c.used != null) ? 0 : '—')} c={PURPLE} sub="usos" />
+        </div>
+      )}
+      {distrib.length > 1 && (
+        <div className="rounded-2xl p-4 glass mb-3">
+          <div className="text-[10px] uppercase tracking-wide text-faint font-extrabold flex items-center gap-1.5 mb-3"><BarChart3 size={12} style={{ color: ML }} /> Cupons por situação</div>
+          <div className="flex flex-col gap-1.5">
+            {distrib.map((x) => (
+              <div key={x.l} className="flex items-center gap-2">
+                <span className="text-[10.5px] flex-none" style={{ width: 96, color: x.c }}>{x.l}</span>
+                <div className="flex-1 h-5 rounded-md overflow-hidden" style={{ background: 'rgba(255,255,255,.05)' }}>
+                  <div className="h-full rounded-md flex items-center justify-end pr-1.5" style={{ width: `${Math.max(10, (x.n / maxD) * 100)}%`, background: `linear-gradient(90deg, ${x.c}55, ${x.c})` }}>
+                    <span className="text-[9px] font-extrabold num" style={{ color: x.c === 'var(--faint)' ? 'var(--fg)' : '#0d0d0d' }}>{x.n}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {cupons.length === 0
         ? <Vazio texto="Nenhum cupom ativo. Crie um cupom com código (para distribuir aos seguidores por fora) ou público (o ML destaca para todos os compradores das publicações)." />
-        : cupons.map((m, i) => <CupomCard key={m.id} p={m} onAcao={onAcao} onEncerrar={onEncerrar} idx={i} />)}
+        : cupons.map((m, i) => <CupomCard key={m.id} p={m} valor={valorDe(m)} onAcao={onAcao} onEncerrar={onEncerrar} idx={i} />)}
     </>
   )
 }
-function CupomCard({ p, onAcao, onEncerrar, idx = 0 }) {
+function CupomCard({ p, valor, onAcao, onEncerrar, idx = 0 }) {
   const st = stInfo(p.status); const ini = dcurta(p.start_date), fim = dcurta(p.finish_date)
+  const tempo = (p.start_date && p.finish_date) ? Math.round(pctTempo(p.start_date, p.finish_date)) : null
+  const restam = diasAte(p.finish_date)
+  const temOrc = p.budget != null && p.budget > 0
+  const rest = p.remaining_budget != null ? p.remaining_budget : (temOrc ? p.budget : null)
+  const usado = temOrc && rest != null ? p.budget - rest : null
+  const pacing = temOrc && usado != null ? Math.round((usado / p.budget) * 100) : null
+  const tipoPct = p.fixed_percentage != null
   return (
     <div className="rounded-2xl p-3.5 mb-3 glass lift card-in" style={{ boxShadow: 'inset 3px 0 0 #F2C200', animationDelay: `${idx * 45}ms` }}>
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-[14px] font-bold">{p.name || 'Cupom'}</span>
-        <Chip cor={ML}><Ticket size={10} /> Cupom (MLB)</Chip>
+        <div className="w-9 h-9 rounded-xl grid place-items-center flex-none" style={{ background: 'rgba(242,194,0,.16)', color: ML }}><Ticket size={17} /></div>
+        <div className="min-w-0">
+          <div className="text-[14px] font-bold truncate" style={{ fontFamily: 'Fraunces, Georgia, serif' }}>{p.name || 'Cupom'}</div>
+          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+            {valor && <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(242,194,0,.16)', color: ML }}>{tipoPct ? `${valor} OFF` : `${valor} OFF`}</span>}
+            {p.min_purchase_amount != null && p.min_purchase_amount > 0 && <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(255,255,255,.06)', color: 'var(--dim)' }}>mín. {brl(p.min_purchase_amount)}</span>}
+            {p.max_purchase_amount != null && p.max_purchase_amount > 0 && <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(255,255,255,.06)', color: 'var(--dim)' }}>teto {brl(p.max_purchase_amount)}</span>}
+          </div>
+        </div>
         <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full" style={{ background: `${st.c}22`, color: st.c }}>{st.t}</span>
         <span className="ml-auto text-[10px] text-faint">cumulativo com promoção · 1 uso/comprador</span>
       </div>
       <div className="grid gap-2.5 mt-3" style={{ gridTemplateColumns: 'repeat(5,1fr)' }}>
+        <Mini l="Valor" v={valor || '—'} s={tipoPct ? 'percentual' : p.fixed_amount != null ? 'fixo' : 'benefício'} />
         <Mini l="Período" v={ini || '—'} s={fim ? `→ ${fim}` : 'programado'} />
-        <Mini l="Orçamento" v="em breve" s="100% seu" />
-        <Mini l="Resgatados" v="em breve" s="used_coupons" />
-        <Mini l="Restante" v="em breve" s="remaining_budget" hero />
-        <Mini l="Pacing" v="em breve" s="auto-pausa" prof />
+        <Mini l="Orçamento" v={temOrc ? brl(p.budget) : '—'} s={temOrc ? '100% seu' : 'sem dado'} />
+        <Mini l="Resgatados" v={p.used != null ? p.used : '—'} s="usos" hero />
+        <Mini l="Restante" v={rest != null ? brl(rest) : '—'} s={pacing != null ? `${pacing}% usado` : 'remaining_budget'} prof />
       </div>
-      <div className="h-1.5 rounded-full overflow-hidden mt-2.5" style={{ background: 'rgba(255,255,255,.08)' }}><div style={{ width: '8%', height: '100%', background: 'linear-gradient(90deg, #F2C200, #d9a400)' }} /></div>
+      {(temOrc && pacing != null) ? (
+        <div className="mt-2.5">
+          <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,.08)' }}><div style={{ width: `${Math.min(100, pacing)}%`, height: '100%', background: pacing >= 85 ? 'linear-gradient(90deg, var(--danger), #ff9a9a)' : 'linear-gradient(90deg, #F2C200, #d9a400)' }} /></div>
+          <div className="flex items-center justify-between text-[8.5px] text-faint num mt-1"><span>orçamento consumido</span><span>{brl(usado)} de {brl(p.budget)}{restam != null && restam >= 0 ? ` · ${restam}d restantes` : ''}</span></div>
+        </div>
+      ) : tempo != null && (
+        <div className="mt-2.5">
+          <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,.08)' }}><div style={{ width: `${tempo}%`, height: '100%', background: 'linear-gradient(90deg, #F2C200, #d9a400)' }} /></div>
+          <div className="flex items-center justify-between text-[8.5px] text-faint num mt-1"><span>tempo decorrido</span><span>{tempo}%{restam != null && restam >= 0 ? ` · ${restam}d restantes` : ''}</span></div>
+        </div>
+      )}
       <div className="flex gap-2 mt-3 flex-wrap">
         <Act icon={SlidersHorizontal} onClick={() => onAcao('Editar cupom')}>Editar</Act>
         <Act icon={Sparkles} onClick={() => onAcao('Versão pública (sem código)')}>Versão pública</Act>
@@ -1206,7 +1270,81 @@ const AGENTES = [
   { key: 'parado', nm: 'Agente Estoque Parado', tg: 'sem venda 30d+', icon: Boxes, cor: 'var(--danger)', trig: 'parado > 30 dias', acao: 'desconto seguro (folga)', chip: 'liquidação' },
   { key: 'estoque_baixo', nm: 'Agente Menor Estoque', tg: 'urgência × proteção', icon: Gauge, cor: 'var(--accent)', trig: 'estoque baixo + vendendo', acao: 'Relâmpago pequeno', chip: 'anti-ruptura' },
   { key: 'buybox', nm: 'Agente Posição / Buybox', tg: 'perda de destaque', icon: Target, cor: BLUE, trig: 'perdeu buybox', acao: 'preço p/ recuperar (price_to_win)', chip: 'na aba Inteligência' },
+  { key: 'radar', nm: 'Agente Radar de Campanha', tg: 'eficiência do desconto', icon: Gauge, cor: PURPLE, trig: 'giro caiu na vigência', acao: 'sair da campanha (REVISAR)', chip: 'durante × antes' },
 ]
+function RadarCampanhas({ notify }) {
+  const [d, setD] = useState(null)
+  const [carr, setCarr] = useState(true)
+  const [saindo, setSaindo] = useState(null)
+  const carregar = async () => {
+    setCarr(true)
+    try { const r = await api.mlPromoParticipantes(); setD(r) } catch { setD(null) } finally { setCarr(false) }
+  }
+  useEffect(() => { carregar() }, [])
+  const camps = d?.campanhas || []
+  const revisar = camps.filter((c) => c.lift?.status === 'revisar')
+  const neutras = camps.filter((c) => c.lift?.status === 'neutra')
+  const aceleraram = camps.filter((c) => c.lift?.status === 'acelerou')
+  const semDados = d && camps.filter((c) => c.lift && c.lift.status !== 'sem_dados').length === 0
+  const sair = async (c) => {
+    if (!window.confirm(`Sair da campanha “${c.nome}”? O giro caiu ${Math.abs(c.lift.pct)}% durante a vigência — o desconto (−${brl(c.desconto)}) não está trazendo mais vendas. Remove todos os itens participantes desta campanha.`)) return
+    setSaindo(c.id)
+    try {
+      const r = await api.mlPromoSair(c.id, c.type)
+      notify && notify(`${r.removidos ?? 0} item(ns) removido(s) da campanha.`, (r.removidos ?? 0) > 0 ? 'ok' : 'warn')
+      await carregar()
+    } catch (e) { notify && notify(traduzErroML(e.message), 'danger') } finally { setSaindo(null) }
+  }
+  return (
+    <div className="rounded-2xl p-4 mt-4" style={{ border: '1px solid transparent', background: 'linear-gradient(180deg,var(--surface),#160c13) padding-box, linear-gradient(155deg, rgba(160,107,232,.5), rgba(214,0,127,.12) 55%, rgba(255,255,255,.07)) border-box' }}>
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <span className="text-[11px] uppercase tracking-wide font-extrabold flex items-center gap-1.5" style={{ color: '#cfaef5' }}><Gauge size={13} /> Agente Radar de Campanha <span className="text-faint normal-case tracking-normal">· sair de quem não traz giro</span></span>
+        <div className="flex items-center gap-1.5">
+          {aceleraram.length > 0 && <span className="text-[8.5px] font-extrabold px-2 py-0.5 rounded-full" style={{ background: 'rgba(47,217,141,.14)', color: 'var(--ok)' }}>▲ {aceleraram.length} aceleraram</span>}
+          {revisar.length > 0 && <span className="text-[8.5px] font-extrabold px-2 py-0.5 rounded-full" style={{ background: 'rgba(255,122,122,.14)', color: 'var(--danger)' }}>▼ {revisar.length} p/ revisar</span>}
+          <button onClick={carregar} disabled={carr} className="text-[9px] font-bold px-2 py-1 rounded-full inline-flex items-center gap-1 disabled:opacity-50" style={{ color: '#cfaef5', border: '1px solid rgba(160,107,232,.4)' }}>{carr ? <Loader2 size={10} className="animate-spin" /> : <RefreshCw size={10} />}</button>
+        </div>
+      </div>
+      {carr && !d ? (
+        <div>{Array.from({ length: 2 }).map((_, i) => <div key={i} className="skel mb-2" style={{ height: 76, borderRadius: 14 }} />)}</div>
+      ) : !d || !d.totais?.cache_pedidos ? (
+        <div className="text-[11px] text-dim flex items-center gap-2"><RefreshCw size={14} style={{ color: BLUE, flexShrink: 0 }} /> Sincronize os pedidos e abra a aba Participantes para o Radar medir o giro das campanhas.</div>
+      ) : revisar.length === 0 ? (
+        <div className="rounded-xl p-4 text-center" style={{ background: 'rgba(47,217,141,.06)', border: '1px solid rgba(47,217,141,.25)' }}>
+          <Check size={18} className="mx-auto mb-1" style={{ color: 'var(--ok)' }} />
+          <div className="text-[12px] font-bold" style={{ color: 'var(--ok)' }}>Nenhuma campanha para revisar</div>
+          <div className="text-[10px] text-dim mt-0.5">{semDados ? 'Sem histórico suficiente nas vigências ainda.' : 'Suas campanhas estão neutras ou acelerando o giro — nenhuma está queimando margem sem vender mais.'}</div>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          <div className="text-[10px] text-dim mb-1">Nestas campanhas o <b style={{ color: 'var(--danger)' }}>giro caiu</b> na vigência × período anterior — o desconto não trouxe mais vendas. Sugestão do agente: <b style={{ color: 'var(--fg)' }}>sair</b>.</div>
+          {revisar.map((c) => {
+            const L = c.lift; const Ic = meta(c.type).icon
+            return (
+              <div key={c.id} className="rounded-xl p-3" style={{ background: 'rgba(255,122,122,.06)', border: '1px solid rgba(255,122,122,.3)', boxShadow: 'inset 3px 0 0 var(--danger)' }}>
+                <div className="flex items-start gap-2.5">
+                  <div className="w-8 h-8 rounded-lg grid place-items-center flex-none" style={{ background: `${meta(c.type).cor}1e`, color: meta(c.type).cor }}><Ic size={15} /></div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[12.5px] font-bold truncate">{c.nome || meta(c.type).label}</div>
+                    <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                      <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(255,122,122,.16)', color: 'var(--danger)' }}>▼ {L.pct}% giro</span>
+                      <span className="text-[9px] num text-faint">{L.un_antes}→{L.un_durante} un · {L.dur_dias}d</span>
+                      <span className="text-[9px] num" style={{ color: 'var(--warn)' }}>−{brl(c.desconto)} concedido</span>
+                      <span className="text-[9px] num" style={{ color: 'var(--ok)' }}>recebe {brl(c.voce_recebe)}</span>
+                    </div>
+                  </div>
+                  <button onClick={() => sair(c)} disabled={saindo === c.id} className="text-[10.5px] font-bold px-3 py-1.5 rounded-lg text-white inline-flex items-center gap-1.5 flex-none disabled:opacity-50" style={{ background: 'var(--danger)' }}>{saindo === c.id ? <Loader2 size={12} className="animate-spin" /> : <Ban size={12} />} Sair</button>
+                </div>
+              </div>
+            )
+          })}
+          {neutras.length > 0 && <div className="text-[9.5px] text-faint mt-1 flex items-center gap-1.5"><Info size={11} /> {neutras.length} campanha(s) NEUTRA(s): o giro não mudou com o desconto — avalie se compensa manter.</div>}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function Automacao({ notify }) {
   const [ligado, setLigado] = useState(() => { try { return JSON.parse(localStorage.getItem('promo_agentes') || '{}') } catch { return {} } })
   const [sugs, setSugs] = useState(null)
@@ -1214,15 +1352,54 @@ function Automacao({ notify }) {
   const [aplicandoId, setAplicandoId] = useState(null)
   const [dispensados, setDispensados] = useState(() => { try { return new Set(JSON.parse(localStorage.getItem('promo_dispensados') || '[]')) } catch { return new Set() } })
   const [modo, setModo] = useState(() => localStorage.getItem('promo_modo') || 'sugestivo')
-  const trocarModo = (m) => { setModo(m); localStorage.setItem('promo_modo', m) }
+  const [cfg, setCfg] = useState(null)
+  const [execs, setExecs] = useState([])
+  const [rodando, setRodando] = useState(false)
+  const [resumo, setResumo] = useState(null)
+  const [tetoDrag, setTetoDrag] = useState(null)
   const [aplicandoTodas, setAplicandoTodas] = useState(false)
 
-  const on = (k) => ligado[k] !== false // default ligado
-  const toggle = (k) => { const n = { ...ligado, [k]: !on(k) }; setLigado(n); localStorage.setItem('promo_agentes', JSON.stringify(n)) }
+  const on = (k) => ligado[k] !== false
+  const salvarLimite = async (patch) => {
+    setCfg((c) => ({ ...(c || {}), ...patch }))
+    await salvarCfg(patch)
+  }
+  const salvarCfg = async (patch) => {
+    try { return await api.mlAgentesConfigSalvar(patch) } catch (e) { notify && notify(traduzErroML(e.message), 'danger') }
+  }
+  const toggle = (k) => {
+    const n = { ...ligado, [k]: !on(k) }; setLigado(n); localStorage.setItem('promo_agentes', JSON.stringify(n)); salvarCfg({ agentes: n })
+  }
+  const trocarModo = async (m) => {
+    setModo(m); localStorage.setItem('promo_modo', m)
+    const r = await salvarCfg({ automatico: m === 'automatico', agentes: ligado })
+    if (r) setCfg((c) => ({ ...(c || {}), automatico: m === 'automatico' }))
+    if (m === 'automatico') notify && notify('Modo automatico ligado - os agentes vao rodar sozinhos no servidor.', 'ok')
+  }
+  const carregarExecs = () => { api.mlAgentesExecucoes(8).then((r) => setExecs(r.execucoes || [])).catch(() => {}) }
+  const rodarAgora = async () => {
+    setRodando(true)
+    try {
+      const r = await api.mlAgentesRodar()
+      if (r.bloqueado === 'kill_switch') notify && notify('Kill switch ativo - nada foi aplicado.', 'warn')
+      else notify && notify(`Agentes rodaram: ${r.aplicados} aplicado(s)${r.ignorados ? `, ${r.ignorados} ignorado(s) pelo piso` : ''}${r.falhas ? `, ${r.falhas} falha(s)` : ''}.`, r.aplicados > 0 ? 'ok' : 'warn')
+      carregarExecs()
+      api.mlAgentesResumo(7).then((r) => setResumo(r)).catch(() => {})
+      const s = await api.mlAgentesSugestoes(60); setSugs(s)
+    } catch (e) { notify && notify(traduzErroML(e.message), 'danger') } finally { setRodando(false) }
+  }
+  const toggleKill = async () => {
+    const novo = !(cfg?.kill_switch)
+    const r = await salvarCfg({ kill_switch: novo })
+    if (r) { setCfg((c) => ({ ...(c || {}), kill_switch: novo })); notify && notify(novo ? 'Kill switch ATIVADO - nenhuma automacao sera aplicada.' : 'Kill switch desligado.', novo ? 'warn' : 'ok') }
+  }
 
   useEffect(() => {
     let vivo = true
     api.mlAgentesSugestoes(60).then((r) => { if (vivo) setSugs(r) }).catch(() => { if (vivo) setSugs(null) }).finally(() => { if (vivo) setCarregando(false) })
+    api.mlAgentesConfig().then((c) => { if (vivo && c) { setCfg(c); if (c.automatico) { setModo('automatico'); localStorage.setItem('promo_modo', 'automatico') } if (c.agentes) { setLigado(c.agentes); localStorage.setItem('promo_agentes', JSON.stringify(c.agentes)) } } }).catch(() => {})
+    api.mlAgentesExecucoes(8).then((r) => { if (vivo) setExecs(r.execucoes || []) }).catch(() => {})
+    api.mlAgentesResumo(7).then((r) => { if (vivo) setResumo(r) }).catch(() => {})
     return () => { vivo = false }
   }, [])
 
@@ -1259,23 +1436,46 @@ function Automacao({ notify }) {
       <Secao icon={Cpu} cor="var(--accent)" titulo="Automação — 6 agentes" pill="modo sugestivo · trava de margem" pillCor="var(--ok)" />
 
       {/* modos */}
-      <div className="rounded-2xl p-3 glass mb-3">
+            <div className="rounded-2xl p-3 glass mb-3">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-[10px] uppercase tracking-wide text-faint font-extrabold">Modos</span>
-          {[['sugestivo', 'Sugestivo', 'Você aplica cada sugestão'], ['manual', 'Manual (em lote)', 'Aplica todas de uma vez'], ['automatico', 'Automático', 'Aplica as seguras em lote']].map(([m, lb]) => (
-            <button key={m} onClick={() => trocarModo(m)} className="text-[10px] font-extrabold px-2.5 py-1 rounded-full inline-flex items-center gap-1 transition-colors" style={modo === m ? { background: 'rgba(47,217,141,.16)', color: 'var(--ok)', border: '1px solid rgba(47,217,141,.4)' } : { background: 'rgba(255,255,255,.06)', color: 'var(--dim)', border: '1px solid var(--glass-border)' }}>{modo === m && <Check size={11} />} {lb}</button>
+          {[['sugestivo', 'Sugestivo', 'Você aprova cada uma'], ['manual', 'Manual (em lote)', 'Você dispara quando quiser'], ['automatico', 'Automático', 'O servidor roda sozinho']].map(([m, lb, sub]) => (
+            <button key={m} onClick={() => trocarModo(m)} title={sub} className="text-[10px] font-extrabold px-2.5 py-1 rounded-full inline-flex items-center gap-1 transition-colors" style={modo === m ? { background: 'rgba(47,217,141,.16)', color: 'var(--ok)', border: '1px solid rgba(47,217,141,.4)' } : { background: 'rgba(255,255,255,.06)', color: 'var(--dim)', border: '1px solid var(--glass-border)' }}>{modo === m && <Check size={11} />} {lb}</button>
           ))}
-          <span className="ml-auto text-[9.5px] text-faint flex items-center gap-1.5"><Shield size={12} /> Nada é aplicado abaixo do piso — em qualquer modo.</span>
+          <button onClick={toggleKill} className="ml-auto text-[9.5px] font-bold px-2.5 py-1 rounded-full inline-flex items-center gap-1" style={cfg?.kill_switch ? { background: 'var(--danger)', color: '#fff' } : { background: 'rgba(255,255,255,.06)', color: 'var(--dim)', border: '1px solid var(--glass-border)' }} title="Trava geral: quando ligada, nenhuma automação é aplicada">{cfg?.kill_switch ? <Power size={11} /> : <Shield size={11} />} {cfg?.kill_switch ? 'Kill switch ON' : 'Kill switch'}</button>
         </div>
-        {modo !== 'sugestivo' && (
-          <div className="mt-3 pt-3 flex items-center gap-3 flex-wrap" style={{ borderTop: '1px solid var(--glass-border)' }}>
-            <div className="flex-1 min-w-[200px]">
-              <div className="text-[11.5px] font-semibold">{modo === 'automatico' ? 'Modo automático' : 'Aplicação em lote'}</div>
-              <div className="text-[10px] text-faint">{aplicaveis.length > 0 ? `${aplicaveis.length} sugestão(ões) segura(s) pronta(s) para aplicar (7 dias cada, acima do piso).` : 'Nenhuma sugestão segura no momento — nada a aplicar.'}{modo === 'automatico' ? ' A automação contínua no servidor entra na próxima fase.' : ''}</div>
+
+        <div className="mt-3 pt-3 flex items-center gap-3 flex-wrap" style={{ borderTop: '1px solid var(--glass-border)' }}>
+          <div className="flex-1 min-w-[220px]">
+            <div className="text-[11.5px] font-semibold flex items-center gap-1.5">{modo === 'automatico' ? <><Cpu size={13} style={{ color: 'var(--ok)' }} /> Automático ligado</> : modo === 'manual' ? 'Aplicação em lote' : 'Modo sugestivo'}</div>
+            <div className="text-[10px] text-faint">
+              {cfg?.kill_switch ? <span style={{ color: 'var(--danger)' }}>Kill switch ativo — nada será aplicado até você desligar.</span>
+                : modo === 'automatico' ? <>Os agentes ligados rodam sozinhos a cada <b style={{ color: 'var(--fg)' }}>{cfg?.intervalo_horas || 6}h</b> no servidor — piso-safe, teto de <b style={{ color: 'var(--fg)' }}>{cfg?.max_por_execucao || 15}</b> por rodada. {cfg?.ultima_execucao_auto ? `Última automática: ${dcurta(cfg.ultima_execucao_auto)}.` : 'Aguardando a 1ª rodada.'}</>
+                  : aplicaveis.length > 0 ? `${aplicaveis.length} sugestão(ões) segura(s) pronta(s) (7 dias cada, acima do piso).` : 'Nenhuma sugestão segura no momento.'}
             </div>
-            <button onClick={aplicarTodas} disabled={aplicandoTodas || aplicaveis.length === 0} className="text-[11.5px] font-bold px-4 py-2 rounded-xl text-white inline-flex items-center gap-2 disabled:opacity-50" style={{ background: 'var(--ok)', color: '#04140c' }}>{aplicandoTodas ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />} Aplicar todas as sugestões ({aplicaveis.length})</button>
+          </div>
+          {modo === 'manual' && <button onClick={aplicarTodas} disabled={aplicandoTodas || aplicaveis.length === 0 || cfg?.kill_switch} className="text-[11.5px] font-bold px-3.5 py-2 rounded-xl inline-flex items-center gap-2 disabled:opacity-50" style={{ background: 'rgba(47,217,141,.14)', color: 'var(--ok)', border: '1px solid rgba(47,217,141,.4)' }}>{aplicandoTodas ? <Loader2 size={14} className="animate-spin" /> : <Layers size={14} />} Aplicar todas ({aplicaveis.length})</button>}
+          <button onClick={rodarAgora} disabled={rodando || cfg?.kill_switch} className="text-[11.5px] font-bold px-4 py-2 rounded-xl inline-flex items-center gap-2 text-white disabled:opacity-50" style={{ background: 'linear-gradient(135deg, var(--accent), #a80063)' }}>{rodando ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />} Rodar agentes agora</button>
+        </div>
+
+        {execs.length > 0 && (
+          <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--glass-border)' }}>
+            <div className="text-[9px] uppercase tracking-wide text-faint font-extrabold mb-1.5 flex items-center gap-1"><Activity size={11} style={{ color: BLUE }} /> Últimas execuções</div>
+            <div className="flex flex-col gap-1">
+              {execs.slice(0, 5).map((e, i) => (
+                <div key={i} className="flex items-center gap-2 text-[10px] rounded-lg px-2.5 py-1.5" style={{ background: 'rgba(0,0,0,.2)' }}>
+                  <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full flex-none" style={{ background: e.gatilho === 'auto' ? 'rgba(47,217,141,.16)' : 'rgba(91,141,239,.16)', color: e.gatilho === 'auto' ? 'var(--ok)' : BLUE }}>{e.gatilho === 'auto' ? 'AUTO' : 'MANUAL'}</span>
+                  <span className="text-faint num flex-none">{e.quando ? new Date(e.quando).toLocaleString('pt-BR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'}</span>
+                  <span className="num" style={{ color: 'var(--ok)' }}>{e.aplicados} aplicado(s)</span>
+                  {e.ignorados > 0 && <span className="num text-faint">· {e.ignorados} piso</span>}
+                  {e.falhas > 0 && <span className="num" style={{ color: 'var(--danger)' }}>· {e.falhas} falha(s)</span>}
+                </div>
+              ))}
+            </div>
           </div>
         )}
+
+        <div className="mt-2 text-[9px] text-faint flex items-center gap-1.5"><Shield size={11} /> Em qualquer modo, nada é aplicado abaixo do Preço Bling. O kill switch trava tudo na hora.</div>
       </div>
 
       {/* cards dos agentes (toggles reais filtram o feed) */}
@@ -1306,7 +1506,72 @@ function Automacao({ notify }) {
         })}
       </div>
 
-      {/* feed de sugestões reais */}
+      {/* limites de segurança da automação */}
+      <div className="rounded-2xl p-4 glass mb-3">
+        <div className="text-[10px] uppercase tracking-wide text-faint font-extrabold flex items-center gap-1.5 mb-3"><SlidersHorizontal size={12} style={{ color: 'var(--accent)' }} /> Limites de segurança <span className="text-faint normal-case tracking-normal">· valem para o modo automático e o "rodar agora"</span></div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <div className="flex items-center justify-between mb-1"><span className="text-[10.5px] font-semibold flex items-center gap-1.5"><Layers size={12} style={{ color: BLUE }} /> Itens por rodada</span><span className="text-[12px] font-extrabold num" style={{ color: BLUE }}>{cfg?.max_por_execucao ?? 15}</span></div>
+            <input type="range" min={1} max={50} step={1} value={cfg?.max_por_execucao ?? 15} onChange={(e) => salvarLimite({ max_por_execucao: Number(e.target.value) })} className="w-full" style={{ accentColor: '#5B8DEF' }} />
+            <div className="text-[8.5px] text-faint mt-0.5">no máximo esse tanto de descontos por execução</div>
+          </div>
+          <div>
+            <div className="flex items-center justify-between mb-1"><span className="text-[10.5px] font-semibold flex items-center gap-1.5"><Clock size={12} style={{ color: 'var(--ok)' }} /> Frequência</span><span className="text-[12px] font-extrabold num" style={{ color: 'var(--ok)' }}>{cfg?.intervalo_horas ?? 6}h</span></div>
+            <div className="flex gap-1 flex-wrap">
+              {[3, 6, 12, 24, 48].map((h) => (
+                <button key={h} onClick={() => salvarLimite({ intervalo_horas: h })} className="text-[10px] font-bold px-2 py-1 rounded-lg num transition-colors" style={(cfg?.intervalo_horas ?? 6) === h ? { background: 'rgba(47,217,141,.18)', color: 'var(--ok)', border: '1px solid rgba(47,217,141,.4)' } : { background: 'rgba(255,255,255,.06)', color: 'var(--dim)', border: '1px solid var(--glass-border)' }}>{h}h</button>
+              ))}
+            </div>
+            <div className="text-[8.5px] text-faint mt-1">de quanto em quanto tempo roda sozinho</div>
+          </div>
+          <div>
+            <div className="flex items-center justify-between mb-1"><span className="text-[10.5px] font-semibold flex items-center gap-1.5"><TrendingDown size={12} style={{ color: 'var(--warn)' }} /> Teto de desconto</span><span className="text-[12px] font-extrabold num" style={{ color: cfg?.teto_desconto_pct ? 'var(--warn)' : 'var(--faint)' }}>{(() => { const tv = tetoDrag != null ? tetoDrag : cfg?.teto_desconto_pct; return tv ? `${tv}%` : 'sem teto' })()}</span></div>
+            <div className="flex items-center gap-2">
+              <button onClick={() => { const temTeto = !!cfg?.teto_desconto_pct; salvarLimite({ teto_desconto_pct: temTeto ? 0 : (tetoDrag || cfg?.teto_desconto_pct || 15) }) }} className="text-[9.5px] font-bold px-2.5 py-1.5 rounded-lg whitespace-nowrap transition-colors" style={cfg?.teto_desconto_pct ? { background: 'rgba(224,162,60,.2)', color: 'var(--warn)', border: '1px solid rgba(224,162,60,.45)' } : { background: 'rgba(255,255,255,.06)', color: 'var(--dim)', border: '1px solid var(--glass-border)' }}>{cfg?.teto_desconto_pct ? 'Com teto' : 'Sem teto'}</button>
+              <input type="range" min={1} max={70} step={1} value={(tetoDrag != null ? tetoDrag : cfg?.teto_desconto_pct) || 15} disabled={!cfg?.teto_desconto_pct} onChange={(e) => setTetoDrag(Number(e.target.value))} onMouseUp={(e) => { salvarLimite({ teto_desconto_pct: Number(e.target.value) }); setTetoDrag(null) }} onTouchEnd={(e) => { salvarLimite({ teto_desconto_pct: Number(e.target.value) }); setTetoDrag(null) }} className="flex-1 min-w-[90px]" style={{ accentColor: '#E0A23C', opacity: cfg?.teto_desconto_pct ? 1 : 0.35 }} />
+            </div>
+            <div className="text-[8.5px] text-faint mt-1">{cfg?.teto_desconto_pct ? 'você escolhe o limite — arraste de 1% a 70%. Nunca desconta mais que isso (e nunca abaixo do piso).' : 'sem teto: cada agente usa o desconto que calculou (sempre acima do piso). Ative para impor um limite.'}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* resumo do que a automação fez */}
+      {resumo && (resumo.execucoes > 0 || resumo.aplicados > 0) && (() => {
+        const serie = resumo.serie || []
+        const maxS = Math.max(1, ...serie.map((x) => x.aplicados || 0))
+        const ags = Object.entries(resumo.por_agente || {}).sort((a, b) => (b[1].itens || 0) - (a[1].itens || 0))
+        return (
+          <div className="rounded-2xl p-4 mb-3" style={{ border: '1px solid transparent', background: 'linear-gradient(180deg,var(--surface),#160c13) padding-box, linear-gradient(155deg, rgba(47,217,141,.4), rgba(91,141,239,.12) 55%, rgba(255,255,255,.07)) border-box' }}>
+            <div className="text-[10px] uppercase tracking-wide font-extrabold flex items-center gap-1.5 mb-3" style={{ color: 'var(--ok)' }}><Activity size={13} /> O que a automação fez · últimos {resumo.dias} dias</div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 mb-3">
+              <BbKpi icon={Zap} l="Descontos aplicados" v={resumo.aplicados} c="var(--ok)" sub={`${resumo.execucoes} execução(ões)`} />
+              <BbKpi icon={Cpu} l="Automático" v={resumo.por_gatilho?.auto ?? 0} c={BLUE} sub={`${resumo.por_gatilho?.manual ?? 0} manual`} />
+              <BbKpi icon={Shield} l="Barrados pelo piso" v={resumo.ignorados_piso} c="var(--warn)" sub="margem protegida" />
+              <BbKpi icon={AlertTriangle} l="Falhas" v={resumo.falhas} c={resumo.falhas > 0 ? 'var(--danger)' : 'var(--faint)'} sub="erros do ML" />
+            </div>
+            {serie.length > 1 && (
+              <div className="flex items-end gap-1.5 h-16 mb-2">
+                {serie.map((x, i) => (
+                  <div key={i} className="flex-1 flex flex-col items-center justify-end gap-1">
+                    <span className="text-[8px] num text-faint">{x.aplicados || ''}</span>
+                    <div className="w-full rounded-t" style={{ height: `${Math.max(4, (x.aplicados / maxS) * 100)}%`, background: 'linear-gradient(180deg, var(--ok), rgba(47,217,141,.3))', minHeight: 4 }} />
+                    <span className="text-[7.5px] text-faint">{x.dia.slice(8)}/{x.dia.slice(5, 7)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {ags.length > 0 && (
+              <div className="flex items-center gap-2 flex-wrap pt-2" style={{ borderTop: '1px solid var(--glass-border)' }}>
+                <span className="text-[9px] uppercase text-faint font-extrabold">Por agente:</span>
+                {ags.map(([k, v]) => { const a = AGENTES.find((x) => x.key === k); return <span key={k} className="text-[9.5px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1" style={{ background: `${a?.cor || 'var(--dim)'}1c`, color: a?.cor || 'var(--dim)' }}>{a?.nm?.replace('Agente ', '') || k}: {v.itens}</span> })}
+              </div>
+            )}
+          </div>
+        )
+      })()}
+
+      {on('radar') && <RadarCampanhas notify={notify} />}
+
       <div className="mt-4">
         <div className="flex items-center gap-2 mb-2">
           <div className="text-[11px] uppercase tracking-wide text-faint font-extrabold flex items-center gap-1.5"><Sparkles size={12} style={{ color: 'var(--accent)' }} /> Sugestões dos agentes</div>
@@ -1631,7 +1896,20 @@ function DesempenhoDrawer({ p, onClose, onSincronizar, notify }) {
                         {d.imagem ? <img src={d.imagem} alt="" className="w-9 h-9 rounded-lg object-cover flex-none" /> : <div className="w-9 h-9 rounded-lg grid place-items-center flex-none" style={{ background: 'rgba(255,255,255,.05)' }}><Boxes size={15} className="text-faint" /></div>}
                         <div className="min-w-0 flex-1">
                           <div className="text-[11.5px] font-semibold truncate">{d.titulo || d.item_id}</div>
-                          <div className="text-[9.5px] text-faint num truncate">{d.sku || d.item_id}{d.desconto_pct != null ? ` · −${d.desconto_pct}%` : ''}{d.estoque != null ? ` · ${d.estoque} un` : ''}</div>
+                          <div className="text-[9.5px] text-faint num truncate flex items-center gap-1.5 flex-wrap">
+                            <span>{d.sku || d.item_id}</span>
+                            {d.original_price != null && d.price != null && d.price < d.original_price
+                              ? <span><s className="text-faint">{brl(d.original_price)}</s> <b style={{ color: 'var(--ok)' }}>{brl(d.price)}</b></span>
+                              : (d.price != null || d.preco_catalogo != null) && <span>{brl(d.price ?? d.preco_catalogo)}</span>}
+                            {d.desconto_pct != null && d.desconto_pct > 0 && <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(224,162,60,.16)', color: 'var(--warn)' }}>−{d.desconto_pct}%</span>}
+                            {d.estoque != null && <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: d.estoque <= 5 ? 'rgba(255,122,122,.14)' : 'rgba(255,255,255,.07)', color: d.estoque <= 5 ? 'var(--danger)' : 'var(--dim)' }}>{d.estoque} un</span>}
+                            {d.logistic_type === 'fulfillment' && <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(242,194,0,.16)', color: ML }}>FULL</span>}
+                            {d.logistic_type === 'self_service' && <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(47,217,141,.12)', color: 'var(--ok)' }}>FLEX</span>}
+                            {d.frete_gratis && <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(91,141,239,.14)', color: BLUE }}>frete grátis</span>}
+                            {d.catalogo && <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(160,107,232,.14)', color: '#cfaef5' }}>catálogo</span>}
+                            {d.saude_item != null && <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: d.saude_item >= 0.8 ? 'rgba(47,217,141,.12)' : d.saude_item >= 0.5 ? 'rgba(224,162,60,.14)' : 'rgba(255,122,122,.14)', color: d.saude_item >= 0.8 ? 'var(--ok)' : d.saude_item >= 0.5 ? 'var(--warn)' : 'var(--danger)' }}>saúde {Math.round(d.saude_item * 100)}%</span>}
+                            {d.em_promocao && <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(214,0,127,.14)', color: 'var(--accent)' }}>em outras promoções</span>}
+                          </div>
                         </div>
                         <div className="text-right flex-none">
                           <div className="text-[11px] font-extrabold num" style={{ color: 'var(--ok)' }}>{d.liquido != null ? brl(d.liquido) : '—'}</div>
@@ -1981,8 +2259,14 @@ function ProdutoCampanhasDrawer({ itemId, onClose, notify, onMudou }) {
     if (!c.acima_piso && !window.confirm(`Este preço (${brl(c.preco_final)}) fica ABAIXO do seu piso (${brl(c.piso)}). Participar mesmo assim?`)) return
     setAcao(c.id)
     try {
+      let offerId = c.offer_id
+      // tipos que exigem offer_id (LIGHTNING/SMART/etc.) — resolve o candidato se não veio
+      if (!offerId && TIPOS_OFFER_ID.has(c.type)) {
+        try { const r = await api.mlItemOffer(itemId, c.id, c.type); offerId = r && r.offer_id } catch { /* segue sem */ }
+        if (!offerId) { notify && notify('Não foi possível localizar a oferta desta campanha para este anúncio. Tente “Atualizar” ou participe pelo painel de convites.', 'danger'); setAcao(null); return }
+      }
       const body = { promotion_id: c.id, promotion_type: c.type, deal_price: c.preco_final, permitir_abaixo_piso: !c.acima_piso }
-      if (TIPOS_OFFER_ID.has(c.type) && c.offer_id) body.offer_id = c.offer_id
+      if (offerId && TIPOS_OFFER_ID.has(c.type)) body.offer_id = offerId
       await api.mlPromoAderir(itemId, body)
       notify && notify('Participação confirmada no Mercado Livre.', 'ok'); await carregar(true); onMudou && onMudou()
     } catch (e) { notify && notify(traduzErroML(e.message), 'danger') } finally { setAcao(null) }
@@ -2066,7 +2350,7 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, inicio, fim
   const [itens, setItens] = useState(null)
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState('')
-  const [pct, setPct] = useState(15)
+  const [pct, setPct] = useState(10)
   const [sel, setSel] = useState(() => new Set())
   const [aplicando, setAplicando] = useState(false)
   const [prog, setProg] = useState(null)
@@ -2119,8 +2403,20 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, inicio, fim
   }
   const furaPiso = (it) => it.piso_preco != null && dealDe(it) < it.piso_preco - 0.005
   const isParticipando = (it) => ['active', 'started', 'enabled'].includes((it.status || '').toLowerCase())
-  const podeSel = (it) => !isParticipando(it) && (permitirAbaixo || !furaPiso(it))
+  // Campanha própria: cada item recebe o MAIOR desconto que ainda respeita o SEU piso (nunca fura a margem).
+  const dealAplicado = (it) => {
+    const bruto = dealDe(it)
+    if (modo === 'convite' || permitirAbaixo || it.piso_preco == null) return bruto
+    return Math.max(it.piso_preco, bruto)
+  }
+  const semFolga = (it) => modo === 'campanha' && it.piso_preco != null && !permitirAbaixo && it.piso_preco >= (it.preco || 0) - 0.005
+  const ajustado = (it) => modo === 'campanha' && !permitirAbaixo && furaPiso(it) && !semFolga(it)
+  const descAplicado = (it) => { const base = it.preco || it.original_price; const d = dealAplicado(it); return (base && d != null) ? Math.max(0, Math.round((1 - d / base) * 1000) / 10) : 0 }
+  const podeSel = (it) => modo === 'convite'
+    ? (!isParticipando(it) && (permitirAbaixo || !furaPiso(it)))
+    : (!isParticipando(it) && (permitirAbaixo || !semFolga(it)))
   const toggle = (it) => { if (!podeSel(it)) return; setSel((s) => { const n = new Set(s); n.has(it.item_id) ? n.delete(it.item_id) : n.add(it.item_id); return n }) }
+
   const lista = itens || []
   const ql = q.trim().toLowerCase()
   const listaExibida = (modo === 'convite' && ql)
@@ -2154,18 +2450,19 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, inicio, fim
   const aplicar = async () => {
     const alvos = lista.filter((i) => sel.has(i.item_id) && podeSel(i))
     if (!alvos.length) { notify('Selecione ao menos um item.', 'warn'); return }
-    const nAbaixo = alvos.filter(furaPiso).length
-    if (nAbaixo > 0 && !window.confirm(`${nAbaixo} ${nAbaixo === 1 ? 'item está' : 'itens estão'} ABAIXO do Preço Bling — isso vende abaixo da sua meta de margem. Aderir mesmo assim?`)) return
+    const nAbaixo = alvos.filter((it) => it.piso_preco != null && dealAplicado(it) < it.piso_preco - 0.005).length
+    if (nAbaixo > 0 && !window.confirm(`${nAbaixo} ${nAbaixo === 1 ? 'item ficará' : 'itens ficarão'} ABAIXO do Preço Bling — isso vende abaixo da sua meta de margem. Continuar mesmo assim?`)) return
+    const nAjust = alvos.filter(ajustado).length
     setAplicando(true); setProg({ feito: 0, total: alvos.length, falhas: [] })
     const falhas = []
     for (let k = 0; k < alvos.length; k++) {
       const it = alvos[k]
       try {
-        const body = { promotion_id: promotionId, promotion_type: promotionType, deal_price: dealDe(it) }
+        const preco = dealAplicado(it)
+        const body = { promotion_id: promotionId, promotion_type: promotionType, deal_price: preco }
         if (it.offer_id && TIPOS_OFFER_ID.has(promotionType)) body.offer_id = it.offer_id
-        if (furaPiso(it)) body.permitir_abaixo_piso = true
+        if (it.piso_preco != null && preco < it.piso_preco - 0.005) body.permitir_abaixo_piso = true
         if (promotionType === 'LIGHTNING') {
-          // limites do ML são EXCLUSIVOS: "greater than min and less than max"
           const lo = it.stock_min != null ? it.stock_min + 1 : 1
           const hi = it.stock_max != null ? it.stock_max - 1 : null
           let st = it.estoque != null ? it.estoque : lo
@@ -2178,7 +2475,7 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, inicio, fim
       setProg({ feito: k + 1, total: alvos.length, falhas: [...falhas] })
     }
     setAplicando(false)
-    if (falhas.length === 0) { notify(`${alvos.length} ${alvos.length === 1 ? 'item adicionado' : 'itens adicionados'}.`, 'ok'); onOk() }
+    if (falhas.length === 0) { notify(`${alvos.length} ${alvos.length === 1 ? 'item adicionado' : 'itens adicionados'}${nAjust > 0 ? ` · ${nAjust} ajustado(s) ao piso` : ''}.`, 'ok'); onOk() }
     else notify(`${alvos.length - falhas.length} ok · ${falhas.length} com erro.`, falhas.length === alvos.length ? 'danger' : 'warn')
   }
 
@@ -2280,15 +2577,19 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, inicio, fim
               <span className="text-[11px] font-extrabold num" style={{ color: 'var(--accent)' }}>{pct}%</span>
             </div>
           )}
+          {modo === 'campanha' && (
+            <div className="text-[10px] mt-1.5 flex items-start gap-1.5" style={{ color: 'var(--dim)' }}><Sparkles size={12} className="flex-none mt-0.5" style={{ color: 'var(--ok)' }} /> <span>Desconto inteligente: cada item recebe <b style={{ color: 'var(--fg)' }}>até {pct}%</b>, mas <b style={{ color: 'var(--ok)' }}>nunca abaixo do piso dele</b>. Itens de margem apertada entram com desconto menor (marcado <span style={{ color: 'var(--warn)' }}>ajustado ao piso</span>) — por isso <b style={{ color: 'var(--fg)' }}>todos ficam selecionáveis</b>. Só ficam de fora os sem folga nenhuma.</span></div>
+          )}
+
           {modo === 'convite' && <div className="text-[10px] text-faint mt-1.5 flex items-start gap-1.5"><Info size={12} className="flex-none mt-0.5" /> <span>Convites usam o desconto do <b style={{ color: 'var(--fg)' }}>Mercado Livre</b> — o preço de cada item é definido pela plataforma. Você só escolhe <b style={{ color: 'var(--fg)' }}>quais participam</b>; nunca abaixo do piso.</span></div>}
           {modo === 'convite' && participandoItens.some((it) => (it.meli_percentage || 0) + (it.seller_percentage || 0) > 0) && <div className="text-[9.5px] text-faint mt-1 flex items-start gap-1.5"><Gift size={11} className="flex-none mt-0.5" style={{ color: BLUE }} /> <span><b style={{ color: 'var(--fg)' }}>Coparticipação:</b> o desconto é dividido — o ML cobre uma parte (<b style={{ color: BLUE }}>ML%</b>) e você cobre o resto (<b style={{ color: BLUE }}>você%</b>). “Você recebe” já é o líquido depois das taxas.</span></div>}
           {semBling > 0 && <div className="text-[10px] mt-1.5 flex items-start gap-1.5" style={{ color: 'var(--warn)' }}><AlertTriangle size={12} className="flex-none mt-0.5" /> {semBling} {semBling === 1 ? 'item sem' : 'itens sem'} Preço Bling — sem trava de margem. Cadastre o custo/Preço Bling no Bling para proteger a margem.</div>}
-          {abaixoTotal > 0 && (
+          {(modo === 'convite' ? abaixoTotal > 0 : lista.filter(semFolga).length > 0 || permitirAbaixo) && (
             <div className="mt-2 rounded-xl p-2.5" style={{ background: permitirAbaixo ? 'rgba(255,122,122,.12)' : 'rgba(224,162,60,.1)', border: `1px solid ${permitirAbaixo ? 'rgba(255,122,122,.35)' : 'rgba(224,162,60,.3)'}` }}>
               <div className="flex items-center gap-2">
                 <AlertTriangle size={14} style={{ color: permitirAbaixo ? 'var(--danger)' : 'var(--warn)', flexShrink: 0 }} />
                 <div className="text-[10.5px] flex-1" style={{ color: permitirAbaixo ? 'var(--danger)' : 'var(--warn)' }}>
-                  {abaixoTotal} de {lista.length} {abaixoTotal === 1 ? 'item ficaria' : 'itens ficariam'} <b>abaixo do Preço Bling</b> nesta promoção{elegiveis.length === 0 && !permitirAbaixo ? ' — por isso nada fica selecionável (a trava protege sua margem).' : '.'}
+                  {modo === 'campanha' ? <>{lista.filter(semFolga).length} {lista.filter(semFolga).length === 1 ? 'item sem folga nenhuma' : 'itens sem folga nenhuma'} (piso = preço) {permitirAbaixo ? '— liberados abaixo do piso.' : '— só entram permitindo abaixo do piso.'}</> : <>{abaixoTotal} de {lista.length} {abaixoTotal === 1 ? 'item ficaria' : 'itens ficariam'} <b>abaixo do Preço Bling</b>{elegiveis.length === 0 && !permitirAbaixo ? ' — por isso nada fica selecionável (a trava protege sua margem).' : '.'}</>}
                 </div>
                 <button onClick={() => { setPermitirAbaixo((v) => !v); setSel(new Set()) }} className="text-[10px] font-bold px-2.5 py-1 rounded-full whitespace-nowrap" style={permitirAbaixo ? { background: 'var(--danger)', color: '#fff', flexShrink: 0 } : { background: 'transparent', color: 'var(--warn)', border: '1px solid rgba(224,162,60,.5)', flexShrink: 0 }}>{permitirAbaixo ? 'Trava desativada' : 'Permitir abaixo do piso'}</button>
               </div>
@@ -2308,7 +2609,8 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, inicio, fim
           ) : !listaExibida.length ? (
             <div className="text-[12px] text-faint p-6 text-center">Nenhum resultado para “{q}”.</div>
           ) : (<>{[...listaExibida].sort((a, b) => (isParticipando(b) ? 1 : 0) - (isParticipando(a) ? 1 : 0)).map((it) => {
-            const dp = dealDe(it); const fura = furaPiso(it); const sb = it.piso_preco == null
+            const dp = dealAplicado(it); const fura = furaPiso(it); const sb = it.piso_preco == null
+            const aj = ajustado(it); const semF = semFolga(it); const bloqueado = !podeSel(it) && !isParticipando(it)
             const folga = it.piso_preco != null ? dp - it.piso_preco : null
             const on = sel.has(it.item_id); const part = isParticipando(it)
             const coop = (it.meli_percentage || 0) + (it.seller_percentage || 0)
@@ -2316,7 +2618,7 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, inicio, fim
             const descPart = coop > 0 ? Math.round(coop) : (refOrig && it.price != null && it.price < refOrig ? Math.round((1 - it.price / refOrig) * 100) : 0)
             const precoFinal = (it.price != null && refOrig && it.price < refOrig) ? it.price : (refOrig && descPart ? Math.round(refOrig * (1 - descPart / 100) * 100) / 100 : (it.price != null ? it.price : dp))
             return (
-              <div key={it.item_id} onClick={() => { if (!part) toggle(it) }} className="flex items-center gap-3 px-3 py-2 rounded-xl mb-1" style={{ background: part ? 'rgba(47,217,141,.08)' : on ? 'rgba(214,0,127,.08)' : 'transparent', border: '1px solid ' + (part ? 'rgba(47,217,141,.3)' : on ? 'rgba(214,0,127,.3)' : 'transparent'), boxShadow: part ? 'inset 3px 0 0 var(--ok)' : 'none', opacity: (fura && !permitirAbaixo && !part) ? 0.55 : 1, cursor: part ? 'default' : 'pointer' }}>
+              <div key={it.item_id} onClick={() => { if (!part) toggle(it) }} className="flex items-center gap-3 px-3 py-2 rounded-xl mb-1" style={{ background: part ? 'rgba(47,217,141,.08)' : on ? 'rgba(214,0,127,.08)' : 'transparent', border: '1px solid ' + (part ? 'rgba(47,217,141,.3)' : on ? 'rgba(214,0,127,.3)' : 'transparent'), boxShadow: part ? 'inset 3px 0 0 var(--ok)' : 'none', opacity: bloqueado ? 0.5 : 1, cursor: part ? 'default' : bloqueado ? 'not-allowed' : 'pointer' }}>
                 {part
                   ? <div className="w-5 h-5 rounded-md grid place-items-center flex-none" style={{ background: 'var(--ok)' }} title="Já participando"><Check size={13} color="#08130d" /></div>
                   : <div className="w-5 h-5 rounded-md grid place-items-center flex-none" style={{ border: '1.5px solid ' + (on ? 'var(--accent)' : 'var(--glass-border)'), background: on ? 'var(--accent)' : 'transparent' }}>{on && <Check size={13} color="#fff" />}</div>}
@@ -2331,7 +2633,7 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, inicio, fim
                     <div className="text-[12.5px] font-extrabold num" style={{ color: 'var(--ok)' }}>{brl(precoFinal)}</div>
                   </>) : (<>
                     <div className="text-[10px] text-faint num">de {brl(it.preco || it.original_price)}</div>
-                    <div className="text-[12.5px] font-extrabold num" style={{ color: fura ? 'var(--danger)' : 'var(--ok)' }}>{brl(dp)}</div>
+                    <div className="text-[12.5px] font-extrabold num" style={{ color: semF ? 'var(--faint)' : aj ? 'var(--warn)' : 'var(--ok)' }}>{brl(dp)}</div>
                   </>)}
                 </div>
                 <div className="flex-none text-right" style={{ width: 138 }}>
@@ -2341,9 +2643,13 @@ function SeletorItens({ modo, promotionId, promotionType, promoNome, inicio, fim
                       : <span className="text-[9px] font-extrabold" style={{ color: 'var(--warn)' }}>sem desconto ativo</span>}
                     {it.net_proceeds != null && <div className="text-[8.5px] num" style={{ color: 'var(--ok)' }}>você recebe {brl(it.net_proceeds)}</div>}
                     {coop > 0 && it.meli_percentage != null && <div className="text-[8.5px] num" style={{ color: BLUE }}>cofin.: ML {Math.round(it.meli_percentage)}% · você {Math.round(it.seller_percentage || 0)}%</div>}
-                  </>) : sb ? <span className="text-[9px] text-faint">sem Preço Bling</span>
-                    : fura ? <span className="text-[9px] font-extrabold" style={{ color: 'var(--danger)' }}>fura o piso {brl(it.piso_preco)}</span>
-                      : <span className="text-[9px] font-extrabold" style={{ color: 'var(--ok)' }}>folga {brl(folga)}</span>}
+                  </>) : modo === 'convite'
+                    ? (sb ? <span className="text-[9px] text-faint">sem Preço Bling</span>
+                      : fura ? <span className="text-[9px] font-extrabold" style={{ color: 'var(--danger)' }}>fura o piso {brl(it.piso_preco)}</span>
+                        : <span className="text-[9px] font-extrabold" style={{ color: 'var(--ok)' }}>folga {brl(folga)}</span>)
+                    : (semF ? <span className="text-[9px] font-extrabold" style={{ color: 'var(--danger)' }}>sem folga p/ desconto</span>
+                      : aj ? <><span className="text-[9.5px] font-extrabold" style={{ color: 'var(--warn)' }}>−{descAplicado(it)}% · ajustado ao piso</span><div className="text-[8px] num text-faint">máx sem furar a margem</div></>
+                        : <span className="text-[9.5px] font-extrabold" style={{ color: 'var(--ok)' }}>−{descAplicado(it)}% · folga {brl(folga)}</span>)}
                   {modo === 'convite' && !part && it.min_discounted_price != null && <div className="text-[8.5px] text-faint num">preço do ML {brl(it.suggested_discounted_price != null ? it.suggested_discounted_price : it.min_discounted_price)}</div>}
                 </div>
               </div>
@@ -2380,17 +2686,16 @@ const inputCls = 'w-full text-[12.5px] px-3 py-2 rounded-xl bg-transparent text-
 const inputSty = { border: '1px solid var(--glass-border)' }
 
 function Modal({ title, icon: Ic, onClose, children }) {
-  return createPortal(
-    <div className="fixed inset-0 z-[100] flex justify-end" style={{ background: 'rgba(0,0,0,.55)' }} onClick={(e) => { e.stopPropagation(); onClose() }}>
-      <div onClick={(e) => e.stopPropagation()} className="h-full w-full drawer-in flex flex-col" style={{ maxWidth: 480, border: '1px solid transparent', background: 'linear-gradient(180deg,var(--surface),#160c13) padding-box, linear-gradient(155deg, rgba(214,0,127,.6), rgba(214,0,127,.06) 42%, rgba(255,255,255,.10)) border-box', boxShadow: '-24px 0 70px rgba(0,0,0,.55)' }}>
-        <div className="flex items-center gap-2 px-4 py-3 flex-none" style={{ borderBottom: '1px solid var(--glass-border)' }}>
-          {Ic && <div className="w-8 h-8 rounded-lg grid place-items-center flex-none" style={{ background: 'rgba(214,0,127,.16)', color: 'var(--accent)' }}><Ic size={16} /></div>}
-          <span className="text-[15px] font-bold" style={{ fontFamily: 'Fraunces, Georgia, serif' }}>{title}</span>
-          <button onClick={onClose} className="ml-auto text-faint hover:text-fg"><X size={18} /></button>
-        </div>
-        <div className="p-4 flex-1 overflow-y-auto">{children}</div>
+  return (
+    <div className="rounded-2xl overflow-hidden card-in flex flex-col" style={{ border: '1px solid transparent', background: 'linear-gradient(180deg,var(--surface),#160c13) padding-box, linear-gradient(155deg, rgba(214,0,127,.65), rgba(214,0,127,.06) 42%, rgba(255,255,255,.10)) border-box', boxShadow: '0 20px 60px rgba(0,0,0,.5)', maxHeight: 'calc(100vh - 40px)' }}>
+      <div className="flex items-center gap-2 px-4 py-3 flex-none" style={{ borderBottom: '1px solid var(--glass-border)' }}>
+        {Ic && <div className="w-8 h-8 rounded-lg grid place-items-center flex-none" style={{ background: 'linear-gradient(145deg, rgba(214,0,127,.95), rgba(168,0,99,.95))', color: '#fff', boxShadow: '0 4px 14px rgba(214,0,127,.35)' }}><Ic size={16} /></div>}
+        <span className="text-[15px] font-bold" style={{ fontFamily: 'Fraunces, Georgia, serif' }}>{title}</span>
+        <button onClick={onClose} className="ml-auto text-faint hover:text-fg"><X size={18} /></button>
       </div>
-    </div>, document.body)
+      <div className="p-4 flex-1 overflow-y-auto">{children}</div>
+    </div>
+  )
 }
 
 function Campo({ label, children }) {
