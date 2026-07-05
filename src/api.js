@@ -157,6 +157,8 @@ export const api = {
     Object.entries(q).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '' && v !== false) p.set(k, v) })
     return req(`/api/mercadolivre/produtos/painel?${p.toString()}`)
   },
+  mlProdutoUm: (itemId) => req(`/api/mercadolivre/produtos/${itemId}`),
+  mlProdutoEditar: (itemId, body) => req(`/api/mercadolivre/produtos/${itemId}/editar`, { method: 'POST', body }),
   mlPromocoesItem: (item_id) => req(`/api/mercadolivre/promocoes/${item_id}`),
   mlPromoAplicar: (b) => req('/api/mercadolivre/promocoes/aplicar', { method: 'POST', body: b }),
   mlPromoRemover: (item_id) => req('/api/mercadolivre/promocoes/remover', { method: 'POST', body: { item_id } }),

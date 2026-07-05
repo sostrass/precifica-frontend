@@ -95,7 +95,7 @@ const TABS = [
 ]
 
 export default function Produtos() {
-  const { push: notify } = useToast()
+  const notify = useToast()
   const [tab, setTab] = useState('visao')
   const [painel, setPainel] = useState(null)
   const [carregando, setCarregando] = useState(true)
@@ -333,6 +333,7 @@ function ProdutosLista({ notify }) {
   const [page, setPage] = useState(1)
   const [sel, setSel] = useState(() => new Set())
   const [aberto, setAberto] = useState(null)
+  const [refreshTick, setRefreshTick] = useState(0)
   const pageSize = 40
 
   const query = useMemo(() => ({
@@ -344,7 +345,7 @@ function ProdutosLista({ notify }) {
   useEffect(() => {
     setCarregando(true)
     api.mlProdutosPainel(query).then(setDados).catch(() => setDados(null)).finally(() => setCarregando(false))
-  }, [query])
+  }, [query, refreshTick])
   useEffect(() => { const t = setTimeout(() => { setBuscaLive(busca); setPage(1) }, 350); return () => clearTimeout(t) }, [busca])
 
   const k = dados?.kpis || {}
@@ -406,10 +407,10 @@ function ProdutosLista({ notify }) {
               <span style={{ width: 20, height: 20, borderRadius: 6, background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 9 }}><Check size={12} color="#fff" /></span>
               <b style={{ fontSize: 11.5, color: '#ffd1ea' }}>{sel.size} selecionados</b>
               <div style={{ flex: 1 }} />
-              <MiniBtn icon={BarChart3} onClick={() => notify('Reprecificação em lote entra com o endpoint de edição.', 'info')}>Reprecificar</MiniBtn>
-              <MiniBtn icon={PauseCircle} onClick={() => notify('Pausa em lote entra com o endpoint de edição.', 'info')}>Pausar</MiniBtn>
-              <MiniBtn icon={FileText} onClick={() => notify('Envio fiscal em lote na aba Fiscal.', 'info')}>Enviar fiscal</MiniBtn>
-              <MiniBtn icon={Sparkles} ai onClick={() => notify('Otimização com IA entra com o endpoint de IA.', 'info')}>Otimizar IA</MiniBtn>
+              <MiniBtn icon={BarChart3} onClick={() => notify('Reprecificação em lote entra com o endpoint de edição.', 'warn')}>Reprecificar</MiniBtn>
+              <MiniBtn icon={PauseCircle} onClick={() => notify('Pausa em lote entra com o endpoint de edição.', 'warn')}>Pausar</MiniBtn>
+              <MiniBtn icon={FileText} onClick={() => notify('Envio fiscal em lote na aba Fiscal.', 'warn')}>Enviar fiscal</MiniBtn>
+              <MiniBtn icon={Sparkles} ai onClick={() => notify('Otimização com IA entra com o endpoint de IA.', 'warn')}>Otimizar IA</MiniBtn>
               <MiniBtn icon={X} onClick={() => setSel(new Set())}>Limpar</MiniBtn>
             </div>
           )}
@@ -435,7 +436,7 @@ function ProdutosLista({ notify }) {
         </div>
 
         {/* cockpit */}
-        {aberto ? <Cockpit p={aberto} onClose={() => setAberto(null)} notify={notify} />
+        {aberto ? <Cockpit p={aberto} onClose={() => setAberto(null)} notify={notify} onSaved={(prod) => { setAberto((a) => ({ ...a, ...prod })); setRefreshTick((t) => t + 1) }} />
           : <div className="glass" style={{ padding: 22, borderRadius: 18, textAlign: 'center', position: 'sticky', top: 76 }}>
             <Boxes size={26} style={{ color: 'var(--faint)', margin: '0 auto 8px' }} />
             <div style={{ fontSize: 12, color: 'var(--dim)' }}>Selecione um produto para abrir o cockpit — editar, precificar, variações, atacado e fiscal.</div>
@@ -500,104 +501,226 @@ function ProdutoRow({ p, sel, onSel, onOpen, ativo }) {
 }
 
 /* ================= COCKPIT DO PRODUTO ================= */
-function Cockpit({ p, onClose, notify }) {
-  const st = STATUS_INFO[p.status] || STATUS_INFO.inactive
-  const ratio = (p.preco && p.liquido) ? p.liquido / p.preco : null   // razão líquida efetiva
-  const taxas = (p.preco != null && p.liquido != null) ? Math.max(0, p.preco - p.liquido) : null
-  const folga = (p.liquido != null && p.piso != null && p.preco) ? p.preco - p.piso : null
-  const [faixas, setFaixas] = useState([{ q: 1, preco: p.preco || 0 }])
-  const setFaixa = (i, campo, v) => setFaixas((f) => f.map((x, idx) => idx === i ? { ...x, [campo]: Number(v) || 0 } : x))
-  const addFaixa = () => setFaixas((f) => f.length >= 5 ? f : [...f, { q: (f[f.length - 1]?.q || 1) + 5, preco: Math.max(0, (p.preco || 0) - f.length) }])
-  const rmFaixa = (i) => setFaixas((f) => f.filter((_, idx) => idx !== i))
-  const liqFaixa = (preco) => ratio != null ? Math.round(preco * ratio * 100) / 100 : null
+function Cockpit({ p, onClose, notify, onSaved }) {
+  const [det, setDet] = useState(p)
+  const [titulo, setTitulo] = useState(p.titulo || '')
+  const [preco, setPreco] = useState(p.preco || 0)
+  const [estoque, setEstoque] = useState(p.estoque ?? 0)
+  const [status, setStatus] = useState(p.status || 'active')
+  const [permitir, setPermitir] = useState(false)
+  const [salvando, setSalvando] = useState(false)
+  const [subtab, setSubtab] = useState('editar')
+
+  useEffect(() => {
+    api.mlProdutoUm(p.item_id).then((d) => {
+      setDet(d); setTitulo(d.titulo || ''); setPreco(d.preco || 0)
+      setEstoque(d.estoque ?? 0); setStatus(d.status || 'active')
+    }).catch(() => {})
+  }, [p.item_id])
+
+  const st = STATUS_INFO[status] || STATUS_INFO.inactive
+  const precoBling = det.preco_bling
+  const piso = det.piso
+  const precoRegra = det.preco_regra
+  const ratio = (det.preco && det.liquido) ? det.liquido / det.preco : null   // razão líquida efetiva
+  const liqAt = ratio != null ? Math.round(preco * ratio * 100) / 100 : det.liquido
+  const taxas = (preco != null && liqAt != null) ? Math.max(0, preco - liqAt) : null
+  const folga = (piso != null && preco) ? preco - piso : null
+  const furaPiso = (piso != null && preco < piso - 0.01)
+  const dirty = titulo !== (det.titulo || '') || Number(preco) !== (det.preco || 0) || Number(estoque) !== (det.estoque ?? 0) || status !== (det.status || 'active')
+
+  const salvar = async (over) => {
+    const body = {}
+    if (titulo !== (det.titulo || '') && titulo.trim()) body.titulo = titulo.trim()
+    if (Number(preco) !== (det.preco || 0)) body.preco = Number(preco)
+    if (Number(estoque) !== (det.estoque ?? 0)) body.estoque = Number(estoque)
+    if (status !== (det.status || 'active')) body.status = status
+    if (over || permitir) body.permitir_abaixo_piso = true
+    if (Object.keys(body).length === 0) { notify('Nada mudou para salvar.', 'warn'); return }
+    setSalvando(true)
+    try {
+      const r = await api.mlProdutoEditar(p.item_id, body)
+      setDet(r.produto); onSaved?.(r.produto)
+      notify('Anúncio atualizado e sincronizado com o ML.', 'ok')
+    } catch (e) {
+      const d = e?.data?.detail || e?.detail
+      if (d && typeof d === 'object' && d.erro === 'abaixo_do_piso') {
+        notify(`${d.mensagem} Mínimo seguro R$ ${Number(d.minimo_seguro).toFixed(2)}. Marque "permitir abaixo do piso" para forçar.`, 'danger')
+      } else {
+        notify(typeof d === 'string' ? d : 'Não foi possível salvar. Tente novamente.', 'danger')
+      }
+    } finally { setSalvando(false) }
+  }
+  const alternarStatus = () => { const novo = status === 'active' ? 'paused' : 'active'; setStatus(novo) }
+
+  const SUBTABS = [['editar', 'Editar'], ['preco', 'Precificação'], ['atacado', 'Atacado PxQ'], ['fiscal', 'Fiscal'], ['hist', 'Histórico']]
 
   return (
     <div style={{ position: 'sticky', top: 76, borderRadius: 18, border: '1px solid transparent', background: 'linear-gradient(180deg,var(--surface),#150b12) padding-box, linear-gradient(155deg,rgba(214,0,127,.65),rgba(214,0,127,.05) 42%,rgba(255,255,255,.10)) border-box', boxShadow: '0 22px 64px rgba(0,0,0,.5)' }}>
       <div className="row" style={{ display: 'flex', alignItems: 'center', padding: '13px 14px', borderBottom: '1px solid var(--glass-border)' }}>
-        <div style={{ width: 42, height: 42, borderRadius: 11, marginRight: 11, background: 'rgba(214,0,127,.16)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none', overflow: 'hidden' }}>{p.imagem ? <img src={p.imagem} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Package size={18} style={{ color: 'var(--accent)' }} />}</div>
+        <div style={{ width: 42, height: 42, borderRadius: 11, marginRight: 11, background: 'rgba(214,0,127,.16)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none', overflow: 'hidden' }}>{det.imagem ? <img src={det.imagem} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Package size={18} style={{ color: 'var(--accent)' }} />}</div>
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontFamily: 'Fraunces, Georgia, serif' }}>{p.titulo || p.item_id}</div>
-          <div className="num" style={{ fontSize: 10, color: 'var(--faint)' }}>{p.item_id} · <span style={{ color: st.c }}>{st.t}</span>{p.permalink && <> · <a href={p.permalink} target="_blank" rel="noreferrer" style={{ color: BLUE, textDecoration: 'none' }}>ver no ML ↗</a></>}</div>
+          <div style={{ fontSize: 14, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontFamily: 'Fraunces, Georgia, serif' }}>{det.titulo || det.item_id}</div>
+          <div className="num" style={{ fontSize: 10, color: 'var(--faint)' }}>{det.item_id} · <span style={{ color: st.c }}>{st.t}</span>{det.permalink && <> · <a href={det.permalink} target="_blank" rel="noreferrer" style={{ color: BLUE, textDecoration: 'none' }}>ver no ML ↗</a></>}</div>
         </div>
         <X size={17} style={{ color: 'var(--faint)', cursor: 'pointer' }} onClick={onClose} />
       </div>
 
-      <div className="row" style={{ display: 'flex', gap: 16, padding: '9px 14px 0', borderBottom: '1px solid var(--glass-border)' }}>
-        {['Editar', 'Precificação', 'Atacado PxQ', 'Variações', 'Fiscal', 'Histórico'].map((s, i) => (
-          <span key={s} style={{ fontSize: 11, fontWeight: i === 0 ? 800 : 700, color: i === 0 ? 'var(--accent)' : 'var(--faint)', borderBottom: i === 0 ? '2px solid var(--accent)' : 'none', paddingBottom: 8 }}>{s}</span>
+      <div className="row" style={{ display: 'flex', gap: 16, padding: '9px 14px 0', borderBottom: '1px solid var(--glass-border)', flexWrap: 'wrap' }}>
+        {SUBTABS.map(([k, lb]) => (
+          <span key={k} onClick={() => setSubtab(k)} style={{ fontSize: 11, fontWeight: subtab === k ? 800 : 700, color: subtab === k ? 'var(--accent)' : 'var(--faint)', borderBottom: subtab === k ? '2px solid var(--accent)' : '2px solid transparent', paddingBottom: 8, cursor: 'pointer' }}>{lb}</span>
         ))}
       </div>
 
-      <div style={{ padding: 14, maxHeight: '76vh', overflowY: 'auto' }}>
-        {/* mini kpis reais */}
+      <div style={{ padding: 14, maxHeight: '74vh', overflowY: 'auto' }}>
+        {/* mini kpis reais (refletem edição ao vivo) */}
         <div className="grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8, marginBottom: 12 }}>
-          <MiniKpi lbl="Preço ML" v={brl(p.preco)} cor="var(--ok)" />
-          <MiniKpi lbl="Líquido" v={brl(p.liquido)} cor="var(--text)" />
-          <MiniKpi lbl="Estoque" v={p.estoque ?? '—'} cor="var(--text)" />
-          <MiniKpi lbl="Piso" v={brl(p.piso)} cor={folga != null && folga < 0 ? 'var(--danger)' : 'var(--dim)'} />
+          <MiniKpi lbl="Preço ML" v={brl(preco)} cor="var(--ok)" />
+          <MiniKpi lbl="Você recebe" v={brl(liqAt)} cor={BLUE} />
+          <MiniKpi lbl="Estoque" v={estoque} cor="var(--text)" />
+          <MiniKpi lbl="Piso" v={brl(piso)} cor={furaPiso ? 'var(--danger)' : 'var(--dim)'} />
         </div>
 
-        {/* copiloto IA (diff representativo) */}
-        <div style={{ background: 'linear-gradient(135deg,rgba(160,107,232,.15),rgba(214,0,127,.10))', border: '1px solid rgba(160,107,232,.32)', borderRadius: 13, padding: 11, marginBottom: 12 }}>
-          <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 8 }}><Sparkles size={14} style={{ color: '#cfaef5' }} /><b style={{ fontSize: 11.5, color: '#e9dbfb' }}>Copiloto IA</b></div>
-          <div className="row" style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            <MiniBtn icon={Wand2} ai onClick={() => notify('Reescrita de título entra com o endpoint de IA.', 'info')}>Reescrever título</MiniBtn>
-            <MiniBtn icon={FileText} ai onClick={() => notify('Geração de descrição entra com o endpoint de IA.', 'info')}>Gerar descrição</MiniBtn>
-            <MiniBtn icon={Tag} ai onClick={() => notify('Preenchimento de atributos com IA em breve.', 'info')}>Completar atributos</MiniBtn>
-          </div>
-        </div>
-
-        {/* cascata real */}
-        <div className="glass" style={{ padding: 11, marginBottom: 12, borderRadius: 12 }}>
-          <div className="row" style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}><b style={{ fontSize: 10.5 }}>Cascata da regra (Bling → ML)</b><div style={{ flex: 1 }} />{folga != null && <Badge c={folga >= 0 ? 'var(--ok)' : 'var(--danger)'} bg={folga >= 0 ? 'rgba(47,217,141,.14)' : 'rgba(255,122,122,.14)'}>{folga >= 0 ? 'DENTRO DA REGRA' : 'ABAIXO DO PISO'}</Badge>}</div>
-          <CascLinha lbl="Preço no ML" v={p.preco} cor="var(--ok)" />
-          {taxas != null && <CascLinha lbl="− Taxas do ML" v={-taxas} cor="var(--danger)" />}
-          <CascLinha lbl="= Você recebe" v={p.liquido} cor={BLUE} forte />
-          <CascLinha lbl="Piso (líquido-alvo)" v={p.piso} cor="var(--faint)" />
-          <div className="note" style={{ fontSize: 9.5, color: 'var(--faint)', display: 'flex', alignItems: 'flex-start', gap: 6, marginTop: 7 }}><Shield size={11} style={{ marginTop: 1, flex: 'none' }} />{folga != null ? (folga >= 0 ? `Folga de ${brl(folga)} acima do piso.` : `Faltam ${brl(-folga)} para o piso — reprecificar.`) : 'Sem Preço Bling vinculado — cadastre o SKU no Bling para calcular o piso.'}</div>
-        </div>
-
-        {/* ATACADO PxQ editável */}
-        <div className="glass" style={{ padding: 11, marginBottom: 12, borderRadius: 12, border: '1px solid rgba(160,107,232,.32)' }}>
-          <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 9 }}>
-            <Boxes size={13} style={{ color: '#cfaef5' }} /><b style={{ fontSize: 10.5 }}>Atacado · preço por quantidade</b>
-            <Badge c="var(--ok)" bg="rgba(47,217,141,.14)" style={{ marginLeft: 5 }}>SUAS FAIXAS</Badge>
-            <div style={{ flex: 1 }} />
-            <MiniBtn icon={Sparkles} ai onClick={() => notify('Sugestão de faixas por IA em breve.', 'info')}>Sugerir</MiniBtn>
-          </div>
-          <div className="note" style={{ fontSize: 9.5, color: 'var(--faint)', display: 'flex', alignItems: 'flex-start', gap: 6, marginBottom: 9 }}><Info size={11} style={{ marginTop: 1, flex: 'none' }} /><b style={{ color: 'var(--text)', marginRight: 3 }}>Você define</b> quantidade e preço de cada faixa. A validação do piso é ao vivo (estimada pela razão líquida atual).</div>
-          {faixas.map((f, i) => {
-            const liq = liqFaixa(f.preco)
-            const furou = (liq != null && p.preco_bling != null && liq < p.preco_bling - 0.01)
-            return (
-              <div key={i} className="row" style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                <input className="num" type="number" value={f.q} onChange={(e) => setFaixa(i, 'q', e.target.value)} style={{ width: 54, padding: '5px 7px', fontSize: 11, textAlign: 'center', background: 'rgba(0,0,0,.18)', border: '1px solid var(--glass-border)', borderRadius: 8, color: 'var(--text)' }} />
-                <span style={{ fontSize: 8.5, color: 'var(--faint)' }}>un</span>
-                <span style={{ fontSize: 9, color: 'var(--faint)' }}>R$</span>
-                <input className="num" type="number" value={f.preco} onChange={(e) => setFaixa(i, 'preco', e.target.value)} style={{ width: 74, padding: '5px 7px', fontSize: 11, background: 'rgba(0,0,0,.18)', border: `1px solid ${furou ? 'rgba(255,122,122,.55)' : 'var(--glass-border)'}`, borderRadius: 8, color: furou ? 'var(--danger)' : 'var(--text)' }} />
-                <div style={{ flex: 1, fontSize: 9.5, color: 'var(--faint)' }} className="num">líq. {brl(liq)}</div>
-                <span style={{ fontSize: 9.5, color: furou ? 'var(--danger)' : 'var(--ok)', width: 40, textAlign: 'right' }}>{p.preco_bling == null ? '—' : furou ? '✗ fura' : '✓'}</span>
-                {faixas.length > 1 && <X size={13} style={{ color: 'var(--faint)', cursor: 'pointer' }} onClick={() => rmFaixa(i)} />}
+        {subtab === 'editar' && (
+          <>
+            {/* título editável */}
+            <div className="glass" style={{ padding: 11, marginBottom: 12, borderRadius: 12 }}>
+              <div className="row" style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
+                <b style={{ fontSize: 10.5 }}>Título</b><div style={{ flex: 1 }} />
+                <span className="num" style={{ fontSize: 9, color: titulo.length > 60 ? 'var(--danger)' : 'var(--faint)' }}>{titulo.length}/60</span>
+                <span style={{ marginLeft: 8 }}><MiniBtn icon={Wand2} ai onClick={() => notify('Reescrita de título com IA entra com o endpoint de IA.', 'warn')}>IA</MiniBtn></span>
               </div>
-            )
-          })}
-          <div className="row" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 9 }}>
-            <MiniBtn icon={Plus} onClick={addFaixa}>Adicionar faixa</MiniBtn>
-            <span style={{ fontSize: 9, color: 'var(--faint)' }}>até 5 faixas · qualquer quantidade acima do piso</span>
-            <div style={{ flex: 1 }} />
-            <MiniBtn icon={Check} onClick={() => notify('Aplicar faixas PxQ entra com o endpoint de preços do ML.', 'info')}>Aplicar no ML</MiniBtn>
-          </div>
-        </div>
+              <input value={titulo} maxLength={70} onChange={(e) => setTitulo(e.target.value)} style={{ width: '100%', background: 'rgba(0,0,0,.18)', border: '1px solid var(--glass-border)', borderRadius: 10, color: 'var(--text)', fontSize: 12.5, padding: '9px 11px' }} />
+              {det.catalogo && <div className="note" style={{ fontSize: 9, color: 'var(--faint)', marginTop: 6, display: 'flex', gap: 5 }}><Info size={10} />Anúncio de catálogo: o ML pode recusar mudança de título.</div>}
+            </div>
 
-        <div className="row" style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-          <button style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, padding: '7px 12px', borderRadius: 9, color: '#fff', border: 'none', cursor: 'pointer', background: 'linear-gradient(135deg,var(--accent),#a00061)' }} onClick={() => notify('Salvar & sincronizar entra com o endpoint de edição de item.', 'info')}><Check size={12} />Salvar &amp; sincronizar</button>
-          <MiniBtn icon={PauseCircle} onClick={() => notify('Pausar entra com o endpoint de status.', 'info')}>Pausar</MiniBtn>
-          <MiniBtn icon={Copy} onClick={() => notify('Duplicar em breve.', 'info')}>Duplicar</MiniBtn>
+            {/* preço + trava de piso ao vivo */}
+            <div className="glass" style={{ padding: 11, marginBottom: 12, borderRadius: 12, border: furaPiso && !permitir ? '1px solid rgba(255,122,122,.5)' : '1px solid var(--glass-border)' }}>
+              <div className="row" style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
+                <b style={{ fontSize: 10.5 }}>Preço no Mercado Livre</b><div style={{ flex: 1 }} />
+                {folga != null && <Badge c={furaPiso ? 'var(--danger)' : 'var(--ok)'} bg={furaPiso ? 'rgba(255,122,122,.14)' : 'rgba(47,217,141,.14)'}>{furaPiso ? 'ABAIXO DO PISO' : 'DENTRO DA REGRA'}</Badge>}
+              </div>
+              <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <span style={{ fontSize: 12, color: 'var(--faint)' }}>R$</span>
+                <input type="number" step="0.01" value={preco} onChange={(e) => setPreco(e.target.value)} style={{ width: 120, background: 'rgba(0,0,0,.18)', border: `1px solid ${furaPiso && !permitir ? 'rgba(255,122,122,.5)' : 'var(--glass-border)'}`, borderRadius: 10, color: furaPiso ? 'var(--danger)' : 'var(--ok)', fontSize: 18, fontWeight: 800, padding: '8px 11px' }} className="num" />
+                {precoRegra != null && Math.abs(Number(preco) - precoRegra) > 0.01 && (
+                  <span onClick={() => setPreco(precoRegra)} style={{ fontSize: 10, fontWeight: 700, padding: '5px 9px', borderRadius: 8, cursor: 'pointer', color: '#cfaef5', border: '1px solid rgba(160,107,232,.4)', background: 'rgba(160,107,232,.14)' }}>usar preço da regra · {brl(precoRegra)}</span>
+                )}
+              </div>
+              {/* cascata ao vivo */}
+              <CascLinha lbl="Preço no ML" v={Number(preco)} cor="var(--ok)" />
+              {taxas != null && <CascLinha lbl="− Taxas do ML" v={-taxas} cor="var(--danger)" />}
+              <CascLinha lbl="= Você recebe" v={liqAt} cor={BLUE} forte />
+              <CascLinha lbl="Piso (líquido-alvo)" v={piso} cor="var(--faint)" />
+              {precoBling == null ? (
+                <div className="note" style={{ fontSize: 9.5, color: 'var(--warn)', display: 'flex', gap: 6, marginTop: 7 }}><Info size={11} style={{ flex: 'none', marginTop: 1 }} />Sem Preço Bling vinculado — cadastre o SKU no Bling para travar o piso.</div>
+              ) : furaPiso ? (
+                <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 9, padding: '8px 10px', borderRadius: 9, background: 'rgba(255,122,122,.08)', border: '1px solid rgba(255,122,122,.28)' }}>
+                  <AlertTriangle size={13} style={{ color: 'var(--danger)', flex: 'none' }} />
+                  <span style={{ fontSize: 10, color: 'var(--danger)', flex: 1 }}>Fura o piso. Mínimo seguro <b>{brl(piso)}</b>.</span>
+                  <span className="row" style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ fontSize: 9.5, color: 'var(--dim)' }}>permitir</span><Toggle on={permitir} onClick={() => setPermitir((v) => !v)} /></span>
+                </div>
+              ) : folga != null && (
+                <div className="note" style={{ fontSize: 9.5, color: 'var(--faint)', display: 'flex', gap: 6, marginTop: 7 }}><Shield size={11} style={{ flex: 'none', marginTop: 1 }} />Folga de {brl(folga)} acima do piso.</div>
+              )}
+            </div>
+
+            {/* estoque + status */}
+            <div className="grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+              <div className="glass" style={{ padding: 11, borderRadius: 12 }}>
+                <b style={{ fontSize: 10.5 }}>Estoque</b>
+                <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                  <span onClick={() => setEstoque((q) => Math.max(0, Number(q) - 1))} style={{ width: 28, height: 28, borderRadius: 8, border: '1px solid var(--glass-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--dim)', flex: 'none' }}>−</span>
+                  <input type="number" value={estoque} onChange={(e) => setEstoque(e.target.value)} className="num" style={{ flex: 1, textAlign: 'center', background: 'rgba(0,0,0,.18)', border: '1px solid var(--glass-border)', borderRadius: 8, color: 'var(--text)', fontSize: 15, fontWeight: 800, padding: '5px' }} />
+                  <span onClick={() => setEstoque((q) => Number(q) + 1)} style={{ width: 28, height: 28, borderRadius: 8, border: '1px solid var(--glass-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--dim)', flex: 'none' }}>+</span>
+                </div>
+                {det.estoque_bling != null && det.estoque_bling !== Number(estoque) && <div className="note" style={{ fontSize: 9, color: BLUE, marginTop: 6 }}>Bling: {det.estoque_bling} un</div>}
+              </div>
+              <div className="glass" style={{ padding: 11, borderRadius: 12 }}>
+                <b style={{ fontSize: 10.5 }}>Situação</b>
+                <div style={{ display: 'inline-flex', width: '100%', background: 'rgba(0,0,0,.3)', border: '1px solid var(--glass-border)', borderRadius: 10, padding: 3, marginTop: 8 }}>
+                  {[['active', 'Ativo', 'var(--ok)'], ['paused', 'Pausado', 'var(--warn)']].map(([v, lb, c]) => (
+                    <b key={v} onClick={() => setStatus(v)} style={{ flex: 1, textAlign: 'center', fontSize: 10.5, fontWeight: 800, padding: '6px 0', borderRadius: 8, cursor: 'pointer', color: status === v ? '#0d0d0d' : 'var(--dim)', background: status === v ? c : 'transparent' }}>{lb}</b>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
+        {subtab === 'preco' && (
+          <div className="glass" style={{ padding: 11, marginBottom: 12, borderRadius: 12 }}>
+            <b style={{ fontSize: 10.5 }}>Cascata da regra (Bling → ML)</b>
+            <div style={{ marginTop: 8 }}>
+              <CascLinha lbl="Preço no ML" v={Number(preco)} cor="var(--ok)" />
+              {taxas != null && <CascLinha lbl="− Taxas do ML" v={-taxas} cor="var(--danger)" />}
+              <CascLinha lbl="= Você recebe" v={liqAt} cor={BLUE} forte />
+              <CascLinha lbl="Preço Bling (alvo)" v={precoBling} cor="#cfaef5" />
+              <CascLinha lbl="Piso" v={piso} cor="var(--faint)" />
+            </div>
+            {precoRegra != null && <div className="note" style={{ fontSize: 9.5, color: 'var(--faint)', display: 'flex', gap: 6, marginTop: 8 }}><Info size={11} style={{ flex: 'none', marginTop: 1 }} />Preço ideal pela regra: <b style={{ color: 'var(--text)', margin: '0 3px' }}>{brl(precoRegra)}</b> (preserva o líquido-alvo do Bling).</div>}
+          </div>
+        )}
+
+        {subtab === 'atacado' && <AtacadoPxQ p={det} preco={Number(preco)} ratio={ratio} precoBling={precoBling} notify={notify} />}
+
+        {subtab === 'fiscal' && <Empty icon={FileText} texto="A ficha fiscal do anúncio (NCM, origem, can_invoice) entra com o endpoint fiscal do ML — mantendo o vínculo com o Bling." />}
+        {subtab === 'hist' && <Empty icon={Clock} texto="O histórico do anúncio (preço, status e moderações ao longo do tempo) entra quando ligarmos o log de eventos e webhooks." />}
+
+        {/* barra de ação fixa */}
+        <div className="row" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 6, paddingTop: 12, borderTop: '1px solid var(--glass-border)' }}>
+          <button disabled={salvando || (!dirty)} onClick={() => salvar(false)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, fontWeight: 700, padding: '8px 14px', borderRadius: 10, color: '#fff', border: 'none', cursor: dirty && !salvando ? 'pointer' : 'default', opacity: dirty && !salvando ? 1 : .5, background: 'linear-gradient(135deg,var(--accent),#a00061)' }}>
+            {salvando ? <Loader2 size={13} className="spin" /> : <Check size={13} />}{salvando ? 'Salvando…' : 'Salvar & sincronizar'}
+          </button>
+          <MiniBtn icon={PauseCircle} onClick={alternarStatus}>{status === 'active' ? 'Pausar' : 'Ativar'}</MiniBtn>
+          {dirty && <span style={{ fontSize: 9.5, color: 'var(--warn)', display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--warn)' }} />alterações não salvas</span>}
         </div>
       </div>
     </div>
   )
 }
+
+/* Atacado PxQ — faixas livres com validação de piso ao vivo */
+function AtacadoPxQ({ p, preco, ratio, precoBling, notify }) {
+  const [faixas, setFaixas] = useState([{ q: 1, preco: preco || p.preco || 0 }])
+  const setFaixa = (i, campo, v) => setFaixas((f) => f.map((x, idx) => idx === i ? { ...x, [campo]: Number(v) || 0 } : x))
+  const addFaixa = () => setFaixas((f) => f.length >= 5 ? f : [...f, { q: (f[f.length - 1]?.q || 1) + 5, preco: Math.max(0, (preco || 0) - f.length) }])
+  const rmFaixa = (i) => setFaixas((f) => f.filter((_, idx) => idx !== i))
+  const liqFaixa = (pr) => ratio != null ? Math.round(pr * ratio * 100) / 100 : null
+  return (
+    <div className="glass" style={{ padding: 11, marginBottom: 12, borderRadius: 12, border: '1px solid rgba(160,107,232,.32)' }}>
+      <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 9 }}>
+        <Boxes size={13} style={{ color: '#cfaef5' }} /><b style={{ fontSize: 10.5 }}>Atacado · preço por quantidade</b>
+        <Badge c="var(--ok)" bg="rgba(47,217,141,.14)" style={{ marginLeft: 5 }}>SUAS FAIXAS</Badge>
+        <div style={{ flex: 1 }} />
+        <MiniBtn icon={Sparkles} ai onClick={() => notify('Sugestão de faixas por IA em breve.', 'warn')}>Sugerir</MiniBtn>
+      </div>
+      <div className="note" style={{ fontSize: 9.5, color: 'var(--faint)', display: 'flex', alignItems: 'flex-start', gap: 6, marginBottom: 9 }}><Info size={11} style={{ marginTop: 1, flex: 'none' }} /><b style={{ color: 'var(--text)', marginRight: 3 }}>Você define</b> quantidade e preço de cada faixa — validação de piso ao vivo.</div>
+      {faixas.map((f, i) => {
+        const liq = liqFaixa(f.preco)
+        const furou = (liq != null && precoBling != null && liq < precoBling - 0.01)
+        return (
+          <div key={i} className="row" style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+            <input className="num" type="number" value={f.q} onChange={(e) => setFaixa(i, 'q', e.target.value)} style={{ width: 54, padding: '5px 7px', fontSize: 11, textAlign: 'center', background: 'rgba(0,0,0,.18)', border: '1px solid var(--glass-border)', borderRadius: 8, color: 'var(--text)' }} />
+            <span style={{ fontSize: 8.5, color: 'var(--faint)' }}>un</span>
+            <span style={{ fontSize: 9, color: 'var(--faint)' }}>R$</span>
+            <input className="num" type="number" value={f.preco} onChange={(e) => setFaixa(i, 'preco', e.target.value)} style={{ width: 74, padding: '5px 7px', fontSize: 11, background: 'rgba(0,0,0,.18)', border: `1px solid ${furou ? 'rgba(255,122,122,.55)' : 'var(--glass-border)'}`, borderRadius: 8, color: furou ? 'var(--danger)' : 'var(--text)' }} />
+            <div style={{ flex: 1, fontSize: 9.5, color: 'var(--faint)' }} className="num">líq. {brl(liq)}</div>
+            <span style={{ fontSize: 9.5, color: furou ? 'var(--danger)' : 'var(--ok)', width: 40, textAlign: 'right' }}>{precoBling == null ? '—' : furou ? '✗ fura' : '✓'}</span>
+            {faixas.length > 1 && <X size={13} style={{ color: 'var(--faint)', cursor: 'pointer' }} onClick={() => rmFaixa(i)} />}
+          </div>
+        )
+      })}
+      <div className="row" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 9 }}>
+        <MiniBtn icon={Plus} onClick={addFaixa}>Adicionar faixa</MiniBtn>
+        <span style={{ fontSize: 9, color: 'var(--faint)' }}>até 5 faixas · acima do piso</span>
+        <div style={{ flex: 1 }} />
+        <MiniBtn icon={Check} onClick={() => notify('Aplicar PxQ entra com o endpoint de preços por quantidade do ML.', 'warn')}>Aplicar no ML</MiniBtn>
+      </div>
+    </div>
+  )
+}
+
 function MiniKpi({ lbl, v, cor }) {
   return <div className="glass" style={{ padding: '8px 10px', borderRadius: 10 }}><div style={{ fontSize: 8.5, textTransform: 'uppercase', letterSpacing: '.4px', fontWeight: 800, color: 'var(--faint)' }}>{lbl}</div><b className="num" style={{ fontSize: 14, color: cor }}>{v}</b></div>
 }
@@ -675,7 +798,7 @@ function SaudeAtencao({ k, notify }) {
                     <span className="num" style={{ fontSize: 9, color: 'var(--faint)' }}>{s.motivo || ''}{s.deal_price_sugerido != null && <> · sugerido {brl(s.deal_price_sugerido)}</>}</span>
                   </div>
                 </div>
-                <MiniBtn icon={s.deal_price_sugerido != null ? Zap : Sparkles} ai={s.deal_price_sugerido == null} onClick={() => notify('Ação individual entra com o endpoint de aplicação (já existe em Promoções/Agentes).', 'info')}>{s.deal_price_sugerido != null ? 'Aplicar' : 'Corrigir'}</MiniBtn>
+                <MiniBtn icon={s.deal_price_sugerido != null ? Zap : Sparkles} ai={s.deal_price_sugerido == null} onClick={() => notify('Ação individual entra com o endpoint de aplicação (já existe em Promoções/Agentes).', 'warn')}>{s.deal_price_sugerido != null ? 'Aplicar' : 'Corrigir'}</MiniBtn>
               </div>
             )
           })}
@@ -696,7 +819,7 @@ function Fiscal({ k, notify }) {
       <div style={{ background: 'linear-gradient(135deg,rgba(160,107,232,.15),rgba(214,0,127,.10))', border: '1px solid rgba(160,107,232,.32)', borderRadius: 13, padding: '11px 14px', marginBottom: 12, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
         <FileText size={15} style={{ color: '#cfaef5' }} />
         <span style={{ flex: 1, minWidth: 200, fontSize: 11, color: 'var(--dim)' }}>A leitura fiscal completa (NCM, CEST, origem, <b style={{ color: 'var(--text)' }}>can_invoice</b>) entra com o endpoint fiscal do ML — próximo da fila. Aqui já dá para ver quem tem base do Bling.</span>
-        <MiniBtn icon={Sparkles} ai onClick={() => notify('Mutirão fiscal com IA entra com o endpoint fiscal.', 'info')}>Preencher com IA</MiniBtn>
+        <MiniBtn icon={Sparkles} ai onClick={() => notify('Mutirão fiscal com IA entra com o endpoint fiscal.', 'warn')}>Preencher com IA</MiniBtn>
       </div>
       <Empty icon={FileText} texto="A lista fiscal detalhada (pendências de NCM/origem por item) aparece quando ligarmos GET /can_invoice e o cadastro fiscal. A base já está pronta neste painel." />
     </>
@@ -743,7 +866,7 @@ function CriarPublicar({ notify }) {
       <div style={{ background: 'linear-gradient(135deg,rgba(160,107,232,.15),rgba(214,0,127,.10))', border: '1px solid rgba(160,107,232,.32)', borderRadius: 13, padding: '11px 14px', marginBottom: 12, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
         <Sparkles size={15} style={{ color: '#cfaef5' }} />
         <span style={{ flex: 1, minWidth: 200, fontSize: 11, color: 'var(--dim)' }}>O fluxo de criação assistida (origem Bling → título/categoria por IA → atributos → atacado PxQ → fiscal → publicar com validação) entra com os endpoints de criação/publicação do ML — próximo da fila.</span>
-        <MiniBtn icon={Plus} onClick={() => notify('Publicação entra com POST /items + validação.', 'info')}>Novo produto</MiniBtn>
+        <MiniBtn icon={Plus} onClick={() => notify('Publicação entra com POST /items + validação.', 'warn')}>Novo produto</MiniBtn>
       </div>
       <Empty icon={Rocket} texto="O assistente de publicação em 6 passos com prévia ao vivo já está desenhado — será ligado aos endpoints de criação do ML mantendo a regra de piso e o PxQ editável." />
     </>
