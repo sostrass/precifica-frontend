@@ -172,6 +172,21 @@ export const api = {
   mlCategoriaAtributosIa: (catId, body) => req(`/api/mercadolivre/categorias/${catId}/atributos/ia`, { method: 'POST', body }),
   mlProdutoValidar: (body) => req('/api/mercadolivre/produtos/validar', { method: 'POST', body }),
   mlProdutoPublicar: (body) => req('/api/mercadolivre/produtos/publicar', { method: 'POST', body }),
+  mlSyncDivergencias: (q = {}) => {
+    const p = new URLSearchParams()
+    Object.entries(q).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '' && v !== false) p.set(k, v) })
+    return req(`/api/mercadolivre/sync/divergencias?${p.toString()}`)
+  },
+  mlFiscalPainel: (q = {}) => {
+    const p = new URLSearchParams()
+    Object.entries(q).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '' && v !== false) p.set(k, v) })
+    return req(`/api/mercadolivre/fiscal/painel?${p.toString()}`)
+  },
+  mlFiscalItem: (itemId) => req(`/api/mercadolivre/fiscal/item/${itemId}`),
+  mlFiscalSalvar: (itemId, body) => req(`/api/mercadolivre/fiscal/item/${itemId}`, { method: 'POST', body }),
+  mlFiscalRegras: () => req('/api/mercadolivre/fiscal/regras'),
+  mlWebhooksPainel: (horas = 24) => req(`/api/mercadolivre/webhooks/painel?horas=${horas}`),
+  mlWebhooksRecuperar: () => req('/api/mercadolivre/webhooks/recuperar', { method: 'POST' }),
   mlPromocoesItem: (item_id) => req(`/api/mercadolivre/promocoes/${item_id}`),
   mlPromoAplicar: (b) => req('/api/mercadolivre/promocoes/aplicar', { method: 'POST', body: b }),
   mlPromoRemover: (item_id) => req('/api/mercadolivre/promocoes/remover', { method: 'POST', body: { item_id } }),

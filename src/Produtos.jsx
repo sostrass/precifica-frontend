@@ -195,8 +195,8 @@ export default function Produtos() {
       {tab === 'produtos' && <ProdutosLista notify={notify} />}
       {tab === 'criar' && <CriarPublicar notify={notify} />}
       {tab === 'atencao' && <SaudeAtencao k={k} notify={notify} />}
-      {tab === 'fiscal' && <Fiscal k={k} notify={notify} />}
-      {tab === 'sync' && <Sincronizacao k={k} notify={notify} />}
+      {tab === 'fiscal' && <Fiscal notify={notify} />}
+      {tab === 'sync' && <Sincronizacao k={k} notify={notify} onGoCriar={() => setTab('criar')} />}
 
       {cmd && <CmdPalette onClose={() => setCmd(false)} onGo={(t) => { setTab(t); setCmd(false) }} />}
 
@@ -873,48 +873,419 @@ function SaudeAtencao({ k, notify }) {
   )
 }
 
-/* ================= FISCAL ================= */
-function Fiscal({ k, notify }) {
+/* ================= FISCAL (prontidão + cadastro real) ================= */
+const ORIGENS = [['reseller', 'Revenda (nacional)'], ['manufacturer', 'Fabricação própria'], ['imported', 'Importado']]
+function Fiscal({ notify }) {
+  const [situacao, setSituacao] = useState('todos')
+  const [dados, setDados] = useState(null)
+  const [carregando, setCarregando] = useState(true)
+  const [tick, setTick] = useState(0)
+  const [aberto, setAberto] = useState(null)
+  const [regras, setRegras] = useState([])
+  const [enviando, setEnviando] = useState(() => new Set())
+  const [lote, setLote] = useState(false)
+
+  useEffect(() => {
+    setCarregando(true)
+    api.mlFiscalPainel({ situacao, page: 1, page_size: 60 }).then(setDados).catch(() => setDados(null)).finally(() => setCarregando(false))
+  }, [situacao, tick])
+  useEffect(() => { api.mlFiscalRegras().then((r) => setRegras(r.regras || [])).catch(() => setRegras([])) }, [])
+
+  const k = dados?.kpis || {}
+  const itens = dados?.itens || []
+  const prontidao = k.total ? Math.round((k.pronto / k.total) * 100) : 0
+  const marcar = (id, on) => setEnviando((s) => { const n = new Set(s); on ? n.add(id) : n.delete(id); return n })
+
+  const enviar = async (row, form) => {
+    marcar(row.item_id, true)
+    try {
+      const r = await api.mlFiscalSalvar(row.item_id, form || {})
+      notify(r.pode_faturar ? `Fiscal enviado — ${row.sku} apto a faturar.` : `Fiscal enviado para ${row.sku}.`, 'ok')
+      setAberto(null); setTick((t) => t + 1)
+    } catch (e) {
+      const d = e?.data?.detail
+      notify(typeof d === 'object' ? d.mensagem : (d || 'Falha ao enviar fiscal.'), 'danger')
+    } finally { marcar(row.item_id, false) }
+  }
+  const enviarLote = async () => {
+    const prontos = itens.filter((x) => x.estado === 'pronto')
+    if (!prontos.length) { notify('Nenhum item pronto nesta página.', 'warn'); return }
+    setLote(true); let ok = 0
+    for (const row of prontos) { try { await api.mlFiscalSalvar(row.item_id, {}); ok++ } catch { /* segue */ } }
+    setLote(false); notify(`${ok} de ${prontos.length} enviados ao ML.`, ok ? 'ok' : 'warn'); setTick((t) => t + 1)
+  }
+
+  const TABS = [['todos', 'Todos', k.total, 'var(--dim)'], ['pronto', 'Prontos (Bling)', k.pronto, 'var(--ok)'], ['sem_ncm', 'Sem NCM', k.sem_ncm, 'var(--warn)'], ['sem_bling', 'Sem Bling', k.sem_bling, 'var(--danger)']]
+
   return (
     <>
       <div className="grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 12 }}>
-        <Kpi icon={Check} label="Total no catálogo" value={nfmt(k.total)} cor="var(--ok)" sub="base para NF-e" />
-        <Kpi icon={FileText} label="Com custo Bling" value={nfmt((k.total || 0) - (k.sem_bling || 0))} cor={BLUE} sub="dados fiscais herdados" />
-        <Kpi icon={AlertTriangle} label="Sem vínculo Bling" value={nfmt(k.sem_bling)} cor="var(--warn)" sub="fiscal a completar" />
-        <Kpi icon={Sparkles} label="IA pode preencher" value={nfmt(k.sem_bling)} cor="#cfaef5" sub="cruzando o Bling" />
+        <Kpi icon={FileText} label="No catálogo" value={nfmt(k.total)} cor="var(--text)" sub="base para NF-e" />
+        <Kpi icon={Check} label="Prontos (NCM Bling)" value={nfmt(k.pronto)} cor="var(--ok)" sub="dá para enviar já" />
+        <Kpi icon={AlertTriangle} label="Sem NCM" value={nfmt(k.sem_ncm)} cor="var(--warn)" sub="cadastrar no Bling" />
+        <Kpi icon={Info} label="Sem vínculo Bling" value={nfmt(k.sem_bling)} cor="var(--danger)" sub="vincular SKU" />
       </div>
-      <div style={{ background: 'linear-gradient(135deg,rgba(160,107,232,.15),rgba(214,0,127,.10))', border: '1px solid rgba(160,107,232,.32)', borderRadius: 13, padding: '11px 14px', marginBottom: 12, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
-        <FileText size={15} style={{ color: '#cfaef5' }} />
-        <span style={{ flex: 1, minWidth: 200, fontSize: 11, color: 'var(--dim)' }}>A leitura fiscal completa (NCM, CEST, origem, <b style={{ color: 'var(--text)' }}>can_invoice</b>) entra com o endpoint fiscal do ML — próximo da fila. Aqui já dá para ver quem tem base do Bling.</span>
-        <MiniBtn icon={Sparkles} ai onClick={() => notify('Mutirão fiscal com IA entra com o endpoint fiscal.', 'warn')}>Preencher com IA</MiniBtn>
+
+      {/* prontidão + breakdown */}
+      <div className="grid" style={{ display: 'grid', gridTemplateColumns: '210px 1fr', gap: 12, marginBottom: 12 }}>
+        <div className="glass" style={{ padding: 16, borderRadius: 16, textAlign: 'center' }}>
+          <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '.5px', fontWeight: 800, color: 'var(--faint)', marginBottom: 8 }}>Prontidão fiscal</div>
+          <Ring size={96} val={prontidao} cor="var(--ok)" w={10}><span style={{ color: 'var(--ok)', fontSize: 19 }}>{prontidao}%</span></Ring>
+          <div className="num" style={{ fontSize: 9, color: 'var(--faint)', marginTop: 6 }}>{nfmt(k.pronto)} de {nfmt(k.total)} com NCM</div>
+        </div>
+        <div className="glass" style={{ padding: 16, borderRadius: 16 }}>
+          <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '.5px', fontWeight: 800, color: 'var(--faint)', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}><BarChart3 size={13} />Situação fiscal do catálogo</div>
+          <BarRow label="Prontos" val={k.pronto || 0} max={k.total || 1} cor="var(--ok)" />
+          <BarRow label="Sem NCM" val={k.sem_ncm || 0} max={k.total || 1} cor="var(--warn)" />
+          <BarRow label="Sem Bling" val={k.sem_bling || 0} max={k.total || 1} cor="var(--danger)" />
+          <div className="note" style={{ fontSize: 9.5, color: 'var(--faint)', display: 'flex', gap: 6, marginTop: 8 }}><Info size={11} style={{ flex: 'none', marginTop: 1 }} />O <b style={{ color: 'var(--text)', margin: '0 3px' }}>Bling é a fonte fiscal</b> — NCM e origem vêm de lá. O envio grava o <span className="num" style={{ margin: '0 3px' }}>fiscal_information</span> no ML e reconfere o <span className="num" style={{ margin: '0 3px' }}>can_invoice</span>.</div>
+        </div>
       </div>
-      <Empty icon={FileText} texto="A lista fiscal detalhada (pendências de NCM/origem por item) aparece quando ligarmos GET /can_invoice e o cadastro fiscal. A base já está pronta neste painel." />
+
+      {/* segmento + lote */}
+      <div className="row" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginBottom: 12 }}>
+        {TABS.map(([v, lb, n, cor]) => (
+          <span key={v} onClick={() => setSituacao(v)} style={{ fontSize: 11, fontWeight: 700, padding: '7px 13px', borderRadius: 99, cursor: 'pointer', color: situacao === v ? '#fff' : 'var(--dim)', background: situacao === v ? `linear-gradient(135deg,${cor === 'var(--dim)' ? 'var(--accent)' : cor},${cor === 'var(--dim)' ? 'rgba(214,0,127,.6)' : cor + 'aa'})` : 'rgba(255,255,255,.04)', border: `1px solid ${situacao === v ? 'transparent' : 'var(--glass-border)'}`, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            {lb}{n != null && <span style={{ fontSize: 9, fontWeight: 800, background: 'rgba(255,255,255,.18)', borderRadius: 99, padding: '1px 6px' }}>{nfmt(n)}</span>}
+          </span>
+        ))}
+        <div style={{ flex: 1 }} />
+        {itens.some((x) => x.estado === 'pronto') && (
+          <button onClick={enviarLote} disabled={lote} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10.5, fontWeight: 700, padding: '7px 12px', borderRadius: 10, cursor: lote ? 'default' : 'pointer', color: '#fff', border: 'none', background: 'linear-gradient(135deg,var(--accent),#a00061)', opacity: lote ? .7 : 1 }}>{lote ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}Enviar prontos da página</button>
+        )}
+      </div>
+
+      {/* lista */}
+      {carregando ? Array.from({ length: 5 }).map((_, i) => <div key={i} className="glass" style={{ padding: 12, borderRadius: 14, marginBottom: 8 }}><Skel h={38} /></div>)
+        : itens.length === 0 ? <Empty icon={FileText} texto="Nada nesta situação fiscal." />
+          : itens.map((row) => {
+            const busy = enviando.has(row.item_id)
+            const est = row.estado
+            const info = est === 'pronto' ? { c: 'var(--ok)', bg: 'rgba(47,217,141,.14)', t: 'NCM no Bling' } : est === 'sem_ncm' ? { c: 'var(--warn)', bg: 'rgba(224,162,60,.14)', t: 'sem NCM' } : { c: 'var(--danger)', bg: 'rgba(255,122,122,.14)', t: 'sem Bling' }
+            const exp = aberto === row.item_id
+            return (
+              <div key={row.item_id} className="glass" style={{ borderRadius: 14, marginBottom: 8, borderLeft: `3px solid ${info.c}`, overflow: 'hidden' }}>
+                <div className="row lift" style={{ display: 'flex', alignItems: 'center', padding: '11px 12px', cursor: 'pointer' }} onClick={() => setAberto(exp ? null : row.item_id)}>
+                  <Thumb src={row.imagem} />
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.titulo || row.item_id}</div>
+                    <div className="num" style={{ fontSize: 9.5, color: 'var(--faint)', marginTop: 2 }}>{row.sku || 's/ SKU'}{row.ncm ? <> · NCM <b style={{ color: 'var(--text)' }}>{row.ncm}</b></> : ''}{row.cest ? ` · CEST ${row.cest}` : ''}</div>
+                  </div>
+                  <Badge c={info.c} bg={info.bg} style={{ marginRight: 10 }}>{info.t}</Badge>
+                  {est === 'pronto' && <button onClick={(e) => { e.stopPropagation(); enviar(row, {}) }} disabled={busy} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 700, padding: '7px 12px', borderRadius: 9, cursor: busy ? 'default' : 'pointer', color: '#fff', border: 'none', background: 'linear-gradient(135deg,var(--accent),#a00061)', opacity: busy ? .6 : 1, marginRight: 6 }}>{busy ? <Loader2 size={11} className="animate-spin" /> : <Send size={11} />}Enviar</button>}
+                  <ChevronRight size={16} style={{ color: 'var(--faint)', transform: exp ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} />
+                </div>
+                {exp && <FiscalEditor row={row} regras={regras} busy={busy} onEnviar={(form) => enviar(row, form)} notify={notify} />}
+              </div>
+            )
+          })}
     </>
   )
 }
 
-/* ================= SINCRONIZAÇÃO ================= */
-function Sincronizacao({ k, notify }) {
-  const emDia = Math.max(0, (k.total || 0) - (k.preco_divergente || 0) - (k.estoque_divergente || 0) - (k.sem_bling || 0))
+function FiscalEditor({ row, regras, busy, onEnviar, notify }) {
+  const [det, setDet] = useState(null)
+  const [ncm, setNcm] = useState(row.ncm || '')
+  const [origem, setOrigem] = useState(row.origin_type || 'reseller')
+  const [detalhe, setDetalhe] = useState(row.origin_detail || '0')
+  const [cest, setCest] = useState(row.cest || '')
+  const [regra, setRegra] = useState('')
+  useEffect(() => {
+    api.mlFiscalItem(row.item_id).then((d) => {
+      setDet(d); const s = d.sugestao_bling || {}
+      if (s.ncm) setNcm(s.ncm); if (s.origin_type) setOrigem(s.origin_type)
+      if (s.origin_detail) setDetalhe(s.origin_detail); if (s.cest) setCest(s.cest)
+    }).catch(() => {})
+  }, [row.item_id])
+  const ncmOk = ncm.replace(/\D/g, '').length === 8
   return (
-    <>
-      <div className="grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 12 }}>
-        <Kpi icon={Check} label="Em dia (Bling=ML)" value={nfmt(emDia)} cor="var(--ok)" sub={`${k.total ? Math.round((emDia / k.total) * 100) : 0}% sincronizado`} />
-        <Kpi icon={BarChart3} label="Preço ≠ regra" value={nfmt(k.preco_divergente)} cor={BLUE} sub="líquido abaixo do alvo" />
-        <Kpi icon={Boxes} label="Estoque ≠" value={nfmt(k.estoque_divergente)} cor="var(--warn)" sub="Bling ≠ ML" />
-        <Kpi icon={AlertTriangle} label="Só no Bling" value={nfmt(k.sem_bling)} cor="#cfaef5" sub="sem vínculo/anúncio" />
-      </div>
-      <div className="glass" style={{ padding: 18, marginBottom: 12, borderRadius: 16 }}>
-        <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '.5px', fontWeight: 800, color: 'var(--faint)', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}><RefreshCw size={13} />Fluxo · Bling é o hub de escrita</div>
-        <div className="row" style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', gap: 8 }}>
-          <div className="glass" style={{ padding: '13px 17px', textAlign: 'center', border: '1px solid rgba(47,217,141,.32)' }}><b style={{ color: 'var(--ok)', fontSize: 13 }}>Bling ERP</b><div style={{ fontSize: 9, color: 'var(--faint)' }}>preço · custo · estoque · NCM</div></div>
-          <ArrowRight size={18} style={{ color: 'var(--faint)' }} />
-          <div style={{ padding: '13px 17px', textAlign: 'center', borderRadius: 14, border: '1px solid rgba(160,107,232,.4)', background: 'rgba(160,107,232,.06)' }}><b style={{ fontSize: 13, color: '#e9dbfb' }}>Precifica AI</b><div style={{ fontSize: 9, color: 'var(--faint)' }}>regra · IA · agentes · diff</div></div>
-          <ArrowRight size={18} style={{ color: 'var(--faint)' }} />
-          <div className="glass" style={{ padding: '13px 17px', textAlign: 'center', border: '1px solid rgba(242,194,0,.32)' }}><b style={{ color: ML, fontSize: 13 }}>Mercado Livre</b><div style={{ fontSize: 9, color: 'var(--faint)' }}>publica · edita · webhooks</div></div>
+    <div style={{ borderTop: '1px solid var(--glass-border)', background: 'rgba(0,0,0,.14)', padding: 13 }}>
+      {det && (
+        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 11 }}>
+          <span style={{ fontSize: 9.5, color: 'var(--faint)' }}>can_invoice atual:</span>
+          {det.pode_faturar === true ? <Badge c="var(--ok)" bg="rgba(47,217,141,.14)"><Check size={10} />apto a faturar</Badge>
+            : det.pode_faturar === false ? <Badge c="var(--danger)" bg="rgba(255,122,122,.14)"><AlertTriangle size={10} />falta dado fiscal</Badge>
+              : <Badge c="var(--faint)">indisponível</Badge>}
+        </div>
+      )}
+      <div className="grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        <div>
+          <div style={{ fontSize: 8.5, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)', marginBottom: 4 }}>NCM (8 dígitos)</div>
+          <input value={ncm} onChange={(e) => setNcm(e.target.value)} placeholder="00000000" className="num" style={{ width: '100%', background: 'rgba(0,0,0,.2)', border: `1px solid ${ncm && !ncmOk ? 'rgba(255,122,122,.5)' : 'var(--glass-border)'}`, borderRadius: 9, color: ncm && !ncmOk ? 'var(--danger)' : 'var(--text)', fontSize: 12, padding: '8px 10px' }} />
+        </div>
+        <div>
+          <div style={{ fontSize: 8.5, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)', marginBottom: 4 }}>Origem</div>
+          <select value={origem} onChange={(e) => setOrigem(e.target.value)} style={{ width: '100%', background: 'rgba(0,0,0,.2)', border: '1px solid var(--glass-border)', borderRadius: 9, color: 'var(--text)', fontSize: 11.5, padding: '8px 10px' }}>
+            {ORIGENS.map(([v, lb]) => <option key={v} value={v}>{lb}</option>)}
+          </select>
+        </div>
+        <div>
+          <div style={{ fontSize: 8.5, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)', marginBottom: 4 }}>Código origem (0-8)</div>
+          <input value={detalhe} onChange={(e) => setDetalhe(e.target.value)} className="num" style={{ width: '100%', background: 'rgba(0,0,0,.2)', border: '1px solid var(--glass-border)', borderRadius: 9, color: 'var(--text)', fontSize: 12, padding: '8px 10px' }} />
+        </div>
+        <div>
+          <div style={{ fontSize: 8.5, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)', marginBottom: 4 }}>CEST (opcional)</div>
+          <input value={cest} onChange={(e) => setCest(e.target.value)} className="num" style={{ width: '100%', background: 'rgba(0,0,0,.2)', border: '1px solid var(--glass-border)', borderRadius: 9, color: 'var(--text)', fontSize: 12, padding: '8px 10px' }} />
         </div>
       </div>
-      <Empty icon={RefreshCw} texto="A tabela linha-a-linha de divergências (Bling → ML com ação por item) entra na sequência, reusando este mesmo cálculo de piso/estoque do painel." />
+      <div style={{ marginTop: 10 }}>
+        <div style={{ fontSize: 8.5, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)', marginBottom: 4 }}>Regra tributária (só Regime Normal — Simples deixe vazio)</div>
+        <select value={regra} onChange={(e) => setRegra(e.target.value)} style={{ width: '100%', background: 'rgba(0,0,0,.2)', border: '1px solid var(--glass-border)', borderRadius: 9, color: 'var(--text)', fontSize: 11.5, padding: '8px 10px' }}>
+          <option value="">— sem regra (Simples Nacional) —</option>
+          {regras.map((r) => <option key={r.id} value={r.id}>{r.description || r.id}</option>)}
+        </select>
+      </div>
+      <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12 }}>
+        <button onClick={() => { if (!ncmOk) { notify('NCM precisa ter 8 dígitos.', 'warn'); return } onEnviar({ ncm, origin_type: origem, origin_detail: detalhe, cest, tax_rule_id: regra || undefined }) }} disabled={busy || !ncmOk} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, fontWeight: 700, padding: '8px 14px', borderRadius: 10, cursor: busy || !ncmOk ? 'default' : 'pointer', color: '#fff', border: 'none', background: 'linear-gradient(135deg,var(--accent),#a00061)', opacity: busy || !ncmOk ? .6 : 1 }}>{busy ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}Enviar ao Mercado Livre</button>
+        {row.estado === 'sem_ncm' && !ncmOk && <span style={{ fontSize: 9.5, color: 'var(--warn)' }}>sem NCM no Bling — informe aqui ou cadastre no Bling</span>}
+      </div>
+    </div>
+  )
+}
+
+/* ================= SINCRONIZAÇÃO (divergências reais) ================= */
+function Sincronizacao({ k, notify, onGoCriar }) {
+  const [tipo, setTipo] = useState('preco')
+  const [dados, setDados] = useState(null)
+  const [carregando, setCarregando] = useState(true)
+  const [tick, setTick] = useState(0)
+  const [aplicando, setAplicando] = useState(() => new Set())
+  const [lote, setLote] = useState(false)
+  const [vista, setVista] = useState('div')
+
+  useEffect(() => {
+    setCarregando(true)
+    api.mlSyncDivergencias({ tipo, page: 1, page_size: 60 }).then(setDados).catch(() => setDados(null)).finally(() => setCarregando(false))
+  }, [tipo, tick])
+
+  const c = dados?.counts || {}
+  const itens = dados?.itens || []
+  const totalMl = c.total_ml || 0
+  const emDiaPct = totalMl ? Math.round((c.em_dia / totalMl) * 100) : 0
+
+  const marcar = (id, on) => setAplicando((s) => { const n = new Set(s); on ? n.add(id) : n.delete(id); return n })
+  const aplicarPreco = async (row) => {
+    if (!row.preco_regra) { notify('Sem preço da regra (produto sem Preço Bling).', 'warn'); return }
+    marcar(row.item_id, true)
+    try { await api.mlProdutoEditar(row.item_id, { preco: row.preco_regra }); notify(`Preço de ${row.sku || row.item_id} ajustado para a regra.`, 'ok'); setTick((t) => t + 1) }
+    catch (e) { const d = e?.data?.detail; notify(typeof d === 'object' ? d.mensagem : (d || 'Falha ao ajustar preço.'), 'danger') }
+    finally { marcar(row.item_id, false) }
+  }
+  const aplicarEstoque = async (row) => {
+    marcar(row.item_id, true)
+    try { await api.mlProdutoEditar(row.item_id, { estoque: row.estoque_bling }); notify(`Estoque de ${row.sku || row.item_id} igualado ao Bling (${row.estoque_bling}).`, 'ok'); setTick((t) => t + 1) }
+    catch (e) { const d = e?.data?.detail; notify(typeof d === 'string' ? d : 'Falha ao igualar estoque.', 'danger') }
+    finally { marcar(row.item_id, false) }
+  }
+  const aplicarTodos = async () => {
+    setLote(true)
+    let ok = 0
+    for (const row of itens) {
+      try {
+        if (tipo === 'preco' && row.preco_regra) { await api.mlProdutoEditar(row.item_id, { preco: row.preco_regra }); ok++ }
+        else if (tipo === 'estoque') { await api.mlProdutoEditar(row.item_id, { estoque: row.estoque_bling }); ok++ }
+      } catch { /* segue */ }
+    }
+    setLote(false); notify(`${ok} de ${itens.length} ajustados nesta página.`, ok ? 'ok' : 'warn'); setTick((t) => t + 1)
+  }
+
+  const TABS = [['preco', 'Preço ≠ regra', c.preco, BLUE], ['estoque', 'Estoque ≠', c.estoque, 'var(--warn)'], ['orfaos', 'Só no Bling', c.orfaos, '#cfaef5']]
+
+  return (
+    <>
+      {/* seletor de vista */}
+      <div className="row" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginBottom: 12 }}>
+        {[['div', 'Divergências', RefreshCw], ['webhooks', 'Webhooks em tempo real', Activity]].map(([v, lb, Ic]) => (
+          <span key={v} onClick={() => setVista(v)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, fontWeight: 700, padding: '8px 14px', borderRadius: 11, cursor: 'pointer', color: vista === v ? '#fff' : 'var(--dim)', background: vista === v ? 'linear-gradient(135deg,var(--accent),rgba(214,0,127,.55))' : 'rgba(255,255,255,.04)', border: `1px solid ${vista === v ? 'transparent' : 'var(--glass-border)'}` }}><Ic size={14} />{lb}</span>
+        ))}
+      </div>
+      {vista === 'webhooks' && <WebhooksPanel notify={notify} />}
+      {vista === 'div' && <>
+      {/* KPIs */}
+      <div className="grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 12 }}>
+        <Kpi icon={Check} label="Em dia (Bling=ML)" value={nfmt(c.em_dia)} cor="var(--ok)" sub={`${emDiaPct}% sincronizado`} />
+        <Kpi icon={BarChart3} label="Preço ≠ regra" value={nfmt(c.preco)} cor={BLUE} sub="líquido abaixo do alvo" />
+        <Kpi icon={Boxes} label="Estoque ≠" value={nfmt(c.estoque)} cor="var(--warn)" sub="Bling ≠ ML" />
+        <Kpi icon={AlertTriangle} label="Só no Bling" value={nfmt(c.orfaos)} cor="#cfaef5" sub="sem anúncio" />
+      </div>
+
+      {/* fluxo + anel em dia */}
+      <div className="grid" style={{ display: 'grid', gridTemplateColumns: '1fr 210px', gap: 12, marginBottom: 12 }}>
+        <div className="glass" style={{ padding: 16, borderRadius: 16 }}>
+          <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '.5px', fontWeight: 800, color: 'var(--faint)', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}><RefreshCw size={13} />Fluxo · Bling é o hub de escrita</div>
+          <div className="row" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+            <div className="glass" style={{ padding: '13px 17px', textAlign: 'center', border: '1px solid rgba(47,217,141,.32)' }}><b style={{ color: 'var(--ok)', fontSize: 13 }}>Bling ERP</b><div style={{ fontSize: 9, color: 'var(--faint)' }}>preço · custo · estoque · NCM</div></div>
+            <ArrowRight size={18} style={{ color: 'var(--faint)' }} />
+            <div style={{ padding: '13px 17px', textAlign: 'center', borderRadius: 14, border: '1px solid rgba(160,107,232,.4)', background: 'rgba(160,107,232,.06)' }}><b style={{ fontSize: 13, color: '#e9dbfb' }}>Precifica AI</b><div style={{ fontSize: 9, color: 'var(--faint)' }}>regra · piso · diff</div></div>
+            <ArrowRight size={18} style={{ color: 'var(--faint)' }} />
+            <div className="glass" style={{ padding: '13px 17px', textAlign: 'center', border: '1px solid rgba(242,194,0,.32)' }}><b style={{ color: ML, fontSize: 13 }}>Mercado Livre</b><div style={{ fontSize: 9, color: 'var(--faint)' }}>publica · edita · webhooks</div></div>
+          </div>
+        </div>
+        <div className="glass" style={{ padding: 16, borderRadius: 16, textAlign: 'center' }}>
+          <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '.5px', fontWeight: 800, color: 'var(--faint)', marginBottom: 8 }}>Catálogo em dia</div>
+          <Ring size={92} val={emDiaPct} cor="var(--ok)" w={9}><span style={{ color: 'var(--ok)', fontSize: 18 }}>{emDiaPct}%</span></Ring>
+          <div className="num" style={{ fontSize: 9, color: 'var(--faint)', marginTop: 6 }}>{nfmt(c.em_dia)} de {nfmt(totalMl)} anúncios</div>
+        </div>
+      </div>
+
+      {/* segmento de tipo */}
+      <div className="row" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginBottom: 12 }}>
+        {TABS.map(([v, lb, n, cor]) => (
+          <span key={v} onClick={() => setTipo(v)} style={{ fontSize: 11, fontWeight: 700, padding: '7px 13px', borderRadius: 99, cursor: 'pointer', color: tipo === v ? '#fff' : 'var(--dim)', background: tipo === v ? `linear-gradient(135deg,${cor},${cor}aa)` : 'rgba(255,255,255,.04)', border: `1px solid ${tipo === v ? 'transparent' : 'var(--glass-border)'}`, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            {lb}{n != null && <span style={{ fontSize: 9, fontWeight: 800, background: 'rgba(255,255,255,.18)', borderRadius: 99, padding: '1px 6px' }}>{nfmt(n)}</span>}
+          </span>
+        ))}
+        <div style={{ flex: 1 }} />
+        {tipo !== 'orfaos' && itens.length > 0 && (
+          <button onClick={aplicarTodos} disabled={lote} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10.5, fontWeight: 700, padding: '7px 12px', borderRadius: 10, cursor: lote ? 'default' : 'pointer', color: '#fff', border: 'none', background: 'linear-gradient(135deg,var(--accent),#a00061)', opacity: lote ? .7 : 1 }}>{lote ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}Aplicar todos ({itens.length})</button>
+        )}
+      </div>
+
+      {/* tabela */}
+      {carregando ? Array.from({ length: 5 }).map((_, i) => <div key={i} className="glass" style={{ padding: 12, borderRadius: 14, marginBottom: 8 }}><Skel h={38} /></div>)
+        : itens.length === 0 ? <Empty icon={Check} texto={tipo === 'preco' ? 'Nenhum preço fora da regra — tudo dentro do líquido-alvo.' : tipo === 'estoque' ? 'Estoques do ML batem com o Bling.' : 'Todos os produtos do Bling já têm anúncio no ML.'} />
+          : itens.map((row) => {
+            const busy = aplicando.has(row.item_id)
+            if (tipo === 'preco') return (
+              <div key={row.item_id} className="glass lift" style={{ display: 'flex', alignItems: 'center', padding: '11px 12px', borderRadius: 14, marginBottom: 8, borderLeft: '3px solid ' + BLUE }}>
+                <Thumb src={row.imagem} />
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.titulo || row.item_id}</div>
+                  <div className="num" style={{ fontSize: 9.5, color: 'var(--faint)', marginTop: 2 }}>{row.sku || 's/ SKU'} · ML {brl(row.preco)} → você recebe <b style={{ color: 'var(--danger)' }}>{brl(row.liquido)}</b> · alvo <b style={{ color: '#cfaef5' }}>{brl(row.preco_bling)}</b></div>
+                </div>
+                <div style={{ textAlign: 'right', marginRight: 12 }}>
+                  <div style={{ fontSize: 8.5, color: 'var(--faint)', textTransform: 'uppercase', fontWeight: 800 }}>preço regra</div>
+                  <b className="num" style={{ fontSize: 14, color: 'var(--ok)' }}>{brl(row.preco_regra)}</b>
+                </div>
+                <button onClick={() => aplicarPreco(row)} disabled={busy || !row.preco_regra} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 700, padding: '7px 12px', borderRadius: 9, cursor: busy ? 'default' : 'pointer', color: '#fff', border: 'none', background: 'linear-gradient(135deg,var(--accent),#a00061)', opacity: busy || !row.preco_regra ? .6 : 1 }}>{busy ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}Aplicar</button>
+              </div>
+            )
+            if (tipo === 'estoque') return (
+              <div key={row.item_id} className="glass lift" style={{ display: 'flex', alignItems: 'center', padding: '11px 12px', borderRadius: 14, marginBottom: 8, borderLeft: '3px solid var(--warn)' }}>
+                <Thumb src={row.imagem} />
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.titulo || row.item_id}</div>
+                  <div className="num" style={{ fontSize: 9.5, color: 'var(--faint)', marginTop: 2 }}>{row.sku || 's/ SKU'}</div>
+                </div>
+                <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 10, marginRight: 12 }}>
+                  <div style={{ textAlign: 'center' }}><div style={{ fontSize: 8, color: 'var(--faint)', textTransform: 'uppercase', fontWeight: 800 }}>ML</div><b className="num" style={{ fontSize: 14, color: 'var(--warn)' }}>{row.estoque_ml}</b></div>
+                  <ArrowRight size={13} style={{ color: 'var(--faint)' }} />
+                  <div style={{ textAlign: 'center' }}><div style={{ fontSize: 8, color: 'var(--faint)', textTransform: 'uppercase', fontWeight: 800 }}>Bling</div><b className="num" style={{ fontSize: 14, color: 'var(--ok)' }}>{row.estoque_bling}</b></div>
+                </div>
+                <button onClick={() => aplicarEstoque(row)} disabled={busy} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 700, padding: '7px 12px', borderRadius: 9, cursor: busy ? 'default' : 'pointer', color: '#fff', border: 'none', background: 'linear-gradient(135deg,var(--accent),#a00061)', opacity: busy ? .6 : 1 }}>{busy ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}Igualar</button>
+              </div>
+            )
+            return (
+              <div key={row.produto_id} className="glass lift" style={{ display: 'flex', alignItems: 'center', padding: '11px 12px', borderRadius: 14, marginBottom: 8, borderLeft: '3px solid #cfaef5' }}>
+                <Thumb src={row.imagem} />
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.nome}</div>
+                  <div className="num" style={{ fontSize: 9.5, color: 'var(--faint)', marginTop: 2 }}>{row.sku || 's/ SKU'} · {row.saldo} un · preço regra <b style={{ color: 'var(--ok)' }}>{brl(row.preco_regra)}</b></div>
+                </div>
+                <button onClick={onGoCriar} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 700, padding: '7px 12px', borderRadius: 9, cursor: 'pointer', color: '#fff', border: 'none', background: 'linear-gradient(135deg,var(--accent),#a00061)' }}><Plus size={11} />Publicar</button>
+              </div>
+            )
+          })}
+      </>}
+    </>
+  )
+}
+function Thumb({ src }) {
+  return <div style={{ width: 44, height: 44, borderRadius: 10, flex: 'none', background: 'rgba(255,255,255,.05)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--glass-border)', marginRight: 12, overflow: 'hidden' }}>{src ? <img src={src} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Package size={18} style={{ color: 'var(--faint)' }} />}</div>
+}
+
+/* ---- Webhooks em tempo real ---- */
+const TOPICO_LABEL = { items: 'Anúncios', items_prices: 'Preços', stock_locations: 'Estoque', catalog_item_competition: 'Buybox/Catálogo', price_suggestion: 'Sugestão de preço', moderations_reports: 'Moderações', shipments: 'Envios', orders_v2: 'Pedidos', messages: 'Mensagens' }
+const TOPICO_COR = { items: 'var(--ok)', items_prices: BLUE, stock_locations: 'var(--warn)', catalog_item_competition: ML, price_suggestion: '#cfaef5', moderations_reports: 'var(--danger)', shipments: '#5B8DEF', orders_v2: 'var(--ok)', messages: '#cfaef5' }
+function tempoRel(iso) {
+  if (!iso) return '—'
+  const s = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000))
+  if (s < 60) return `há ${s}s`
+  if (s < 3600) return `há ${Math.floor(s / 60)}min`
+  if (s < 86400) return `há ${Math.floor(s / 3600)}h`
+  return `há ${Math.floor(s / 86400)}d`
+}
+function WebhooksPanel({ notify }) {
+  const [dados, setDados] = useState(null)
+  const [carregando, setCarregando] = useState(true)
+  const [tick, setTick] = useState(0)
+  const [recuperando, setRecuperando] = useState(false)
+  useEffect(() => {
+    setCarregando(true)
+    api.mlWebhooksPainel(24).then(setDados).catch(() => setDados(null)).finally(() => setCarregando(false))
+  }, [tick])
+  useEffect(() => { const id = setInterval(() => setTick((t) => t + 1), 15000); return () => clearInterval(id) }, [])
+
+  const recuperar = async () => {
+    setRecuperando(true)
+    try { const r = await api.mlWebhooksRecuperar(); notify(`Reconciliação: ${r.reprocessadas} de ${r.encontradas} notificações reprocessadas.`, r.reprocessadas ? 'ok' : 'warn'); setTick((t) => t + 1) }
+    catch (e) { notify(e?.data?.detail || 'Não foi possível consultar as perdidas.', 'danger') }
+    finally { setRecuperando(false) }
+  }
+
+  if (carregando && !dados) return <div className="grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12 }}>{Array.from({ length: 4 }).map((_, i) => <Skel key={i} h={78} r={15} />)}</div>
+  const d = dados || {}
+  const topicos = (d.por_topico || []).filter((t) => t.n > 0)
+  const maxN = Math.max(1, ...topicos.map((t) => t.n))
+  const taxa = d.taxa_processamento
+
+  return (
+    <>
+      {/* status */}
+      <div className="row" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, border: `1px solid ${d.conectado ? 'rgba(47,217,141,.28)' : 'var(--glass-border)'}`, background: d.conectado ? 'linear-gradient(90deg,rgba(47,217,141,.07),rgba(47,217,141,.02))' : 'rgba(255,255,255,.03)', borderRadius: 15, padding: '11px 15px', marginBottom: 12 }}>
+        <span style={{ width: 9, height: 9, borderRadius: '50%', background: d.conectado ? 'var(--ok)' : 'var(--faint)', boxShadow: d.conectado ? '0 0 8px rgba(47,217,141,.7)' : 'none' }} />
+        <b style={{ fontSize: 12, color: d.conectado ? 'var(--ok)' : 'var(--dim)' }}>{d.conectado ? 'Webhooks recebendo eventos' : 'Aguardando o primeiro evento'}</b>
+        <span className="num" style={{ fontSize: 10.5, color: 'var(--faint)' }}>último {tempoRel(d.ultimo_recebido)}</span>
+        <div style={{ flex: 1 }} />
+        <button onClick={() => setTick((t) => t + 1)} className="glass" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 700, padding: '6px 11px', borderRadius: 9, cursor: 'pointer', color: 'var(--dim)' }}><RefreshCw size={12} />Atualizar</button>
+        <button onClick={recuperar} disabled={recuperando} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 700, padding: '6px 11px', borderRadius: 9, cursor: recuperando ? 'default' : 'pointer', color: '#e9dbfb', border: '1px solid rgba(160,107,232,.45)', background: 'linear-gradient(135deg,rgba(160,107,232,.24),rgba(214,0,127,.18))', opacity: recuperando ? .6 : 1 }}>{recuperando ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}Recuperar perdidos</button>
+      </div>
+
+      {/* KPIs */}
+      <div className="grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 12 }}>
+        <Kpi icon={Activity} label="Eventos · 24h" value={nfmt(d.total_janela)} cor="var(--ok)" sub={`${nfmt(d.total_geral)} no total`} />
+        <Kpi icon={Check} label="Processados" value={nfmt(d.processados)} cor={BLUE} sub="cache atualizado" />
+        <Kpi icon={Gauge} label="Taxa" value={taxa == null ? '—' : `${taxa}%`} cor={taxa != null && taxa >= 90 ? 'var(--ok)' : 'var(--warn)'} sub="processados/recebidos" />
+        <Kpi icon={Layers} label="Tópicos assinados" value={nfmt((d.topicos_assinados || []).length)} cor="#cfaef5" sub="items, preços, estoque…" />
+      </div>
+
+      <div className="grid" style={{ display: 'grid', gridTemplateColumns: '1fr 210px', gap: 12, marginBottom: 12 }}>
+        {/* por tópico */}
+        <div className="glass" style={{ padding: 16, borderRadius: 16 }}>
+          <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '.5px', fontWeight: 800, color: 'var(--faint)', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}><BarChart3 size={13} />Webhooks por tópico · 24h</div>
+          {topicos.length === 0 ? <div className="note" style={{ fontSize: 10.5, color: 'var(--faint)', display: 'flex', gap: 6 }}><Info size={11} style={{ flex: 'none', marginTop: 1 }} />Nenhum evento nas últimas 24h. Assim que o ML enviar (preço, estoque, moderação), aparece aqui em tempo real.</div>
+            : topicos.map((t) => (
+              <div key={t.topic} className="row" style={{ display: 'flex', alignItems: 'center', marginBottom: 7 }}>
+                <span style={{ width: 118, fontSize: 10.5, color: TOPICO_COR[t.topic] || 'var(--dim)', flex: 'none' }}>{TOPICO_LABEL[t.topic] || t.topic}</span>
+                <div style={{ flex: 1, height: 17, borderRadius: 7, background: 'rgba(255,255,255,.05)', overflow: 'hidden' }}>
+                  <div style={{ width: `${Math.max(6, (t.n / maxN) * 100)}%`, height: '100%', borderRadius: 7, background: `linear-gradient(90deg, ${(TOPICO_COR[t.topic] || BLUE)}66, ${TOPICO_COR[t.topic] || BLUE})`, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 6, fontSize: 9, fontWeight: 800, color: '#0d0d0d' }}>{nfmt(t.n)}</div>
+                </div>
+                <span className="num" style={{ width: 60, textAlign: 'right', fontSize: 8.5, color: 'var(--faint)' }}>{tempoRel(t.ultimo)}</span>
+              </div>
+            ))}
+        </div>
+        {/* ring taxa */}
+        <div className="glass" style={{ padding: 16, borderRadius: 16, textAlign: 'center' }}>
+          <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '.5px', fontWeight: 800, color: 'var(--faint)', marginBottom: 8 }}>Processamento</div>
+          <Ring size={92} val={taxa || 0} cor={taxa != null && taxa >= 90 ? 'var(--ok)' : 'var(--warn)'} w={9}><span style={{ fontSize: 17, color: taxa != null && taxa >= 90 ? 'var(--ok)' : 'var(--warn)' }}>{taxa == null ? '—' : `${taxa}%`}</span></Ring>
+          <div className="num" style={{ fontSize: 9, color: 'var(--faint)', marginTop: 6 }}>{nfmt(d.processados)} de {nfmt(d.total_janela)} eventos</div>
+        </div>
+      </div>
+
+      {/* feed recente */}
+      <div className="glass" style={{ padding: 14, borderRadius: 16 }}>
+        <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '.5px', fontWeight: 800, color: 'var(--faint)', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}><Activity size={13} />Eventos recentes</div>
+        {(d.recentes || []).length === 0 ? <div className="note" style={{ fontSize: 10.5, color: 'var(--faint)' }}>Sem eventos ainda.</div>
+          : (d.recentes || []).map((e, i) => (
+            <div key={i} className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0', borderBottom: i < d.recentes.length - 1 ? '1px solid rgba(255,255,255,.04)' : 'none' }}>
+              <span style={{ width: 7, height: 7, borderRadius: '50%', flex: 'none', background: TOPICO_COR[e.topic] || 'var(--faint)' }} />
+              <b style={{ fontSize: 10.5, color: TOPICO_COR[e.topic] || 'var(--dim)', width: 110, flex: 'none' }}>{TOPICO_LABEL[e.topic] || e.topic}</b>
+              <span className="num" style={{ fontSize: 10, color: 'var(--dim)', flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.resource_id || '—'}{e.resultado ? ` · ${e.resultado}` : ''}</span>
+              {e.processado ? <Badge c="var(--ok)" bg="rgba(47,217,141,.12)"><Check size={9} />ok</Badge> : <Badge c="var(--warn)" bg="rgba(224,162,60,.12)">pendente</Badge>}
+              <span className="num" style={{ fontSize: 9, color: 'var(--faint)', width: 54, textAlign: 'right' }}>{tempoRel(e.recebido_em)}</span>
+            </div>
+          ))}
+      </div>
     </>
   )
 }
