@@ -162,6 +162,16 @@ export const api = {
   mlProdutoIaTitulo: (body) => req('/api/mercadolivre/produtos/ia/titulo', { method: 'POST', body }),
   mlProdutoIaDescricao: (body) => req('/api/mercadolivre/produtos/ia/descricao', { method: 'POST', body }),
   mlSetDescricao: (itemId, texto) => req('/api/mercadolivre/descricao', { method: 'POST', body: { item_id: itemId, texto } }),
+  mlPublicarBling: (q = {}) => {
+    const p = new URLSearchParams()
+    Object.entries(q).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '' && v !== false) p.set(k, v) })
+    return req(`/api/mercadolivre/publicar/bling?${p.toString()}`)
+  },
+  mlCategoriaPrever: (titulo) => req(`/api/mercadolivre/categorias/prever?titulo=${encodeURIComponent(titulo)}`),
+  mlCategoriaAtributos: (catId) => req(`/api/mercadolivre/categorias/${catId}/atributos`),
+  mlCategoriaAtributosIa: (catId, body) => req(`/api/mercadolivre/categorias/${catId}/atributos/ia`, { method: 'POST', body }),
+  mlProdutoValidar: (body) => req('/api/mercadolivre/produtos/validar', { method: 'POST', body }),
+  mlProdutoPublicar: (body) => req('/api/mercadolivre/produtos/publicar', { method: 'POST', body }),
   mlPromocoesItem: (item_id) => req(`/api/mercadolivre/promocoes/${item_id}`),
   mlPromoAplicar: (b) => req('/api/mercadolivre/promocoes/aplicar', { method: 'POST', body: b }),
   mlPromoRemover: (item_id) => req('/api/mercadolivre/promocoes/remover', { method: 'POST', body: { item_id } }),

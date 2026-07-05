@@ -919,23 +919,311 @@ function Sincronizacao({ k, notify }) {
   )
 }
 
-/* ================= CRIAR / PUBLICAR ================= */
+/* ================= CRIAR / PUBLICAR (assistente real) ================= */
+const PASSOS = ['Origem (Bling)', 'Título & categoria', 'Atributos & fotos', 'Atacado PxQ', 'Fiscal', 'Publicar']
 function CriarPublicar({ notify }) {
+  const [passo, setPasso] = useState(0)
+  // origem
+  const [buscaBling, setBuscaBling] = useState('')
+  const [buscaLive, setBuscaLive] = useState('')
+  const [soNovos, setSoNovos] = useState(true)
+  const [bling, setBling] = useState(null)
+  const [carregandoBling, setCarregandoBling] = useState(false)
+  const [prod, setProd] = useState(null)   // produto Bling escolhido
+  // ficha
+  const [titulo, setTitulo] = useState('')
+  const [preco, setPreco] = useState(0)
+  const [estoque, setEstoque] = useState(0)
+  const [tipo, setTipo] = useState('gold_special')
+  const [cats, setCats] = useState(null)
+  const [catSel, setCatSel] = useState(null)
+  const [prevendo, setPrevendo] = useState(false)
+  const [iaTit, setIaTit] = useState(null)
+  const [iaTitLoad, setIaTitLoad] = useState(false)
+  // atributos & fotos
+  const [attrs, setAttrs] = useState(null)
+  const [attrVals, setAttrVals] = useState({})
+  const [attrsLoad, setAttrsLoad] = useState(false)
+  const [iaAttrLoad, setIaAttrLoad] = useState(false)
+  const [fotos, setFotos] = useState([])
+  const [novaFoto, setNovaFoto] = useState('')
+  // publicar
+  const [validacao, setValidacao] = useState(null)
+  const [validando, setValidando] = useState(false)
+  const [permitir, setPermitir] = useState(false)
+  const [publicando, setPublicando] = useState(false)
+  const [publicado, setPublicado] = useState(null)
+
+  useEffect(() => { const t = setTimeout(() => setBuscaLive(buscaBling), 350); return () => clearTimeout(t) }, [buscaBling])
+  useEffect(() => {
+    if (passo !== 0) return
+    setCarregandoBling(true)
+    api.mlPublicarBling({ busca: buscaLive, somente_novos: soNovos, page: 1, page_size: 40 })
+      .then(setBling).catch(() => setBling(null)).finally(() => setCarregandoBling(false))
+  }, [buscaLive, soNovos, passo])
+
+  const escolher = (p) => {
+    setProd(p); setTitulo(p.nome || ''); setPreco(p.preco_regra || p.preco_bling || 0)
+    setEstoque(p.saldo || 0); setFotos(p.imagem ? [p.imagem] : [])
+    setCats(null); setCatSel(null); setAttrs(null); setAttrVals({}); setValidacao(null); setPublicado(null)
+    setPasso(1)
+  }
+  const prever = async () => {
+    if (!titulo.trim()) { notify('Escreva o título primeiro.', 'warn'); return }
+    setPrevendo(true)
+    try { const r = await api.mlCategoriaPrever(titulo); setCats(r.sugestoes || []); if ((r.sugestoes || [])[0]) setCatSel(r.sugestoes[0]) }
+    catch (e) { notify(e?.data?.detail || 'Não consegui prever a categoria.', 'danger') }
+    finally { setPrevendo(false) }
+  }
+  const gerarTitulo = async () => {
+    setIaTitLoad(true); setIaTit(null)
+    try { const r = await api.mlProdutoIaTitulo({ titulo }); setIaTit(r.sugestoes || []) }
+    catch (e) { notify(e?.data?.detail || 'IA indisponível.', 'danger') } finally { setIaTitLoad(false) }
+  }
+  const carregarAttrs = async (cat) => {
+    setAttrsLoad(true); setAttrs(null)
+    try { const r = await api.mlCategoriaAtributos(cat.category_id); setAttrs(r.atributos || []) }
+    catch (e) { notify(e?.data?.detail || 'Não consegui carregar os atributos.', 'danger') }
+    finally { setAttrsLoad(false) }
+  }
+  const preencherIaAttrs = async () => {
+    if (!catSel) return
+    setIaAttrLoad(true)
+    try {
+      const r = await api.mlCategoriaAtributosIa(catSel.category_id, { titulo })
+      const nv = { ...attrVals }
+      ;(r.sugestoes || []).forEach((s) => { nv[s.id] = { value_name: s.value_name, value_id: s.value_id } })
+      setAttrVals(nv)
+      notify(`IA preencheu ${(r.sugestoes || []).length} atributo(s) — revise antes de publicar.`, 'ok')
+    } catch (e) { notify(e?.data?.detail || 'IA indisponível.', 'danger') } finally { setIaAttrLoad(false) }
+  }
+  const irAtributos = async () => { if (!catSel) { notify('Escolha a categoria.', 'warn'); return } if (!attrs) await carregarAttrs(catSel); setPasso(2) }
+
+  const montarAtributos = () => Object.entries(attrVals).filter(([, v]) => v && (v.value_name || v.value_id)).map(([id, v]) => ({ id, value_name: v.value_name, value_id: v.value_id }))
+  const corpoBase = () => ({ titulo, category_id: catSel?.category_id, preco: Number(preco), quantidade: Number(estoque), listing_type_id: tipo, condicao: 'new', pictures: fotos, atributos: montarAtributos(), sku: prod?.sku, descricao: undefined })
+  const validar = async () => {
+    setValidando(true); setValidacao(null)
+    try { const r = await api.mlProdutoValidar(corpoBase()); setValidacao(r) }
+    catch (e) { notify(e?.data?.detail || 'Falha ao validar.', 'danger') } finally { setValidando(false) }
+  }
+  const publicar = async () => {
+    setPublicando(true)
+    try {
+      const r = await api.mlProdutoPublicar({ ...corpoBase(), permitir_abaixo_piso: permitir })
+      setPublicado(r); notify('Anúncio publicado no Mercado Livre!', 'ok')
+    } catch (e) {
+      const d = e?.data?.detail || e?.detail
+      if (d && typeof d === 'object' && d.erro === 'abaixo_do_piso') notify(`${d.mensagem} Mínimo seguro R$ ${Number(d.minimo_seguro).toFixed(2)}.`, 'danger')
+      else notify(typeof d === 'string' ? d : 'Não foi possível publicar. Rode a validação para ver o motivo.', 'danger')
+    } finally { setPublicando(false) }
+  }
+
+  const podeAvancar = passo === 0 ? !!prod : passo === 1 ? (!!titulo.trim() && !!catSel) : true
+
   return (
     <>
-      <div className="grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 12, marginBottom: 12 }}>
-        <Kpi icon={Wand2} label="Rascunhos" value="—" cor="var(--warn)" sub="via Bling" />
-        <Kpi icon={Rocket} label="Publicados 7d" value="—" cor="var(--ok)" sub="assistidos por IA" />
-        <Kpi icon={Clock} label="Tempo médio" value="—" cor="#cfaef5" sub="com IA" />
-        <Kpi icon={Sparkles} label="Score médio IA" value="—" cor="var(--ok)" sub="título+atributos" />
-        <Kpi icon={AlertTriangle} label="Rejeitados ML" value="—" cor="var(--danger)" sub="validação prévia" />
+      {/* KPIs do funil */}
+      <div className="grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 12 }}>
+        <Kpi icon={Boxes} label="Novos do Bling" value={bling ? nfmt(bling.novos) : '—'} cor="var(--ok)" sub="sem anúncio no ML" />
+        <Kpi icon={Package} label="No catálogo Bling" value={bling ? nfmt(bling.total) : '—'} cor={BLUE} sub="base para publicar" />
+        <Kpi icon={Sparkles} label="Passo atual" value={`${passo + 1}/6`} cor="#cfaef5" sub={PASSOS[passo]} />
+        <Kpi icon={Rocket} label="Publicado agora" value={publicado ? '1' : '—'} cor="var(--ok)" sub={publicado ? 'nesta sessão' : 'aguardando'} />
       </div>
-      <div style={{ background: 'linear-gradient(135deg,rgba(160,107,232,.15),rgba(214,0,127,.10))', border: '1px solid rgba(160,107,232,.32)', borderRadius: 13, padding: '11px 14px', marginBottom: 12, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
-        <Sparkles size={15} style={{ color: '#cfaef5' }} />
-        <span style={{ flex: 1, minWidth: 200, fontSize: 11, color: 'var(--dim)' }}>O fluxo de criação assistida (origem Bling → título/categoria por IA → atributos → atacado PxQ → fiscal → publicar com validação) entra com os endpoints de criação/publicação do ML — próximo da fila.</span>
-        <MiniBtn icon={Plus} onClick={() => notify('Publicação entra com POST /items + validação.', 'warn')}>Novo produto</MiniBtn>
+
+      {/* stepper */}
+      <div className="glass" style={{ padding: 14, borderRadius: 16, marginBottom: 12 }}>
+        <div className="row" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+          {PASSOS.map((nm, i) => (
+            <div key={i} onClick={() => i < passo && setPasso(i)} className="row" style={{ display: 'flex', alignItems: 'center', flex: i < PASSOS.length - 1 ? 1 : 'none', minWidth: 0, cursor: i < passo ? 'pointer' : 'default' }}>
+              <div style={{ width: 24, height: 24, borderRadius: '50%', flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 800, color: i <= passo ? '#fff' : 'var(--faint)', background: i < passo ? 'var(--ok)' : i === passo ? 'var(--accent)' : 'rgba(255,255,255,.08)' }}>{i < passo ? <Check size={13} /> : i + 1}</div>
+              <span style={{ fontSize: 9.5, fontWeight: i === passo ? 800 : 600, color: i === passo ? 'var(--accent)' : i < passo ? 'var(--ok)' : 'var(--faint)', margin: '0 8px', whiteSpace: 'nowrap' }}>{nm}</span>
+              {i < PASSOS.length - 1 && <div style={{ flex: 1, height: 2, background: i < passo ? 'var(--ok)' : 'rgba(255,255,255,.1)', minWidth: 12 }} />}
+            </div>
+          ))}
+        </div>
       </div>
-      <Empty icon={Rocket} texto="O assistente de publicação em 6 passos com prévia ao vivo já está desenhado — será ligado aos endpoints de criação do ML mantendo a regra de piso e o PxQ editável." />
+
+      <div className="grid" style={{ display: 'grid', gridTemplateColumns: passo >= 1 ? '1fr 340px' : '1fr', alignItems: 'start', gap: 16 }}>
+        <div>
+          {/* PASSO 0 — ORIGEM BLING */}
+          {passo === 0 && (
+            <div className="glass" style={{ padding: 14, borderRadius: 16 }}>
+              <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+                <div style={{ position: 'relative', flex: 1, minWidth: 200 }}>
+                  <Search size={15} style={{ position: 'absolute', left: 11, top: 11, color: 'var(--faint)' }} />
+                  <input value={buscaBling} onChange={(e) => setBuscaBling(e.target.value)} placeholder="Buscar produto do Bling por nome ou SKU…" style={{ width: '100%', background: 'rgba(0,0,0,.18)', border: '1px solid var(--glass-border)', borderRadius: 12, color: 'var(--text)', fontSize: 12.5, padding: '10px 12px 10px 34px' }} />
+                </div>
+                <Chip on={soNovos} onClick={() => setSoNovos((v) => !v)}>só novos (sem anúncio)</Chip>
+              </div>
+              {carregandoBling ? Array.from({ length: 5 }).map((_, i) => <div key={i} className="glass" style={{ padding: 10, borderRadius: 12, marginBottom: 8 }}><Skel h={40} /></div>)
+                : !bling || bling.itens.length === 0 ? <Empty texto="Nenhum produto do Bling encontrado. Ajuste a busca ou sincronize o catálogo do Bling." />
+                  : bling.itens.map((p) => (
+                    <div key={p.produto_id} onClick={() => escolher(p)} className="glass lift" style={{ display: 'flex', alignItems: 'center', padding: '10px 12px', borderRadius: 14, marginBottom: 8, cursor: 'pointer' }}>
+                      <div style={{ width: 44, height: 44, borderRadius: 10, flex: 'none', background: 'rgba(255,255,255,.05)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--glass-border)', marginRight: 12, overflow: 'hidden' }}>{p.imagem ? <img src={p.imagem} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Package size={18} style={{ color: 'var(--faint)' }} />}</div>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.nome}</div>
+                        <div className="num" style={{ fontSize: 9.5, color: 'var(--faint)', marginTop: 2 }}>{p.sku || 's/ SKU'} · {p.saldo} un · preço regra <b style={{ color: 'var(--ok)' }}>{brl(p.preco_regra)}</b></div>
+                      </div>
+                      {p.ja_no_ml ? <Badge c="var(--warn)" bg="rgba(224,162,60,.14)">já no ML</Badge> : <Badge c="var(--ok)" bg="rgba(47,217,141,.14)">novo</Badge>}
+                      <ChevronRight size={16} style={{ color: 'var(--faint)', marginLeft: 8 }} />
+                    </div>
+                  ))}
+            </div>
+          )}
+
+          {/* PASSO 1 — TÍTULO & CATEGORIA */}
+          {passo === 1 && (
+            <div className="glass" style={{ padding: 14, borderRadius: 16 }}>
+              <div className="row" style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
+                <b style={{ fontSize: 11 }}>Título</b><div style={{ flex: 1 }} />
+                <span className="num" style={{ fontSize: 9, color: titulo.length > 60 ? 'var(--danger)' : 'var(--faint)' }}>{titulo.length}/60</span>
+                <span style={{ marginLeft: 8 }}><button onClick={gerarTitulo} disabled={iaTitLoad} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 700, padding: '5.5px 10px', borderRadius: 9, cursor: 'pointer', color: '#e9dbfb', border: '1px solid rgba(160,107,232,.45)', background: 'linear-gradient(135deg,rgba(160,107,232,.24),rgba(214,0,127,.18))', opacity: iaTitLoad ? .6 : 1 }}>{iaTitLoad ? <Loader2 size={11} className="animate-spin" /> : <Wand2 size={11} />}IA</button></span>
+              </div>
+              <input value={titulo} maxLength={70} onChange={(e) => setTitulo(e.target.value)} style={{ width: '100%', background: 'rgba(0,0,0,.18)', border: '1px solid var(--glass-border)', borderRadius: 10, color: 'var(--text)', fontSize: 12.5, padding: '9px 11px' }} />
+              {iaTit && <div style={{ marginTop: 8, padding: 9, borderRadius: 10, background: 'rgba(160,107,232,.1)', border: '1px solid rgba(160,107,232,.28)' }}>{iaTit.map((t, i) => <div key={i} onClick={() => { setTitulo(t); setIaTit(null) }} className="lift" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 9px', borderRadius: 8, cursor: 'pointer', marginBottom: 4, background: 'rgba(0,0,0,.18)' }}><div style={{ flex: 1, fontSize: 11.5 }}>{t}</div><span style={{ fontSize: 9, color: '#cfaef5', fontWeight: 700 }}>usar</span></div>)}</div>}
+
+              <div className="row" style={{ display: 'flex', alignItems: 'center', marginTop: 14, marginBottom: 8 }}>
+                <b style={{ fontSize: 11 }}>Categoria</b><div style={{ flex: 1 }} />
+                <button onClick={prever} disabled={prevendo} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 700, padding: '5.5px 10px', borderRadius: 9, cursor: 'pointer', color: 'var(--accent)', border: '1px solid rgba(214,0,127,.4)', background: 'rgba(214,0,127,.12)', opacity: prevendo ? .6 : 1 }}>{prevendo ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}Prever pela IA do ML</button>
+              </div>
+              {prevendo ? <div className="row" style={{ display: 'flex', gap: 8, color: 'var(--faint)', fontSize: 11, padding: '8px 0' }}><Loader2 size={14} className="animate-spin" />consultando o preditor de categorias…</div>
+                : cats == null ? <div className="note" style={{ fontSize: 10, color: 'var(--faint)', display: 'flex', gap: 6 }}><Info size={11} style={{ flex: 'none', marginTop: 1 }} />Clique em "Prever" — o Mercado Livre sugere as categorias mais prováveis pelo título.</div>
+                  : cats.length === 0 ? <div className="note" style={{ fontSize: 10, color: 'var(--warn)' }}>Nenhuma categoria sugerida. Refine o título.</div>
+                    : cats.map((c) => (
+                      <div key={c.category_id} onClick={() => setCatSel(c)} className="lift" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 11px', borderRadius: 10, cursor: 'pointer', marginBottom: 5, background: catSel?.category_id === c.category_id ? 'rgba(214,0,127,.12)' : 'rgba(0,0,0,.18)', border: `1px solid ${catSel?.category_id === c.category_id ? 'rgba(214,0,127,.4)' : 'var(--glass-border)'}` }}>
+                        <div style={{ width: 16, height: 16, borderRadius: '50%', border: `1px solid ${catSel?.category_id === c.category_id ? 'var(--accent)' : 'var(--faint)'}`, background: catSel?.category_id === c.category_id ? 'var(--accent)' : 'transparent', flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{catSel?.category_id === c.category_id && <Check size={10} color="#fff" />}</div>
+                        <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 12, fontWeight: 600 }}>{c.category_name || c.category_id}</div><div className="num" style={{ fontSize: 8.5, color: 'var(--faint)' }}>{c.category_id}{c.domain_name ? ` · ${c.domain_name}` : ''}</div></div>
+                      </div>
+                    ))}
+
+              <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14 }}>
+                <div style={{ flex: 1 }}><b style={{ fontSize: 10.5 }}>Tipo de anúncio</b>
+                  <div style={{ display: 'inline-flex', width: '100%', background: 'rgba(0,0,0,.3)', border: '1px solid var(--glass-border)', borderRadius: 10, padding: 3, marginTop: 6 }}>
+                    {[['gold_special', 'Clássico'], ['gold_pro', 'Premium']].map(([v, lb]) => <b key={v} onClick={() => setTipo(v)} style={{ flex: 1, textAlign: 'center', fontSize: 10.5, fontWeight: 800, padding: '6px 0', borderRadius: 8, cursor: 'pointer', color: tipo === v ? '#0d0d0d' : 'var(--dim)', background: tipo === v ? ML : 'transparent' }}>{lb}</b>)}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* PASSO 2 — ATRIBUTOS & FOTOS */}
+          {passo === 2 && (
+            <div className="glass" style={{ padding: 14, borderRadius: 16 }}>
+              <div className="row" style={{ display: 'flex', alignItems: 'center', marginBottom: 10 }}>
+                <b style={{ fontSize: 11 }}>Ficha técnica</b>
+                {attrs && <Badge c="var(--warn)" bg="rgba(224,162,60,.14)" style={{ marginLeft: 8 }}>{attrs.filter((a) => a.obrigatorio).length} obrigatórios</Badge>}
+                <div style={{ flex: 1 }} />
+                <button onClick={preencherIaAttrs} disabled={iaAttrLoad || !attrs} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 700, padding: '5.5px 10px', borderRadius: 9, cursor: 'pointer', color: '#e9dbfb', border: '1px solid rgba(160,107,232,.45)', background: 'linear-gradient(135deg,rgba(160,107,232,.24),rgba(214,0,127,.18))', opacity: (iaAttrLoad || !attrs) ? .6 : 1 }}>{iaAttrLoad ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}Preencher com IA</button>
+              </div>
+              {attrsLoad ? <div className="row" style={{ display: 'flex', gap: 8, color: 'var(--faint)', fontSize: 11, padding: '10px 0' }}><Loader2 size={14} className="animate-spin" />carregando atributos da categoria…</div>
+                : !attrs ? <Empty texto="Volte ao passo anterior e escolha a categoria para carregar a ficha." />
+                  : attrs.slice(0, 16).map((a) => (
+                    <div key={a.id} className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7 }}>
+                      <div style={{ width: 130, flex: 'none', fontSize: 10.5, color: a.obrigatorio ? 'var(--text)' : 'var(--dim)' }}>{a.nome}{a.obrigatorio && <span style={{ color: 'var(--danger)' }}> *</span>}</div>
+                      {a.valores && a.valores.length > 0 && a.valores.length <= 30 ? (
+                        <select value={attrVals[a.id]?.value_id || ''} onChange={(e) => { const v = a.valores.find((x) => x.id === e.target.value); setAttrVals((s) => ({ ...s, [a.id]: v ? { value_id: v.id, value_name: v.nome } : undefined })) }} style={{ flex: 1, background: 'rgba(0,0,0,.18)', border: '1px solid var(--glass-border)', borderRadius: 8, color: 'var(--text)', fontSize: 11, padding: '7px 9px' }}>
+                          <option value="">—</option>
+                          {a.valores.map((v) => <option key={v.id} value={v.id}>{v.nome}</option>)}
+                        </select>
+                      ) : (
+                        <input value={attrVals[a.id]?.value_name || ''} onChange={(e) => setAttrVals((s) => ({ ...s, [a.id]: e.target.value ? { value_name: e.target.value } : undefined }))} placeholder="valor" style={{ flex: 1, background: 'rgba(0,0,0,.18)', border: '1px solid var(--glass-border)', borderRadius: 8, color: 'var(--text)', fontSize: 11, padding: '7px 9px' }} />
+                      )}
+                    </div>
+                  ))}
+
+              <div style={{ marginTop: 14 }}>
+                <b style={{ fontSize: 11 }}>Fotos</b>
+                <div className="row" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+                  {fotos.map((f, i) => (
+                    <div key={i} style={{ width: 62, height: 62, borderRadius: 10, overflow: 'hidden', position: 'relative', border: '1px solid var(--glass-border)' }}>
+                      <img src={f} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      <span onClick={() => setFotos((x) => x.filter((_, idx) => idx !== i))} style={{ position: 'absolute', top: 2, right: 2, width: 16, height: 16, borderRadius: '50%', background: 'rgba(0,0,0,.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}><X size={10} color="#fff" /></span>
+                    </div>
+                  ))}
+                </div>
+                <div className="row" style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                  <input value={novaFoto} onChange={(e) => setNovaFoto(e.target.value)} placeholder="Cole a URL de uma foto…" style={{ flex: 1, background: 'rgba(0,0,0,.18)', border: '1px solid var(--glass-border)', borderRadius: 8, color: 'var(--text)', fontSize: 11, padding: '7px 9px' }} />
+                  <MiniBtn icon={Plus} onClick={() => { if (novaFoto.trim()) { setFotos((x) => [...x, novaFoto.trim()]); setNovaFoto('') } }}>Adicionar</MiniBtn>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* PASSO 3 — ATACADO PxQ */}
+          {passo === 3 && <AtacadoPxQ p={{ preco: Number(preco), preco_bling: prod?.preco_bling }} preco={Number(preco)} ratio={prod?.preco_bling ? null : null} precoBling={prod?.preco_bling} notify={notify} />}
+
+          {/* PASSO 4 — FISCAL */}
+          {passo === 4 && <Empty icon={FileText} texto="A etapa fiscal (NCM, origem, CEST) entra com o endpoint fiscal do ML — herdando os dados do Bling. Por ora você pode publicar e completar o fiscal na aba Fiscal." />}
+
+          {/* PASSO 5 — PUBLICAR */}
+          {passo === 5 && (
+            <div className="glass" style={{ padding: 14, borderRadius: 16 }}>
+              {publicado ? (
+                <div style={{ textAlign: 'center', padding: '10px 0' }}>
+                  <div style={{ width: 54, height: 54, borderRadius: '50%', background: 'rgba(47,217,141,.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 10px' }}><Check size={26} style={{ color: 'var(--ok)' }} /></div>
+                  <b style={{ fontSize: 15, fontFamily: 'Fraunces, Georgia, serif' }}>Anúncio publicado!</b>
+                  <div className="num" style={{ fontSize: 11, color: 'var(--faint)', marginTop: 4 }}>{publicado.item_id} · {publicado.status}</div>
+                  <div className="row" style={{ display: 'flex', justifyContent: 'center', gap: 8, marginTop: 12 }}>
+                    {publicado.permalink && <a href={publicado.permalink} target="_blank" rel="noreferrer" style={{ fontSize: 11, fontWeight: 700, padding: '8px 14px', borderRadius: 10, color: '#fff', textDecoration: 'none', background: 'linear-gradient(135deg,var(--accent),#a00061)' }}>Ver no Mercado Livre ↗</a>}
+                    <MiniBtn icon={Plus} onClick={() => { setProd(null); setPublicado(null); setPasso(0) }}>Publicar outro</MiniBtn>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="row" style={{ display: 'flex', alignItems: 'center', marginBottom: 10 }}>
+                    <b style={{ fontSize: 11 }}>Validação prévia (ML)</b><div style={{ flex: 1 }} />
+                    <button onClick={validar} disabled={validando} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 700, padding: '6px 12px', borderRadius: 9, cursor: 'pointer', color: BLUE, border: '1px solid rgba(91,141,239,.4)', background: 'rgba(91,141,239,.12)', opacity: validando ? .6 : 1 }}>{validando ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}Validar</button>
+                  </div>
+                  {validacao == null ? <div className="note" style={{ fontSize: 10, color: 'var(--faint)', display: 'flex', gap: 6, marginBottom: 12 }}><Info size={11} style={{ flex: 'none', marginTop: 1 }} />Rode a validação — o ML confere título, categoria, preço, fotos e atributos obrigatórios antes de publicar.</div>
+                    : validacao.ok ? <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 11px', borderRadius: 10, background: 'rgba(47,217,141,.1)', border: '1px solid rgba(47,217,141,.3)', marginBottom: 12 }}><Check size={14} style={{ color: 'var(--ok)' }} /><span style={{ fontSize: 11, color: 'var(--ok)' }}>Tudo certo — pronto para publicar.</span></div>
+                      : <div style={{ marginBottom: 12 }}>{validacao.erros.map((e, i) => <div key={i} className="row" style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '8px 11px', borderRadius: 9, background: 'rgba(255,122,122,.08)', border: '1px solid rgba(255,122,122,.25)', marginBottom: 5 }}><AlertTriangle size={12} style={{ color: 'var(--danger)', flex: 'none', marginTop: 1 }} /><div style={{ fontSize: 10.5, color: 'var(--danger)' }}>{e.message}{e.code && <span className="num" style={{ color: 'var(--faint)', marginLeft: 5 }}>[{e.code}]</span>}</div></div>)}</div>}
+
+                  <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                    <span style={{ fontSize: 10, color: 'var(--dim)' }}>permitir preço abaixo do piso</span><Toggle on={permitir} onClick={() => setPermitir((v) => !v)} />
+                  </div>
+                  <button onClick={publicar} disabled={publicando} style={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 700, padding: '11px 0', borderRadius: 12, color: '#fff', border: 'none', cursor: publicando ? 'default' : 'pointer', background: 'linear-gradient(135deg,var(--accent),#a00061)', boxShadow: '0 8px 22px rgba(214,0,127,.35)', opacity: publicando ? .7 : 1 }}>{publicando ? <Loader2 size={15} className="animate-spin" /> : <Rocket size={15} />}{publicando ? 'Publicando…' : 'Publicar no Mercado Livre'}</button>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* navegação */}
+          {!publicado && (
+            <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12 }}>
+              {passo > 0 && <MiniBtn icon={ArrowRight} onClick={() => setPasso((s) => s - 1)}>Voltar</MiniBtn>}
+              <div style={{ flex: 1 }} />
+              {passo < 5 && <button onClick={() => { if (passo === 1) irAtributos(); else setPasso((s) => Math.min(5, s + 1)) }} disabled={!podeAvancar} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700, padding: '9px 16px', borderRadius: 11, color: '#fff', border: 'none', cursor: podeAvancar ? 'pointer' : 'default', opacity: podeAvancar ? 1 : .5, background: 'linear-gradient(135deg,var(--accent),#a00061)' }}>Avançar<ChevronRight size={14} /></button>}
+            </div>
+          )}
+        </div>
+
+        {/* PRÉVIA ao vivo (a partir do passo 1) */}
+        {passo >= 1 && (
+          <div className="glass" style={{ padding: 14, borderRadius: 16, position: 'sticky', top: 76 }}>
+            <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '.5px', fontWeight: 800, color: 'var(--faint)', marginBottom: 10 }}>Prévia do anúncio</div>
+            <div style={{ borderRadius: 12, overflow: 'hidden', border: '1px solid var(--glass-border)' }}>
+              <div style={{ height: 150, background: 'rgba(255,255,255,.04)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{fotos[0] ? <img src={fotos[0]} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <ImageOff size={28} style={{ color: 'var(--faint)' }} />}</div>
+              <div style={{ padding: 11 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.3 }}>{titulo || 'Título do anúncio'}</div>
+                <div className="num serif" style={{ fontSize: 20, fontWeight: 800, color: 'var(--ok)', marginTop: 6 }}>{brl(Number(preco))}</div>
+                <div className="row" style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
+                  <Badge c={ML} bg="rgba(242,194,0,.14)">{tipo === 'gold_pro' ? 'Premium' : 'Clássico'}</Badge>
+                  <Badge c="var(--ok)" bg="rgba(47,217,141,.12)">{estoque} un</Badge>
+                  {catSel && <Badge c="#cfaef5" bg="rgba(160,107,232,.14)">{(catSel.category_name || catSel.category_id).slice(0, 22)}</Badge>}
+                </div>
+              </div>
+            </div>
+            {/* checklist */}
+            <div style={{ marginTop: 12 }}>
+              {[['Título', !!titulo.trim() && titulo.length <= 60], ['Categoria', !!catSel], ['Preço', Number(preco) > 0], ['Estoque', Number(estoque) > 0], ['Foto', fotos.length > 0]].map(([lb, ok]) => (
+                <div key={lb} className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 10.5, padding: '3px 0', color: ok ? 'var(--text)' : 'var(--faint)' }}>
+                  {ok ? <Check size={13} style={{ color: 'var(--ok)' }} /> : <div style={{ width: 13, height: 13, borderRadius: '50%', border: '1px solid var(--faint)' }} />}{lb}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
     </>
   )
 }
