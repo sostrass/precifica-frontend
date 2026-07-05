@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import {
-  Package, Boxes, Plus, RefreshCw, Search, Command, Bell, Shield, Power, Cpu, Zap, Check,
+  Package, Boxes, Plus, RefreshCw, Search, Command, Bell, Shield, ShieldAlert, Power, Cpu, Zap, Check,
   BarChart3, Activity, Sparkles, TrendingDown, TrendingUp, Layers, Clock, AlertTriangle,
-  FileText, ChevronRight, X, Loader2, SlidersHorizontal, Wand2, Tag, Gauge, Rocket,
-  ImageOff, ExternalLink, Trophy, Grid3x3, PauseCircle, Copy, Trash2, Send, ArrowRight, Info,
+  FileText, ChevronLeft, ChevronRight, X, Loader2, SlidersHorizontal, Wand2, Tag, Gauge, Rocket,
+  ImageOff, ExternalLink, Trophy, Grid3x3, PauseCircle, PlayCircle, Copy, Trash2, Send, ArrowRight, Info,
 } from 'lucide-react'
 import { api } from './api.js'
 import { useToast } from './toast.jsx'
@@ -101,6 +101,11 @@ export default function Produtos() {
   const [carregando, setCarregando] = useState(true)
   const [cmd, setCmd] = useState(false)
   const [sino, setSino] = useState(false)
+  const [sincronizando, setSincronizando] = useState(false)
+  const [syncInfo, setSyncInfo] = useState(null)
+  const [recarga, setRecarga] = useState(0)
+  const [notifs, setNotifs] = useState(null)
+  const [sinoVisto, setSinoVisto] = useState(false)
 
   const carregarPainel = useCallback(() => {
     setCarregando(true)
@@ -110,6 +115,32 @@ export default function Produtos() {
       .finally(() => setCarregando(false))
   }, [])
   useEffect(() => { carregarPainel() }, [carregarPainel])
+
+  const carregarNotifs = useCallback(() => { api.notificacoes(30).then((l) => setNotifs(Array.isArray(l) ? l : [])).catch(() => setNotifs([])) }, [])
+  useEffect(() => { carregarNotifs() }, [carregarNotifs])
+
+  const sincronizar = useCallback(async () => {
+    if (sincronizando) return
+    setSincronizando(true); setSyncInfo({ status: 'rodando' })
+    try {
+      await api.mlSincronizar()
+      let n = 0
+      while (n < 240) {
+        await new Promise((r) => setTimeout(r, 2500))
+        let st = null
+        try { st = await api.mlSyncStatus() } catch { st = null }
+        if (st) setSyncInfo(st)
+        if (st && (st.status === 'concluido' || st.status === 'erro')) break
+        n++
+      }
+      const fim = await api.mlSyncStatus().catch(() => null)
+      if (fim?.status === 'erro') notify(`Sincronização falhou: ${fim.erro || 'erro'}`, 'danger')
+      else notify(`Catálogo sincronizado — ${nfmt(fim?.total || fim?.processados || 0)} anúncios carregados.`, 'ok')
+      carregarPainel(); setRecarga((x) => x + 1)
+    } catch (e) {
+      notify(e?.data?.detail || 'Não foi possível iniciar a sincronização. Conecte o Mercado Livre.', 'danger')
+    } finally { setSincronizando(false) }
+  }, [sincronizando, carregarPainel, notify])
 
   useEffect(() => {
     const h = (e) => {
@@ -123,7 +154,7 @@ export default function Produtos() {
   const k = painel?.kpis || {}
 
   return (
-    <div style={{ maxWidth: 1220, margin: '0 auto' }}>
+    <div style={{ maxWidth: 1600, margin: '0 auto' }}>
       {/* ===== HERO ===== */}
       <div className="row" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
         <div style={{ width: 50, height: 50, borderRadius: 14, background: 'linear-gradient(145deg,var(--accent),#6d0040)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 14, boxShadow: '0 8px 26px rgba(214,0,127,.42)' }}>
@@ -145,12 +176,13 @@ export default function Produtos() {
           <span style={{ fontSize: 9, fontWeight: 700, border: '1px solid var(--glass-border)', borderBottomWidth: 2, borderRadius: 6, padding: '1px 6px', color: 'var(--dim)' }}>⌘K</span>
         </div>
         <div className="row" style={{ display: 'flex', alignItems: 'center', margin: '5px 0' }}>
-          <div className="glass lift" onClick={() => setSino((s) => !s)} style={{ position: 'relative', padding: '8px 11px', marginRight: 6, cursor: 'pointer', borderRadius: 11 }}>
+          <div className="glass lift" onClick={() => { setSino((s) => !s); setSinoVisto(true) }} style={{ position: 'relative', padding: '8px 11px', marginRight: 6, cursor: 'pointer', borderRadius: 11 }}>
             <Bell size={14} />
-            <span style={{ position: 'absolute', top: 2, right: 4, width: 14, height: 14, borderRadius: '50%', background: 'var(--danger)', color: '#fff', fontSize: 8, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>5</span>
+            {!sinoVisto && (notifs?.length || 0) > 0 && <span style={{ position: 'absolute', top: 2, right: 4, minWidth: 14, height: 14, padding: '0 3px', borderRadius: 99, background: 'var(--danger)', color: '#fff', fontSize: 8, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{notifs.length > 9 ? '9+' : notifs.length}</span>}
+            {sino && <SinoDropdown notifs={notifs} onClose={() => setSino(false)} onLidas={async () => { await api.notificacoesMarcarLidas().catch(() => {}); setSinoVisto(true); carregarNotifs() }} onRefresh={carregarNotifs} />}
           </div>
-          <button className="glass lift" onClick={carregarPainel} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, fontWeight: 700, padding: '8px 13px', borderRadius: 11, color: 'var(--dim)', marginRight: 6, cursor: 'pointer' }}>
-            <RefreshCw size={13} />Sincronizar
+          <button className="glass lift" onClick={sincronizar} disabled={sincronizando} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, fontWeight: 700, padding: '8px 13px', borderRadius: 11, color: sincronizando ? 'var(--accent)' : 'var(--dim)', marginRight: 6, cursor: sincronizando ? 'default' : 'pointer' }}>
+            {sincronizando ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}{sincronizando ? (syncInfo?.total ? `Sincronizando ${nfmt(syncInfo.processados || 0)}/${nfmt(syncInfo.total)}` : 'Sincronizando…') : 'Sincronizar'}
           </button>
           <button style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, fontWeight: 700, padding: '8px 14px', borderRadius: 11, color: '#fff', border: 'none', cursor: 'pointer', background: 'linear-gradient(135deg,var(--accent),#a00061)', boxShadow: '0 6px 18px rgba(214,0,127,.35)' }} onClick={() => setTab('criar')}>
             <Plus size={13} />Novo produto
@@ -160,10 +192,10 @@ export default function Produtos() {
 
       {/* ticker */}
       <div className="row" style={{ display: 'flex', flexWrap: 'wrap', fontSize: 10, color: 'var(--faint)', marginBottom: 10, gap: 16 }}>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--ok)' }} />webhooks ML ativos</span>
-        <span className="num">último sync <b style={{ color: 'var(--text)' }}>há 4 min</b></span>
-        <span className="num">fila de publicação <b style={{ color: 'var(--ok)' }}>vazia</b></span>
-        <span className="num">agentes: próxima varredura <b style={{ color: '#cfaef5' }}>em 2h 14min</b></span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--ok)' }} />sincronização em tempo real via webhooks</span>
+        <span className="num"><b style={{ color: 'var(--text)' }}>{nfmt(k.total || 0)}</b> anúncios no cache</span>
+        <span className="num">último sync <b style={{ color: 'var(--text)' }}>{syncInfo?.concluido_em ? tempoRel(syncInfo.concluido_em) : (painel?.cache_vazio ? 'nunca — rode a sincronização' : '—')}</b></span>
+        <span className="num">preço sempre pela regra — <b style={{ color: 'var(--ok)' }}>nunca abaixo do piso</b></span>
       </div>
 
       {/* governança */}
@@ -192,7 +224,7 @@ export default function Produtos() {
 
       {/* ===== CONTEÚDO ===== */}
       {tab === 'visao' && <VisaoGeral k={k} carregando={carregando} />}
-      {tab === 'produtos' && <ProdutosLista notify={notify} />}
+      {tab === 'produtos' && <ProdutosLista notify={notify} recarga={recarga} onSync={sincronizar} sincronizando={sincronizando} />}
       {tab === 'criar' && <CriarPublicar notify={notify} />}
       {tab === 'atencao' && <SaudeAtencao k={k} notify={notify} />}
       {tab === 'fiscal' && <Fiscal notify={notify} />}
@@ -208,6 +240,39 @@ export default function Produtos() {
 }
 
 /* ================= VISÃO GERAL ================= */
+function SinoDropdown({ notifs, onClose, onLidas, onRefresh }) {
+  const lista = Array.isArray(notifs) ? notifs : []
+  return (
+    <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute', top: 42, right: 0, width: 340, maxHeight: 440, overflow: 'hidden', borderRadius: 14, zIndex: 60, background: 'var(--surface-2, #1d1426)', border: '1px solid var(--glass-border)', boxShadow: '0 24px 60px rgba(0,0,0,.6)', display: 'flex', flexDirection: 'column' }}>
+      <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 13px', borderBottom: '1px solid var(--glass-border)' }}>
+        <Bell size={14} style={{ color: 'var(--accent)' }} />
+        <b style={{ fontSize: 12.5 }}>Notificações</b>
+        <span className="num" style={{ fontSize: 9, color: 'var(--faint)' }}>{lista.length}</span>
+        <div style={{ flex: 1 }} />
+        <button onClick={onRefresh} title="Atualizar" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--faint)', display: 'flex' }}><RefreshCw size={13} /></button>
+        <button onClick={onLidas} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--dim)', fontSize: 10, fontWeight: 700 }}>marcar lidas</button>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--faint)', display: 'flex' }}><X size={14} /></button>
+      </div>
+      <div style={{ overflowY: 'auto', padding: '4px 0' }}>
+        {lista.length === 0 ? (
+          <div style={{ padding: '26px 16px', textAlign: 'center', color: 'var(--faint)', fontSize: 11 }}>Sem notificações por enquanto.</div>
+        ) : lista.map((n, i) => {
+          const cor = n.ok === false ? 'var(--danger)' : n.ok === true ? 'var(--ok)' : 'var(--accent)'
+          return (
+            <div key={n.id || i} className="row lift" style={{ display: 'flex', gap: 9, padding: '9px 13px', alignItems: 'flex-start' }}>
+              <span style={{ width: 7, height: 7, borderRadius: '50%', background: cor, flex: 'none', marginTop: 5 }} />
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{n.titulo || n.categoria || 'Evento'}</div>
+                {n.texto && <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 1, lineHeight: 1.4 }}>{n.texto}</div>}
+                <div className="num" style={{ fontSize: 8.5, color: 'var(--faint)', marginTop: 2 }}>{n.categoria ? `${n.categoria} · ` : ''}{tempoRel(n.quando)}</div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
 function VisaoGeral({ k, carregando }) {
   const [ags, setAgs] = useState(null)
   useEffect(() => { api.mlAgentesSugestoes(60).then(setAgs).catch(() => setAgs(null)) }, [])
@@ -295,24 +360,76 @@ function VisaoGeral({ k, carregando }) {
         <div className="note" style={{ fontSize: 10, color: 'var(--faint)', display: 'flex', alignItems: 'flex-start', gap: 6, marginTop: 12 }}><Info size={11} style={{ marginTop: 1, flex: 'none' }} />Os anéis mostram a fatia de cada agente no risco total. Tudo cai priorizado na aba <b style={{ color: 'var(--text)', margin: '0 3px' }}>Saúde &amp; Atenção</b>.</div>
       </div>
 
-      {/* reputação (placeholder honesto — endpoint próprio a integrar) */}
-      <div className="glass" style={{ padding: 16, borderRadius: 16, marginTop: 12 }}>
-        <div className="row" style={{ display: 'flex', alignItems: 'center', marginBottom: 13 }}>
-          <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '.5px', fontWeight: 800, color: 'var(--faint)', display: 'flex', alignItems: 'center', gap: 6 }}><Trophy size={13} />Reputação da conta no Mercado Livre</div>
-          <div style={{ flex: 1 }} />
-          <Badge c="var(--ok)" bg="rgba(47,217,141,.14)" style={{ border: '1px solid rgba(47,217,141,.4)' }}><Trophy size={10} />MERCADO LÍDER</Badge>
-        </div>
-        <div className="row" style={{ display: 'flex', marginBottom: 5 }}>
-          <div style={{ flex: 1, height: 12, borderRadius: 99, overflow: 'hidden', display: 'flex' }}>
-            <div style={{ flex: 1, background: '#c0392b' }} /><div style={{ flex: 1, background: '#e67e22' }} /><div style={{ flex: 1, background: '#f1c40f' }} /><div style={{ flex: 1, background: '#a8cf45' }} /><div style={{ flex: 1, background: 'var(--ok)' }} />
-          </div>
-        </div>
-        <div className="note" style={{ fontSize: 10, color: 'var(--faint)', display: 'flex', alignItems: 'flex-start', gap: 6, marginTop: 10 }}><Info size={11} style={{ marginTop: 1, flex: 'none' }} />Reputação verde dá mais exposição e desconto de tarifa. As métricas (reclamações, envios, cancelamentos) entram quando ligarmos o endpoint de reputação.</div>
-      </div>
+      <Reputacao />
     </>
   )
 }
 
+
+/* ---- Reputação do vendedor (Mercado Líder) ---- */
+const COR_TERMO = { vermelho: { pos: 8, c: '#c0392b', t: 'Vermelho' }, laranja: { pos: 30, c: '#e67e22', t: 'Laranja' }, amarelo: { pos: 50, c: '#f1c40f', t: 'Amarelo' }, 'verde-claro': { pos: 70, c: '#a8cf45', t: 'Verde-claro' }, verde: { pos: 90, c: '#2FD98D', t: 'Verde' } }
+function MetricaRep({ label, valor, meta, ok, sufixo = '%', metaTexto }) {
+  const cor = ok == null ? 'var(--text)' : ok ? 'var(--ok)' : 'var(--danger)'
+  return (
+    <div className="glass" style={{ padding: '9px 11px', borderRadius: 11 }}>
+      <div style={{ fontSize: 8, textTransform: 'uppercase', letterSpacing: '.4px', fontWeight: 800, color: 'var(--faint)' }}>{label}</div>
+      <b className="num" style={{ fontSize: 16, color: cor }}>{valor == null ? '—' : `${valor}${sufixo}`}</b>
+      <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 8, color: 'var(--faint)' }}>{ok != null && (ok ? <Check size={9} style={{ color: 'var(--ok)' }} /> : <AlertTriangle size={9} style={{ color: 'var(--danger)' }} />)}{metaTexto || (meta != null ? `meta < ${meta}${sufixo}` : '')}</div>
+    </div>
+  )
+}
+function Reputacao() {
+  const [r, setR] = useState(null)
+  const [carregando, setCarregando] = useState(true)
+  useEffect(() => { api.mlReputacaoPainel().then(setR).catch(() => setR({ conectado: false })).finally(() => setCarregando(false)) }, [])
+
+  if (carregando) return <div className="glass" style={{ padding: 16, borderRadius: 16, marginTop: 12 }}><Skel h={70} /></div>
+  if (!r?.conectado) return (
+    <div className="glass" style={{ padding: 16, borderRadius: 16, marginTop: 12 }}>
+      <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '.5px', fontWeight: 800, color: 'var(--faint)', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}><Trophy size={13} />Reputação da conta no Mercado Livre</div>
+      <div className="note" style={{ fontSize: 10.5, color: 'var(--faint)', display: 'flex', gap: 6 }}><Info size={11} style={{ flex: 'none', marginTop: 1 }} />Conecte o Mercado Livre para ver a reputação (nível, reclamações, envios no prazo e cancelamentos).</div>
+    </div>
+  )
+  if (r.sem_dados) return (
+    <div className="glass" style={{ padding: 16, borderRadius: 16, marginTop: 12 }}>
+      <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '.5px', fontWeight: 800, color: 'var(--faint)', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}><Trophy size={13} />Reputação da conta</div>
+      <div className="note" style={{ fontSize: 10.5, color: 'var(--faint)', display: 'flex', gap: 6 }}><Info size={11} style={{ flex: 'none', marginTop: 1 }} />Ainda sem histórico de reputação suficiente nesta conta.</div>
+    </div>
+  )
+  const termo = COR_TERMO[r.cor] || { pos: 50, c: 'var(--faint)', t: r.cor || '—' }
+  const m = r.metricas || {}
+  const atraso = m.envio_atrasado || {}
+  const noPrazo = atraso.rate == null ? null : Math.round((100 - atraso.rate) * 10) / 10
+  const t = r.transacoes || {}
+  const badgeCor = r.cor === 'verde' ? 'var(--ok)' : r.cor === 'amarelo' || r.cor === 'verde-claro' ? 'var(--warn)' : 'var(--danger)'
+  return (
+    <div className="glass" style={{ padding: 16, borderRadius: 16, marginTop: 12 }}>
+      <div className="row" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 13 }}>
+        <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '.5px', fontWeight: 800, color: 'var(--faint)', display: 'flex', alignItems: 'center', gap: 6 }}><Trophy size={13} />Reputação da conta no Mercado Livre</div>
+        <div style={{ flex: 1 }} />
+        {r.eh_lider && r.tier_label ? <Badge c={badgeCor} bg={`${badgeCor}22`} style={{ border: `1px solid ${badgeCor}66` }}><Trophy size={10} />{r.tier_label.toUpperCase()}</Badge>
+          : <Badge c={badgeCor} bg={`${badgeCor}18`}>{`NÍVEL ${r.nivel_num || '—'} · ${termo.t.toUpperCase()}`}</Badge>}
+      </div>
+      {/* termômetro com marcador */}
+      <div style={{ position: 'relative', marginBottom: 6 }}>
+        <div style={{ height: 12, borderRadius: 99, overflow: 'hidden', display: 'flex' }}>
+          <div style={{ flex: 1, background: '#c0392b' }} /><div style={{ flex: 1, background: '#e67e22' }} /><div style={{ flex: 1, background: '#f1c40f' }} /><div style={{ flex: 1, background: '#a8cf45' }} /><div style={{ flex: 1, background: '#2FD98D' }} />
+        </div>
+        <span style={{ position: 'absolute', top: -3, left: `calc(${termo.pos}% - 9px)`, width: 18, height: 18, borderRadius: '50%', background: '#fff', border: `3px solid ${termo.c}`, boxShadow: '0 2px 6px rgba(0,0,0,.4)' }} />
+      </div>
+      <div className="row" style={{ display: 'flex', fontSize: 7.5, color: 'var(--faint)', marginBottom: 13, textTransform: 'uppercase', fontWeight: 700 }}>
+        <span style={{ flex: 1 }}>vermelho</span><span style={{ flex: 1, textAlign: 'center' }}>laranja</span><span style={{ flex: 1, textAlign: 'center' }}>amarelo</span><span style={{ flex: 1, textAlign: 'center' }}>verde-claro</span><span style={{ flex: 1, textAlign: 'right', color: r.cor === 'verde' ? 'var(--ok)' : 'var(--faint)' }}>verde{r.cor === 'verde' ? ' ✓' : ''}</span>
+      </div>
+      <div className="grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 9 }}>
+        <MetricaRep label="Reclamações" valor={m.reclamacoes?.rate} meta={m.reclamacoes?.meta} ok={m.reclamacoes?.ok} />
+        <MetricaRep label="Envios no prazo" valor={noPrazo} ok={atraso.ok} metaTexto={atraso.ok ? 'ótimo' : atraso.rate != null ? `${atraso.rate}% atrasados` : ''} />
+        <MetricaRep label="Cancelados" valor={m.cancelamentos?.rate} meta={m.cancelamentos?.meta} ok={m.cancelamentos?.ok} />
+        <MetricaRep label={`Vendas · ${m.vendas?.periodo || '60d'}`} valor={m.vendas?.completadas != null ? nfmt(m.vendas.completadas) : null} ok={null} sufixo="" metaTexto={t.total != null ? `${nfmt(t.total)} no histórico` : ''} />
+      </div>
+      <div className="note" style={{ fontSize: 9.5, color: 'var(--faint)', display: 'flex', alignItems: 'flex-start', gap: 6, marginTop: 11 }}><Info size={11} style={{ marginTop: 1, flex: 'none' }} />Reputação verde dá mais exposição e desconto de tarifa. O agente de Saúde protege as métricas que sustentam o nível.{t.positivas != null ? ` Avaliações positivas: ${Math.round(t.positivas * 100)}%.` : ''}</div>
+    </div>
+  )
+}
 /* ================= PRODUTOS (lista + cockpit) ================= */
 const VISOES = [
   { id: 'todos', label: 'Todos os produtos', q: {} },
@@ -322,7 +439,7 @@ const VISOES = [
   { id: 'div', label: '≠ Bling', q: { divergente: true } },
   { id: 'saude', label: 'Saúde < 80%', q: { saude_lt: 80 } },
 ]
-function ProdutosLista({ notify }) {
+function ProdutosLista({ notify, recarga = 0, onSync, sincronizando }) {
   const [dados, setDados] = useState(null)
   const [carregando, setCarregando] = useState(true)
   const [busca, setBusca] = useState('')
@@ -345,7 +462,7 @@ function ProdutosLista({ notify }) {
   useEffect(() => {
     setCarregando(true)
     api.mlProdutosPainel(query).then(setDados).catch(() => setDados(null)).finally(() => setCarregando(false))
-  }, [query, refreshTick])
+  }, [query, refreshTick, recarga])
   useEffect(() => { const t = setTimeout(() => { setBuscaLive(busca); setPage(1) }, 350); return () => clearTimeout(t) }, [busca])
 
   const k = dados?.kpis || {}
@@ -421,7 +538,14 @@ function ProdutosLista({ notify }) {
               <div style={{ flex: 1 }}><Skel h={11} w="58%" style={{ marginBottom: 6 }} /><Skel h={8} w="34%" style={{ marginBottom: 6 }} /><Skel h={14} w="52%" /></div>
             </div>
           )) : itens.length === 0 ? (
-            <Empty texto={dados?.cache_vazio ? 'Cache do Mercado Livre ainda vazio. Rode a sincronização para carregar seus anúncios.' : 'Nenhum produto com esses filtros. Ajuste os filtros acima.'} />
+            dados?.cache_vazio ? (
+              <div className="glass" style={{ padding: 30, textAlign: 'center', borderRadius: 16, border: '1px solid transparent', background: 'linear-gradient(180deg,var(--surface),#150b12) padding-box, linear-gradient(155deg,rgba(214,0,127,.4),rgba(255,255,255,.08)) border-box' }}>
+                <div style={{ width: 54, height: 54, borderRadius: '50%', background: 'rgba(214,0,127,.14)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px' }}><Boxes size={26} style={{ color: 'var(--accent)' }} /></div>
+                <div style={{ fontSize: 15, fontWeight: 700, fontFamily: 'Fraunces, Georgia, serif', marginBottom: 4 }}>Seu catálogo do Mercado Livre ainda não foi carregado</div>
+                <div style={{ fontSize: 11.5, color: 'var(--dim)', maxWidth: 460, margin: '0 auto 16px', lineHeight: 1.6 }}>A sincronização varre todos os seus anúncios e traz preço, estoque, saúde e status para cá. É o que alimenta a Visão geral, a Saúde e o Fiscal.</div>
+                {onSync && <button onClick={onSync} disabled={sincronizando} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12.5, fontWeight: 700, padding: '10px 20px', borderRadius: 12, cursor: sincronizando ? 'default' : 'pointer', color: '#fff', border: 'none', background: 'linear-gradient(135deg,var(--accent),#a00061)', boxShadow: '0 6px 18px rgba(214,0,127,.35)', opacity: sincronizando ? .7 : 1 }}>{sincronizando ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}{sincronizando ? 'Sincronizando…' : 'Sincronizar catálogo agora'}</button>}
+              </div>
+            ) : <Empty texto="Nenhum produto com esses filtros. Ajuste os filtros acima." />
           ) : itens.map((p) => (
             <ProdutoRow key={p.item_id} p={p} sel={sel.has(p.item_id)} onSel={() => toggleSel(p.item_id)} onOpen={() => setAberto(p)} ativo={aberto?.item_id === p.item_id} />
           ))}
@@ -609,6 +733,12 @@ function Cockpit({ p, onClose, notify, onSaved }) {
 
         {subtab === 'editar' && (
           <>
+            {det.fotos && det.fotos.length > 0 && (
+              <div className="glass" style={{ padding: 10, marginBottom: 12, borderRadius: 12 }}>
+                <div style={{ fontSize: 8.5, textTransform: 'uppercase', letterSpacing: '.4px', fontWeight: 800, color: 'var(--faint)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 5 }}><Grid3x3 size={11} />Imagens do anúncio<span style={{ color: 'var(--faint)', fontWeight: 700 }}>· {det.fotos.length}</span></div>
+                <Carrossel fotos={det.fotos} altura={200} />
+              </div>
+            )}
             {/* título editável + copiloto */}
             <div className="glass" style={{ padding: 11, marginBottom: 12, borderRadius: 12 }}>
               <div className="row" style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
@@ -838,12 +968,20 @@ function CmdItem({ icon: Icon, cor, bg, label, sub, onClick }) {
 function SaudeAtencao({ k, notify }) {
   const [ags, setAgs] = useState(null)
   const [carregando, setCarregando] = useState(true)
+  const [vista, setVista] = useState('agentes')
   useEffect(() => { api.mlAgentesSugestoes(80).then(setAgs).catch(() => setAgs(null)).finally(() => setCarregando(false)) }, [])
   const sugs = ags?.sugestoes || []
   const impacto = ags?.resumo_impacto || {}
   const corAgente = { parado: 'var(--danger)', margem: 'var(--warn)', giro: BLUE, curva: PURPLE, estoque: 'var(--ok)', buybox: ML }
   return (
     <>
+      <div className="row" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginBottom: 12 }}>
+        {[['agentes', 'Agentes', Cpu], ['saude', 'Moderação & Saúde', ShieldAlert]].map(([v, lb, Ic]) => (
+          <span key={v} onClick={() => setVista(v)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, fontWeight: 700, padding: '8px 14px', borderRadius: 11, cursor: 'pointer', color: vista === v ? '#fff' : 'var(--dim)', background: vista === v ? 'linear-gradient(135deg,var(--accent),rgba(214,0,127,.55))' : 'rgba(255,255,255,.04)', border: `1px solid ${vista === v ? 'transparent' : 'var(--glass-border)'}` }}><Ic size={14} />{lb}</span>
+        ))}
+      </div>
+      {vista === 'saude' && <ModeracaoSaude notify={notify} />}
+      {vista === 'agentes' && <>
       <div className="grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 12, marginBottom: 12 }}>
         <Kpi icon={AlertTriangle} label="Sinalizados" value={nfmt(sugs.length || ((k.melhorar || 0) + (k.abaixo_regra || 0)))} cor="var(--danger)" sub="pelos 6 agentes" />
         <Kpi icon={Sparkles} label="IA corrige" value={nfmt(k.melhorar)} cor="#cfaef5" sub="atributos/fotos" />
@@ -869,10 +1007,155 @@ function SaudeAtencao({ k, notify }) {
               </div>
             )
           })}
+      </>}
     </>
   )
 }
 
+
+/* ---- Moderação & Saúde dos anúncios ---- */
+const STATUS_LABEL = { active: 'Ativo', paused: 'Pausado', under_review: 'Em revisão', closed: 'Encerrado' }
+function corSaude(v) { return v == null ? 'var(--faint)' : v >= 80 ? 'var(--ok)' : v >= 50 ? 'var(--warn)' : 'var(--danger)' }
+function ModeracaoSaude({ notify }) {
+  const [situacao, setSituacao] = useState('todos')
+  const [dados, setDados] = useState(null)
+  const [carregando, setCarregando] = useState(true)
+  const [tick, setTick] = useState(0)
+  const [aberto, setAberto] = useState(null)
+  const [reativando, setReativando] = useState(() => new Set())
+  useEffect(() => {
+    setCarregando(true)
+    api.mlSaudePainel({ situacao, page: 1, page_size: 60 }).then(setDados).catch(() => setDados(null)).finally(() => setCarregando(false))
+  }, [situacao, tick])
+
+  const k = dados?.kpis || {}
+  const itens = dados?.itens || []
+  const dist = k.distribuicao || {}
+  const totDist = Math.max(1, (dist.critico || 0) + (dist.medio || 0) + (dist.bom || 0) + (dist.sem || 0))
+  const reativar = async (row) => {
+    setReativando((s) => { const n = new Set(s); n.add(row.item_id); return n })
+    try { await api.mlProdutoEditar(row.item_id, { status: 'active' }); notify(`Tentativa de reativação enviada para ${row.sku || row.item_id}.`, 'ok'); setTick((t) => t + 1); setAberto(null) }
+    catch (e) { const d = e?.data?.detail; notify(typeof d === 'object' ? (d.mensagem || 'Não foi possível reativar.') : (d || 'Não foi possível reativar.'), 'danger') }
+    finally { setReativando((s) => { const n = new Set(s); n.delete(row.item_id); return n }) }
+  }
+  const TABS = [['todos', 'Tudo', k.atencao, 'var(--dim)'], ['revisao', 'Em revisão / moderação', k.revisao, 'var(--danger)'], ['pausado', 'Pausados', k.pausados, 'var(--warn)'], ['saude_baixa', 'Saúde baixa', k.saude_baixa, ML]]
+
+  return (
+    <>
+      {/* KPIs */}
+      <div className="grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 12 }}>
+        <Kpi icon={ShieldAlert} label="Em revisão / moderação" value={nfmt(k.revisao)} cor="var(--danger)" sub="ação do ML" />
+        <Kpi icon={PauseCircle} label="Pausados" value={nfmt(k.pausados)} cor="var(--warn)" sub="fora do ar" />
+        <Kpi icon={TrendingDown} label="Saúde baixa" value={nfmt(k.saude_baixa)} cor={ML} sub="ativos < 80%" />
+        <Kpi icon={Activity} label="Saúde média" value={k.saude_media == null ? '—' : `${k.saude_media}%`} cor={corSaude(k.saude_media)} sub={`${nfmt(k.total)} anúncios`} />
+      </div>
+
+      {/* distribuição de saúde + anel */}
+      <div className="grid" style={{ display: 'grid', gridTemplateColumns: '1fr 210px', gap: 12, marginBottom: 12 }}>
+        <div className="glass" style={{ padding: 16, borderRadius: 16 }}>
+          <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '.5px', fontWeight: 800, color: 'var(--faint)', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}><BarChart3 size={13} />Distribuição de saúde dos anúncios</div>
+          {[['Crítico (<50%)', dist.critico || 0, 'var(--danger)'], ['Médio (50-79%)', dist.medio || 0, 'var(--warn)'], ['Bom (80%+)', dist.bom || 0, 'var(--ok)'], ['Sem medição', dist.sem || 0, 'var(--faint)']].map(([lb, v, cor]) => (
+            <div key={lb} className="row" style={{ display: 'flex', alignItems: 'center', marginBottom: 7 }}>
+              <span style={{ width: 130, fontSize: 10.5, color: cor, flex: 'none' }}>{lb}</span>
+              <div style={{ flex: 1, height: 16, borderRadius: 7, background: 'rgba(255,255,255,.05)', overflow: 'hidden' }}>
+                <div style={{ width: `${Math.max(v ? 5 : 0, (v / totDist) * 100)}%`, height: '100%', borderRadius: 7, background: `linear-gradient(90deg, ${cor}66, ${cor})` }} />
+              </div>
+              <span className="num" style={{ width: 42, textAlign: 'right', fontSize: 10.5, color: 'var(--dim)' }}>{nfmt(v)}</span>
+            </div>
+          ))}
+        </div>
+        <div className="glass" style={{ padding: 16, borderRadius: 16, textAlign: 'center' }}>
+          <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '.5px', fontWeight: 800, color: 'var(--faint)', marginBottom: 8 }}>Saúde média</div>
+          <Ring size={96} val={k.saude_media || 0} cor={corSaude(k.saude_media)} w={10}><span style={{ fontSize: 18, color: corSaude(k.saude_media) }}>{k.saude_media == null ? '—' : `${k.saude_media}%`}</span></Ring>
+          <div className="num" style={{ fontSize: 9, color: 'var(--faint)', marginTop: 6 }}>{nfmt(k.atencao)} pedem atenção</div>
+        </div>
+      </div>
+
+      {/* segmento */}
+      <div className="row" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginBottom: 12 }}>
+        {TABS.map(([v, lb, n, cor]) => (
+          <span key={v} onClick={() => setSituacao(v)} style={{ fontSize: 11, fontWeight: 700, padding: '7px 13px', borderRadius: 99, cursor: 'pointer', color: situacao === v ? '#fff' : 'var(--dim)', background: situacao === v ? `linear-gradient(135deg,${cor === 'var(--dim)' ? 'var(--accent)' : cor},${cor === 'var(--dim)' ? 'rgba(214,0,127,.6)' : cor + 'aa'})` : 'rgba(255,255,255,.04)', border: `1px solid ${situacao === v ? 'transparent' : 'var(--glass-border)'}`, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            {lb}{n != null && <span style={{ fontSize: 9, fontWeight: 800, background: 'rgba(255,255,255,.18)', borderRadius: 99, padding: '1px 6px' }}>{nfmt(n)}</span>}
+          </span>
+        ))}
+      </div>
+
+      {/* lista */}
+      {carregando ? Array.from({ length: 5 }).map((_, i) => <div key={i} className="glass" style={{ padding: 12, borderRadius: 14, marginBottom: 8 }}><Skel h={40} /></div>)
+        : itens.length === 0 ? <Empty icon={Shield} texto="Nada pedindo atenção nesta situação. Catálogo saudável." />
+          : itens.map((row) => {
+            const exp = aberto === row.item_id
+            const busy = reativando.has(row.item_id)
+            const cor = row.grave ? 'var(--danger)' : row.estado === 'pausado' ? 'var(--warn)' : corSaude(row.saude)
+            return (
+              <div key={row.item_id} className="glass" style={{ borderRadius: 14, marginBottom: 8, borderLeft: `3px solid ${cor}`, overflow: 'hidden' }}>
+                <div className="row lift" style={{ display: 'flex', alignItems: 'center', padding: '11px 12px', cursor: 'pointer' }} onClick={() => setAberto(exp ? null : row.item_id)}>
+                  <Thumb src={row.imagem} />
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.titulo || row.item_id}</div>
+                    <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3, flexWrap: 'wrap' }}>
+                      <span className="num" style={{ fontSize: 9.5, color: 'var(--faint)' }}>{row.sku || 's/ SKU'}</span>
+                      {row.motivos && row.motivos.length > 0 ? row.motivos.slice(0, 2).map((mt, i) => <Badge key={i} c={row.grave ? 'var(--danger)' : 'var(--warn)'} bg={row.grave ? 'rgba(255,122,122,.14)' : 'rgba(224,162,60,.14)'}>{mt}</Badge>)
+                        : <Badge c="var(--dim)">{STATUS_LABEL[row.status] || row.status}</Badge>}
+                    </div>
+                  </div>
+                  {row.saude != null && <div style={{ textAlign: 'right', marginRight: 12 }}><div style={{ fontSize: 7.5, color: 'var(--faint)', textTransform: 'uppercase', fontWeight: 800 }}>Saúde</div><b className="num" style={{ fontSize: 13, color: corSaude(row.saude) }}>{row.saude}%</b></div>}
+                  <ChevronRight size={16} style={{ color: 'var(--faint)', transform: exp ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} />
+                </div>
+                {exp && <SaudeDrill row={row} busy={busy} onReativar={() => reativar(row)} />}
+              </div>
+            )
+          })}
+    </>
+  )
+}
+
+function SaudeDrill({ row, busy, onReativar }) {
+  const [d, setD] = useState(null)
+  const [carregando, setCarregando] = useState(true)
+  useEffect(() => { api.mlSaudeItem(row.item_id).then(setD).catch(() => setD(null)).finally(() => setCarregando(false)) }, [row.item_id])
+  const ICON = { ok: Check, alerta: AlertTriangle, ruim: X }
+  const CORS = { ok: 'var(--ok)', alerta: 'var(--warn)', ruim: 'var(--danger)' }
+  return (
+    <div style={{ borderTop: '1px solid var(--glass-border)', background: 'rgba(0,0,0,.14)', padding: 13 }}>
+      {carregando ? <Skel h={60} /> : !d ? <div className="num" style={{ fontSize: 10, color: 'var(--faint)' }}>Não foi possível carregar o diagnóstico.</div> : (
+        <>
+          <div className="row" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 11 }}>
+            <Badge c={d.grave ? 'var(--danger)' : 'var(--dim)'} bg={d.grave ? 'rgba(255,122,122,.14)' : 'rgba(255,255,255,.06)'}>{STATUS_LABEL[d.status] || d.status}</Badge>
+            {(d.motivos || []).map((mt, i) => <Badge key={i} c="var(--warn)" bg="rgba(224,162,60,.14)"><ShieldAlert size={10} />{mt}</Badge>)}
+            <div style={{ flex: 1 }} />
+            <span style={{ fontSize: 9.5, color: 'var(--faint)' }}>diagnóstico de qualidade</span>
+            <b className="num" style={{ fontSize: 15, color: corSaude(d.score) }}>{d.score}<span style={{ fontSize: 9, color: 'var(--faint)' }}>/100</span></b>
+          </div>
+          <div className="grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 8, marginBottom: 12 }}>
+            {(d.componentes || []).map((c) => {
+              const Ic = ICON[c.status] || Info
+              return (
+                <div key={c.chave} className="glass" style={{ padding: '9px 11px', borderRadius: 11, display: 'flex', alignItems: 'center', gap: 9 }}>
+                  <Ic size={16} style={{ color: CORS[c.status] || 'var(--dim)', flex: 'none' }} />
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 10.5, fontWeight: 600 }}>{c.label} <span className="num" style={{ fontSize: 8.5, color: 'var(--faint)' }}>{c.valor}/{c.max}</span></div>
+                    <div style={{ fontSize: 9, color: 'var(--faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.detalhe}</div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {d.reativavel ? (
+              <button onClick={onReativar} disabled={busy} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, fontWeight: 700, padding: '8px 14px', borderRadius: 10, cursor: busy ? 'default' : 'pointer', color: '#fff', border: 'none', background: 'linear-gradient(135deg,var(--ok),#1fa877)', opacity: busy ? .6 : 1 }}>{busy ? <Loader2 size={12} className="animate-spin" /> : <PlayCircle size={12} />}Tentar reativar</button>
+            ) : d.grave ? (
+              <span style={{ fontSize: 10, color: 'var(--danger)', display: 'flex', alignItems: 'center', gap: 6 }}><ShieldAlert size={12} />Bloqueado pelo Mercado Livre — resolva o motivo acima antes de reativar.</span>
+            ) : (
+              <span style={{ fontSize: 10, color: 'var(--faint)', display: 'flex', alignItems: 'center', gap: 6 }}><Info size={12} />Corrija os itens em alerta para elevar a saúde e a exposição.</span>
+            )}
+            {d.permalink && <a href={d.permalink} target="_blank" rel="noreferrer" style={{ fontSize: 10.5, color: BLUE, display: 'inline-flex', alignItems: 'center', gap: 4, marginLeft: 'auto' }}><ExternalLink size={12} />ver anúncio</a>}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
 /* ================= FISCAL (prontidão + cadastro real) ================= */
 const ORIGENS = [['reseller', 'Revenda (nacional)'], ['manufacturer', 'Fabricação própria'], ['imported', 'Importado']]
 function Fiscal({ notify }) {
@@ -1190,6 +1473,36 @@ function Sincronizacao({ k, notify, onGoCriar }) {
     </>
   )
 }
+function Carrossel({ fotos, altura = 160 }) {
+  const imgs = (fotos || []).filter(Boolean)
+  const [i, setI] = useState(0)
+  useEffect(() => { setI(0) }, [imgs.length])
+  if (imgs.length === 0) return <div style={{ height: altura, background: 'rgba(255,255,255,.04)', borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><ImageOff size={28} style={{ color: 'var(--faint)' }} /></div>
+  const idx = Math.min(i, imgs.length - 1)
+  const prev = (e) => { e && e.stopPropagation && e.stopPropagation(); setI((v) => (v - 1 + imgs.length) % imgs.length) }
+  const next = (e) => { e && e.stopPropagation && e.stopPropagation(); setI((v) => (v + 1) % imgs.length) }
+  return (
+    <div>
+      <div style={{ position: 'relative', height: altura, borderRadius: 12, overflow: 'hidden', background: 'rgba(0,0,0,.22)' }}>
+        <img src={imgs[idx]} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+        {imgs.length > 1 && (<>
+          <button onClick={prev} style={{ position: 'absolute', left: 6, top: '50%', transform: 'translateY(-50%)', width: 28, height: 28, borderRadius: '50%', border: 'none', cursor: 'pointer', background: 'rgba(0,0,0,.55)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><ChevronLeft size={16} /></button>
+          <button onClick={next} style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', width: 28, height: 28, borderRadius: '50%', border: 'none', cursor: 'pointer', background: 'rgba(0,0,0,.55)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><ChevronRight size={16} /></button>
+          <span className="num" style={{ position: 'absolute', bottom: 6, right: 8, fontSize: 9, fontWeight: 800, padding: '2px 7px', borderRadius: 99, background: 'rgba(0,0,0,.6)', color: '#fff' }}>{idx + 1}/{imgs.length}</span>
+        </>)}
+      </div>
+      {imgs.length > 1 && (
+        <div style={{ display: 'flex', gap: 5, marginTop: 6, overflowX: 'auto', paddingBottom: 2 }}>
+          {imgs.map((f, kk) => (
+            <div key={kk} onClick={(e) => { e.stopPropagation(); setI(kk) }} style={{ width: 38, height: 38, borderRadius: 7, flex: 'none', cursor: 'pointer', overflow: 'hidden', border: `2px solid ${kk === idx ? 'var(--accent)' : 'transparent'}`, opacity: kk === idx ? 1 : 0.55 }}>
+              <img src={f} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
 function Thumb({ src }) {
   return <div style={{ width: 44, height: 44, borderRadius: 10, flex: 'none', background: 'rgba(255,255,255,.05)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--glass-border)', marginRight: 12, overflow: 'hidden' }}>{src ? <img src={src} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Package size={18} style={{ color: 'var(--faint)' }} />}</div>
 }
@@ -1293,6 +1606,7 @@ function WebhooksPanel({ notify }) {
 /* ================= CRIAR / PUBLICAR (assistente real) ================= */
 const PASSOS = ['Origem (Bling)', 'Título & categoria', 'Atributos & fotos', 'Atacado PxQ', 'Fiscal', 'Publicar']
 function CriarPublicar({ notify }) {
+  const [modo, setModo] = useState('novo')
   const [passo, setPasso] = useState(0)
   // origem
   const [buscaBling, setBuscaBling] = useState('')
@@ -1316,6 +1630,7 @@ function CriarPublicar({ notify }) {
   const [attrVals, setAttrVals] = useState({})
   const [attrsLoad, setAttrsLoad] = useState(false)
   const [iaAttrLoad, setIaAttrLoad] = useState(false)
+  const [iaFilled, setIaFilled] = useState(() => new Set())
   const [fotos, setFotos] = useState([])
   const [novaFoto, setNovaFoto] = useState('')
   // publicar
@@ -1335,7 +1650,7 @@ function CriarPublicar({ notify }) {
 
   const escolher = (p) => {
     setProd(p); setTitulo(p.nome || ''); setPreco(p.preco_regra || p.preco_bling || 0)
-    setEstoque(p.saldo || 0); setFotos(p.imagem ? [p.imagem] : [])
+    setEstoque(p.saldo || 0); setFotos((p.imagens && p.imagens.length) ? p.imagens : (p.imagem ? [p.imagem] : []))
     setCats(null); setCatSel(null); setAttrs(null); setAttrVals({}); setValidacao(null); setPublicado(null)
     setPasso(1)
   }
@@ -1365,7 +1680,8 @@ function CriarPublicar({ notify }) {
       const nv = { ...attrVals }
       ;(r.sugestoes || []).forEach((s) => { nv[s.id] = { value_name: s.value_name, value_id: s.value_id } })
       setAttrVals(nv)
-      notify(`IA preencheu ${(r.sugestoes || []).length} atributo(s) — revise antes de publicar.`, 'ok')
+      setIaFilled(new Set((r.sugestoes || []).map((s) => s.id)))
+      notify(`IA preencheu ${(r.sugestoes || []).length} atributo(s) — revise os marcados em roxo antes de publicar.`, 'ok')
     } catch (e) { notify(e?.data?.detail || 'IA indisponível.', 'danger') } finally { setIaAttrLoad(false) }
   }
   const irAtributos = async () => { if (!catSel) { notify('Escolha a categoria.', 'warn'); return } if (!attrs) await carregarAttrs(catSel); setPasso(2) }
@@ -1391,14 +1707,43 @@ function CriarPublicar({ notify }) {
 
   const podeAvancar = passo === 0 ? !!prod : passo === 1 ? (!!titulo.trim() && !!catSel) : true
 
+  const obrigAttrs = (attrs || []).filter((a) => a.obrigatorio)
+  const obrigOk = obrigAttrs.filter((a) => { const v = attrVals[a.id]; return v && (v.value_name || v.value_id) }).length
+  const precoOkRegra = Number(preco) > 0 && (!prod?.preco_regra || Number(preco) >= prod.preco_regra - 0.01)
+  const checklist = [
+    ['Título (até 60)', !!titulo.trim() && titulo.length <= 60],
+    ['Categoria folha', !!catSel],
+    ['Preço na régua da regra', precoOkRegra],
+    ['Estoque disponível', Number(estoque) > 0],
+    ['Fotos (2+)', fotos.length >= 2],
+    ['Atributos obrigatórios', obrigAttrs.length > 0 ? obrigOk >= obrigAttrs.length : (attrs != null)],
+  ]
+  const checkOk = checklist.filter(([, ok]) => ok).length
+  const scoreDraft = Math.round(
+    (titulo.trim() ? Math.min(titulo.length / 55, 1) * (titulo.length <= 60 ? 25 : 15) : 0) +
+    (catSel ? 20 : 0) +
+    (Number(preco) > 0 ? (precoOkRegra ? 15 : 8) : 0) +
+    (Number(estoque) > 0 ? 10 : 0) +
+    (Math.min(fotos.length / 6, 1) * 20) +
+    (obrigAttrs.length > 0 ? (obrigOk / obrigAttrs.length) * 10 : (attrs != null ? 10 : 0)),
+  )
+  const scoreCor = scoreDraft >= 80 ? 'var(--ok)' : scoreDraft >= 50 ? 'var(--warn)' : 'var(--danger)'
+
   return (
     <>
+      <div className="row" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginBottom: 14 }}>
+        {[['novo', 'Publicar novo', Plus], ['editar', 'Editar anúncio existente', SlidersHorizontal]].map(([v, lb, Ic]) => (
+          <span key={v} onClick={() => setModo(v)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700, padding: '9px 16px', borderRadius: 11, cursor: 'pointer', color: modo === v ? '#fff' : 'var(--dim)', background: modo === v ? 'linear-gradient(135deg,var(--accent),rgba(214,0,127,.55))' : 'rgba(255,255,255,.04)', border: `1px solid ${modo === v ? 'transparent' : 'var(--glass-border)'}` }}><Ic size={14} />{lb}</span>
+        ))}
+      </div>
+      {modo === 'editar' ? <EditarExistente notify={notify} /> : <>
       {/* KPIs do funil */}
       <div className="grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 12 }}>
         <Kpi icon={Boxes} label="Novos do Bling" value={bling ? nfmt(bling.novos) : '—'} cor="var(--ok)" sub="sem anúncio no ML" />
         <Kpi icon={Package} label="No catálogo Bling" value={bling ? nfmt(bling.total) : '—'} cor={BLUE} sub="base para publicar" />
         <Kpi icon={Sparkles} label="Passo atual" value={`${passo + 1}/6`} cor="#cfaef5" sub={PASSOS[passo]} />
-        <Kpi icon={Rocket} label="Publicado agora" value={publicado ? '1' : '—'} cor="var(--ok)" sub={publicado ? 'nesta sessão' : 'aguardando'} />
+        {prod ? <Kpi icon={Sparkles} label="Score do rascunho" value={`${scoreDraft}`} cor={scoreCor} sub={`${checkOk}/${checklist.length} no checklist`} />
+          : <Kpi icon={Rocket} label="Publicado agora" value={publicado ? '1' : '—'} cor="var(--ok)" sub={publicado ? 'nesta sessão' : 'aguardando'} />}
       </div>
 
       {/* stepper */}
@@ -1435,6 +1780,7 @@ function CriarPublicar({ notify }) {
                         <div style={{ fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.nome}</div>
                         <div className="num" style={{ fontSize: 9.5, color: 'var(--faint)', marginTop: 2 }}>{p.sku || 's/ SKU'} · {p.saldo} un · preço regra <b style={{ color: 'var(--ok)' }}>{brl(p.preco_regra)}</b></div>
                       </div>
+                      {p.imagens && p.imagens.length > 0 && <Badge c="var(--dim)" bg="rgba(255,255,255,.06)" style={{ marginRight: 6 }}><Grid3x3 size={9} />{p.imagens.length}</Badge>}
                       {p.ja_no_ml ? <Badge c="var(--warn)" bg="rgba(224,162,60,.14)">já no ML</Badge> : <Badge c="var(--ok)" bg="rgba(47,217,141,.14)">novo</Badge>}
                       <ChevronRight size={16} style={{ color: 'var(--faint)', marginLeft: 8 }} />
                     </div>
@@ -1486,21 +1832,35 @@ function CriarPublicar({ notify }) {
                 <div style={{ flex: 1 }} />
                 <button onClick={preencherIaAttrs} disabled={iaAttrLoad || !attrs} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 700, padding: '5.5px 10px', borderRadius: 9, cursor: 'pointer', color: '#e9dbfb', border: '1px solid rgba(160,107,232,.45)', background: 'linear-gradient(135deg,rgba(160,107,232,.24),rgba(214,0,127,.18))', opacity: (iaAttrLoad || !attrs) ? .6 : 1 }}>{iaAttrLoad ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}Preencher com IA</button>
               </div>
-              {attrsLoad ? <div className="row" style={{ display: 'flex', gap: 8, color: 'var(--faint)', fontSize: 11, padding: '10px 0' }}><Loader2 size={14} className="animate-spin" />carregando atributos da categoria…</div>
+              {attrs && (
+                <div className="note" style={{ fontSize: 9.5, color: 'var(--faint)', display: 'flex', alignItems: 'flex-start', gap: 6, marginBottom: 10 }}><Info size={11} style={{ flex: 'none', marginTop: 1 }} />{attrs.filter((a) => a.obrigatorio).length} obrigatórios · {attrs.filter((a) => !a.obrigatorio).length} recomendados da categoria.{iaFilled.size > 0 ? ` A IA sugeriu ${iaFilled.size} — confira os marcados em roxo.` : ' Use "Preencher com IA" para adiantar.'}</div>
+              )}
+              {attrsLoad ? Array.from({ length: 6 }).map((_, i) => <div key={i} className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7 }}><Skel h={30} w={132} r={8} /><Skel h={30} r={8} /></div>)
                 : !attrs ? <Empty texto="Volte ao passo anterior e escolha a categoria para carregar a ficha." />
-                  : attrs.slice(0, 16).map((a) => (
-                    <div key={a.id} className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7 }}>
-                      <div style={{ width: 130, flex: 'none', fontSize: 10.5, color: a.obrigatorio ? 'var(--text)' : 'var(--dim)' }}>{a.nome}{a.obrigatorio && <span style={{ color: 'var(--danger)' }}> *</span>}</div>
+                  : attrs.slice(0, 16).map((a) => {
+                    const ia = iaFilled.has(a.id)
+                    const preenchido = attrVals[a.id] && (attrVals[a.id].value_name || attrVals[a.id].value_id)
+                    const brd = ia ? 'rgba(160,107,232,.5)' : (preenchido ? 'rgba(47,217,141,.35)' : 'var(--glass-border)')
+                    return (
+                    <div key={a.id} className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7, paddingLeft: 8, borderLeft: `2px solid ${ia ? 'var(--accent2)' : 'transparent'}` }}>
+                      <div style={{ width: 132, flex: 'none' }}>
+                        <div style={{ fontSize: 10.5, color: a.obrigatorio ? 'var(--text)' : 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.nome}</div>
+                        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 1 }}>
+                          {a.obrigatorio ? <span style={{ fontSize: 7.5, fontWeight: 800, color: 'var(--danger)', textTransform: 'uppercase' }}>obrigatório</span> : <span style={{ fontSize: 7.5, fontWeight: 700, color: 'var(--faint)', textTransform: 'uppercase' }}>recomendado</span>}
+                          {ia && <span style={{ fontSize: 7, fontWeight: 800, color: '#cfaef5', background: 'rgba(160,107,232,.18)', borderRadius: 99, padding: '0 5px' }}>IA</span>}
+                        </div>
+                      </div>
                       {a.valores && a.valores.length > 0 && a.valores.length <= 30 ? (
-                        <select value={attrVals[a.id]?.value_id || ''} onChange={(e) => { const v = a.valores.find((x) => x.id === e.target.value); setAttrVals((s) => ({ ...s, [a.id]: v ? { value_id: v.id, value_name: v.nome } : undefined })) }} style={{ flex: 1, background: 'rgba(0,0,0,.18)', border: '1px solid var(--glass-border)', borderRadius: 8, color: 'var(--text)', fontSize: 11, padding: '7px 9px' }}>
+                        <select value={attrVals[a.id]?.value_id || ''} onChange={(e) => { const v = a.valores.find((x) => x.id === e.target.value); setAttrVals((s) => ({ ...s, [a.id]: v ? { value_id: v.id, value_name: v.nome } : undefined })); setIaFilled((f) => { const n = new Set(f); n.delete(a.id); return n }) }} style={{ flex: 1, background: 'rgba(0,0,0,.18)', border: `1px solid ${brd}`, borderRadius: 8, color: 'var(--text)', fontSize: 11, padding: '7px 9px' }}>
                           <option value="">—</option>
                           {a.valores.map((v) => <option key={v.id} value={v.id}>{v.nome}</option>)}
                         </select>
                       ) : (
-                        <input value={attrVals[a.id]?.value_name || ''} onChange={(e) => setAttrVals((s) => ({ ...s, [a.id]: e.target.value ? { value_name: e.target.value } : undefined }))} placeholder="valor" style={{ flex: 1, background: 'rgba(0,0,0,.18)', border: '1px solid var(--glass-border)', borderRadius: 8, color: 'var(--text)', fontSize: 11, padding: '7px 9px' }} />
+                        <input value={attrVals[a.id]?.value_name || ''} onChange={(e) => { setAttrVals((s) => ({ ...s, [a.id]: e.target.value ? { value_name: e.target.value } : undefined })); setIaFilled((f) => { const n = new Set(f); n.delete(a.id); return n }) }} placeholder="valor" style={{ flex: 1, background: 'rgba(0,0,0,.18)', border: `1px solid ${brd}`, borderRadius: 8, color: 'var(--text)', fontSize: 11, padding: '7px 9px' }} />
                       )}
                     </div>
-                  ))}
+                    )
+                  })}
 
               <div style={{ marginTop: 14 }}>
                 <b style={{ fontSize: 11 }}>Fotos</b>
@@ -1571,9 +1931,15 @@ function CriarPublicar({ notify }) {
         {/* PRÉVIA ao vivo (a partir do passo 1) */}
         {passo >= 1 && (
           <div className="glass" style={{ padding: 14, borderRadius: 16, position: 'sticky', top: 76 }}>
-            <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '.5px', fontWeight: 800, color: 'var(--faint)', marginBottom: 10 }}>Prévia do anúncio</div>
+            <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '.5px', fontWeight: 800, color: 'var(--faint)' }}>Prévia do anúncio</div>
+                <div style={{ fontSize: 9, color: 'var(--faint)', marginTop: 2 }}>qualidade estimada · {checkOk}/{checklist.length} itens</div>
+              </div>
+              <Ring size={54} val={scoreDraft} cor={scoreCor} w={6}><b className="num" style={{ fontSize: 14, color: scoreCor }}>{scoreDraft}</b></Ring>
+            </div>
             <div style={{ borderRadius: 12, overflow: 'hidden', border: '1px solid var(--glass-border)' }}>
-              <div style={{ height: 150, background: 'rgba(255,255,255,.04)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{fotos[0] ? <img src={fotos[0]} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <ImageOff size={28} style={{ color: 'var(--faint)' }} />}</div>
+              <div style={{ padding: 8 }}><Carrossel fotos={fotos} altura={150} /></div>
               <div style={{ padding: 11 }}>
                 <div style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.3 }}>{titulo || 'Título do anúncio'}</div>
                 <div className="num serif" style={{ fontSize: 20, fontWeight: 800, color: 'var(--ok)', marginTop: 6 }}>{brl(Number(preco))}</div>
@@ -1586,7 +1952,11 @@ function CriarPublicar({ notify }) {
             </div>
             {/* checklist */}
             <div style={{ marginTop: 12 }}>
-              {[['Título', !!titulo.trim() && titulo.length <= 60], ['Categoria', !!catSel], ['Preço', Number(preco) > 0], ['Estoque', Number(estoque) > 0], ['Foto', fotos.length > 0]].map(([lb, ok]) => (
+              <div className="row" style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
+                <b style={{ fontSize: 10.5 }}>Checklist de publicação</b><div style={{ flex: 1 }} />
+                <Badge c={checkOk === checklist.length ? 'var(--ok)' : 'var(--warn)'} bg={checkOk === checklist.length ? 'rgba(47,217,141,.14)' : 'rgba(224,162,60,.14)'}>{checkOk}/{checklist.length}</Badge>
+              </div>
+              {checklist.map(([lb, ok]) => (
                 <div key={lb} className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 10.5, padding: '3px 0', color: ok ? 'var(--text)' : 'var(--faint)' }}>
                   {ok ? <Check size={13} style={{ color: 'var(--ok)' }} /> : <div style={{ width: 13, height: 13, borderRadius: '50%', border: '1px solid var(--faint)' }} />}{lb}
                 </div>
@@ -1595,6 +1965,69 @@ function CriarPublicar({ notify }) {
           </div>
         )}
       </div>
+      </>}
     </>
+  )
+}
+
+/* ---- Editar anúncio existente (busca + lista + cockpit reaproveitado) ---- */
+function EditarExistente({ notify }) {
+  const [busca, setBusca] = useState('')
+  const [buscaLive, setBuscaLive] = useState('')
+  const [status, setStatus] = useState('todos')
+  const [dados, setDados] = useState(null)
+  const [carregando, setCarregando] = useState(true)
+  const [page, setPage] = useState(1)
+  const [aberto, setAberto] = useState(null)
+  const [refreshTick, setRefreshTick] = useState(0)
+  const pageSize = 30
+  useEffect(() => { const t = setTimeout(() => { setBuscaLive(busca); setPage(1) }, 350); return () => clearTimeout(t) }, [busca])
+  useEffect(() => {
+    setCarregando(true)
+    api.mlProdutosPainel({ busca: buscaLive, status, page, page_size: pageSize }).then(setDados).catch(() => setDados(null)).finally(() => setCarregando(false))
+  }, [buscaLive, status, page, refreshTick])
+  const itens = dados?.itens || []
+  const total = dados?.total_filtrado ?? 0
+  const paginas = Math.max(1, Math.ceil(total / pageSize))
+  const ST = [['todos', 'Todos'], ['active', 'Ativos'], ['paused', 'Pausados']]
+  return (
+    <div className="grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, alignItems: 'start' }}>
+      <div>
+        <div className="glass" style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', borderRadius: 11, marginBottom: 10 }}>
+          <Search size={13} style={{ color: 'var(--faint)', marginRight: 8 }} />
+          <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar anúncio por título, SKU ou código MLB…" style={{ background: 'none', border: 'none', outline: 'none', color: 'var(--text)', fontSize: 12, width: '100%' }} />
+          {carregando && <Loader2 size={13} className="animate-spin" style={{ color: 'var(--faint)' }} />}
+        </div>
+        <div className="row" style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+          {ST.map(([v, lb]) => <Chip key={v} on={status === v} onClick={() => { setStatus(v); setPage(1) }}>{lb}</Chip>)}
+          {dados && <span className="num" style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--faint)', alignSelf: 'center' }}>{nfmt(total)} anúncios</span>}
+        </div>
+        {carregando ? Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="glass" style={{ display: 'flex', alignItems: 'center', padding: 11, borderRadius: 16, marginBottom: 9 }}>
+            <Skel h={48} w={48} r={11} style={{ marginRight: 12 }} />
+            <div style={{ flex: 1 }}><Skel h={11} w="58%" style={{ marginBottom: 6 }} /><Skel h={8} w="34%" style={{ marginBottom: 6 }} /><Skel h={14} w="52%" /></div>
+          </div>
+        )) : itens.length === 0 ? (
+          <Empty icon={Boxes} texto={dados?.cache_vazio ? 'Catálogo do ML ainda não sincronizado. Rode a sincronização no topo da Central de Produtos.' : 'Nenhum anúncio com esse filtro.'} />
+        ) : itens.map((p) => (
+          <ProdutoRow key={p.item_id} p={p} sel={false} onSel={() => {}} onOpen={() => setAberto(p)} ativo={aberto?.item_id === p.item_id} />
+        ))}
+        {paginas > 1 && (
+          <div className="row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: 10 }}>
+            <MiniBtn onClick={() => setPage((x) => Math.max(1, x - 1))}>‹</MiniBtn>
+            <span className="num" style={{ fontSize: 11, color: 'var(--dim)', margin: '0 8px' }}>página {page} de {paginas}</span>
+            <MiniBtn onClick={() => setPage((x) => Math.min(paginas, x + 1))}>›</MiniBtn>
+          </div>
+        )}
+      </div>
+      <div>
+        {aberto ? <Cockpit p={aberto} onClose={() => setAberto(null)} notify={notify} onSaved={(prod) => { setAberto((a) => ({ ...a, ...prod })); setRefreshTick((t) => t + 1) }} />
+          : <div className="glass" style={{ padding: 26, borderRadius: 18, textAlign: 'center', position: 'sticky', top: 76 }}>
+            <SlidersHorizontal size={26} style={{ color: 'var(--faint)', margin: '0 auto 10px' }} />
+            <div style={{ fontSize: 13, fontWeight: 700, fontFamily: 'Fraunces, Georgia, serif', marginBottom: 4 }}>Escolha um anúncio para editar</div>
+            <div style={{ fontSize: 11, color: 'var(--dim)', lineHeight: 1.5 }}>Título (com IA), preço (com trava de piso), estoque, status, atacado PxQ e as imagens — tudo grava direto no Mercado Livre pelo Bling.</div>
+          </div>}
+      </div>
+    </div>
   )
 }

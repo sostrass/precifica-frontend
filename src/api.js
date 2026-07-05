@@ -139,6 +139,8 @@ export const api = {
   mlItemOffer: (itemId, pid, tipo) => req(`/api/mercadolivre/promocoes/item/${encodeURIComponent(itemId)}/offer?promotion_id=${encodeURIComponent(pid)}&promotion_type=${encodeURIComponent(tipo)}`),
   mlPromoParticipantes: (forcar, dias, mes) => req(`/api/mercadolivre/promocoes/participantes?forcar=${forcar ? 'true' : 'false'}${mes ? `&mes=${mes}` : dias ? `&dias=${dias}` : ''}`),
   mlAdsPainel: (dias = 30) => req(`/api/mercadolivre/ads/painel?dias=${dias}`),
+  mlAdsCampanhaItens: (id, dias = 30) => req(`/api/mercadolivre/ads/campanha/${id}/itens?dias=${dias}`),
+  mlAdsCampanhaEditar: (id, body) => req(`/api/mercadolivre/ads/campanha/${id}`, { method: 'POST', body }),
   mlPromoAderirAuto: (id, tipo, desconto = 15) => req(`/api/mercadolivre/promocoes/promocao/${encodeURIComponent(id)}/aderir-auto?promotion_type=${encodeURIComponent(tipo)}&desconto_pct=${desconto}`, { method: 'POST' }),
   mlPromoMetricas: (id, tipo, inicio, fim) => req(`/api/mercadolivre/promocoes/promocao/${encodeURIComponent(id)}/metricas?${new URLSearchParams(Object.entries({ promotion_type: tipo, inicio: inicio || '', fim: fim || '' }).filter(([, v]) => v !== '')).toString()}`),
   mlPedidosBackfill: (dias = 90) => req(`/api/mercadolivre/pedidos/cache/backfill?dias=${dias}`, { method: 'POST' }),
@@ -152,6 +154,13 @@ export const api = {
   mlAgentesConfigSalvar: (b) => req('/api/mercadolivre/agentes/config', { method: 'PUT', body: b }),
   mlAgentesExecucoes: (limit = 10) => req(`/api/mercadolivre/agentes/execucoes?limit=${limit}`),
   mlAgentesResumo: (dias = 7) => req(`/api/mercadolivre/agentes/resumo-semana?dias=${dias}`),
+  mlReputacaoPainel: () => req('/api/mercadolivre/reputacao/painel'),
+  mlSaudePainel: (q = {}) => {
+    const p = new URLSearchParams()
+    Object.entries(q).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '' && v !== false) p.set(k, v) })
+    return req(`/api/mercadolivre/saude/painel?${p.toString()}`)
+  },
+  mlSaudeItem: (itemId) => req(`/api/mercadolivre/saude/item/${itemId}`),
   mlProdutosPainel: (q = {}) => {
     const p = new URLSearchParams()
     Object.entries(q).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '' && v !== false) p.set(k, v) })

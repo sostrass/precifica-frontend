@@ -1,5 +1,5 @@
 import { useEffect, useState, lazy, Suspense } from 'react'
-import { LayoutDashboard, Boxes, Calculator, SatelliteDish, FileText, Sparkles, Aperture, Bot, Settings, Sun, Moon, LogOut, Plug, ShoppingBag, CalendarDays, Crown, Inbox, Package, Tag } from 'lucide-react'
+import { LayoutDashboard, Boxes, Calculator, SatelliteDish, FileText, Sparkles, Aperture, Bot, Settings, Sun, Moon, LogOut, Plug, ShoppingBag, CalendarDays, Crown, Inbox, Package, Tag, Megaphone } from 'lucide-react'
 import { api, getToken, setToken } from './api.js'
 import { useToast } from './toast.jsx'
 import NotificacoesGlobais from './Notificacoes.jsx'
@@ -20,6 +20,7 @@ const Atendimento = lazy(() => import('./Atendimento.jsx'))
 const Pedidos = lazy(() => import('./Pedidos.jsx'))
 const Promocoes = lazy(() => import('./Promocoes.jsx'))
 const Produtos = lazy(() => import('./Produtos.jsx'))
+const MercadoAds = lazy(() => import('./MercadoAds.jsx'))
 
 const TITULOS = {
   dashboard: 'Inteligência Comercial',
@@ -29,6 +30,7 @@ const TITULOS = {
   pedidos: 'Pedidos',
   promocoes: 'Central de promoções',
   mlprodutos: 'Central de Produtos',
+  mlads: 'Mercado Ads',
   precificacao: 'Precificação por canal',
   radar: 'Radar de mercado',
   nfe: 'Notas fiscais',
@@ -47,6 +49,7 @@ const DESCRICOES = {
   pedidos: 'Pedidos, endereço real e etiqueta oficial',
   promocoes: 'Campanhas, cupons e ofertas do Mercado Livre',
   mlprodutos: 'Criar, publicar e sincronizar anúncios do Mercado Livre',
+  mlads: 'Product Ads — campanhas patrocinadas, ROAS e ACOS',
   precificacao: 'Preço ideal por canal a partir do custo e das taxas',
   radar: 'Acompanhamento de concorrentes e preços do mercado',
   nfe: 'Emissão e gestão de notas fiscais',
@@ -128,6 +131,7 @@ export default function App() {
           <NavItem icon={<Package size={18} />} label="Pedidos" active={view === 'pedidos'} onClick={() => setView('pedidos')} />
           <NavItem icon={<Tag size={18} />} label="Promoções" active={view === 'promocoes'} onClick={() => setView('promocoes')} />
           <NavItem icon={<Boxes size={18} />} label="Produtos ML" active={view === 'mlprodutos'} onClick={() => setView('mlprodutos')} />
+          <NavItem icon={<Megaphone size={18} />} label="Mercado Ads" active={view === 'mlads'} onClick={() => setView('mlads')} />
           <NavItem icon={<SatelliteDish size={18} />} label="Radar" active={view === 'radar'} onClick={() => setView('radar')} />
           <NavSecao>Inteligência</NavSecao>
           <NavItem icon={<Sparkles size={18} />} label="Central IA" active={view === 'ia'} onClick={() => setView('ia')} />
@@ -194,6 +198,7 @@ export default function App() {
             {view === 'pedidos' && <Pedidos />}
             {view === 'promocoes' && <Promocoes />}
             {view === 'mlprodutos' && <Produtos />}
+            {view === 'mlads' && <MercadoAds />}
             {view === 'configuracoes' && <Configuracoes />}
           </Suspense>
         </main>
