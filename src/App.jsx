@@ -19,6 +19,7 @@ const Shopee = lazy(() => import('./Shopee.jsx'))
 const Atendimento = lazy(() => import('./Atendimento.jsx'))
 const Pedidos = lazy(() => import('./Pedidos.jsx'))
 const Promocoes = lazy(() => import('./Promocoes.jsx'))
+const Produtos = lazy(() => import('./Produtos.jsx'))
 
 const TITULOS = {
   dashboard: 'Inteligência Comercial',
@@ -27,6 +28,7 @@ const TITULOS = {
   atendimento: 'Atendimento',
   pedidos: 'Pedidos',
   promocoes: 'Central de promoções',
+  mlprodutos: 'Central de Produtos',
   precificacao: 'Precificação por canal',
   radar: 'Radar de mercado',
   nfe: 'Notas fiscais',
@@ -44,6 +46,7 @@ const DESCRICOES = {
   atendimento: 'Perguntas dos compradores, multicanal, com IA',
   pedidos: 'Pedidos, endereço real e etiqueta oficial',
   promocoes: 'Campanhas, cupons e ofertas do Mercado Livre',
+  mlprodutos: 'Criar, publicar e sincronizar anúncios do Mercado Livre',
   precificacao: 'Preço ideal por canal a partir do custo e das taxas',
   radar: 'Acompanhamento de concorrentes e preços do mercado',
   nfe: 'Emissão e gestão de notas fiscais',
@@ -124,6 +127,7 @@ export default function App() {
           <NavItem icon={<Inbox size={18} />} label="Atendimento" active={view === 'atendimento'} onClick={() => setView('atendimento')} />
           <NavItem icon={<Package size={18} />} label="Pedidos" active={view === 'pedidos'} onClick={() => setView('pedidos')} />
           <NavItem icon={<Tag size={18} />} label="Promoções" active={view === 'promocoes'} onClick={() => setView('promocoes')} />
+          <NavItem icon={<Boxes size={18} />} label="Produtos ML" active={view === 'mlprodutos'} onClick={() => setView('mlprodutos')} />
           <NavItem icon={<SatelliteDish size={18} />} label="Radar" active={view === 'radar'} onClick={() => setView('radar')} />
           <NavSecao>Inteligência</NavSecao>
           <NavItem icon={<Sparkles size={18} />} label="Central IA" active={view === 'ia'} onClick={() => setView('ia')} />
@@ -189,6 +193,7 @@ export default function App() {
             {view === 'atendimento' && <Atendimento />}
             {view === 'pedidos' && <Pedidos />}
             {view === 'promocoes' && <Promocoes />}
+            {view === 'mlprodutos' && <Produtos />}
             {view === 'configuracoes' && <Configuracoes />}
           </Suspense>
         </main>

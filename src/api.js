@@ -152,6 +152,11 @@ export const api = {
   mlAgentesConfigSalvar: (b) => req('/api/mercadolivre/agentes/config', { method: 'PUT', body: b }),
   mlAgentesExecucoes: (limit = 10) => req(`/api/mercadolivre/agentes/execucoes?limit=${limit}`),
   mlAgentesResumo: (dias = 7) => req(`/api/mercadolivre/agentes/resumo-semana?dias=${dias}`),
+  mlProdutosPainel: (q = {}) => {
+    const p = new URLSearchParams()
+    Object.entries(q).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '' && v !== false) p.set(k, v) })
+    return req(`/api/mercadolivre/produtos/painel?${p.toString()}`)
+  },
   mlPromocoesItem: (item_id) => req(`/api/mercadolivre/promocoes/${item_id}`),
   mlPromoAplicar: (b) => req('/api/mercadolivre/promocoes/aplicar', { method: 'POST', body: b }),
   mlPromoRemover: (item_id) => req('/api/mercadolivre/promocoes/remover', { method: 'POST', body: { item_id } }),
