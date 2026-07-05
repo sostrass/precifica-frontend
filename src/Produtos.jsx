@@ -878,21 +878,71 @@ function Cockpit({ p, onClose, notify, onSaved }) {
 }
 
 /* Atacado PxQ — faixas livres com validação de piso ao vivo */
+function AttrCampo({ a, attrVals, setAttrVals, iaFilled, setIaFilled }) {
+  const ia = iaFilled.has(a.id)
+  const val = attrVals[a.id]
+  const preenchido = val && (val.value_name || val.value_id)
+  const brd = ia ? 'rgba(160,107,232,.5)' : (preenchido ? 'rgba(47,217,141,.4)' : 'var(--glass-border)')
+  const clearIa = () => setIaFilled((f) => { const n = new Set(f); n.delete(a.id); return n })
+  const setVal = (v) => { setAttrVals((s) => ({ ...s, [a.id]: v })); clearIa() }
+  const temValores = a.valores && a.valores.length > 0
+  const poucos = temValores && a.valores.length <= 6
+  return (
+    <div style={{ marginBottom: 11, paddingLeft: 10, borderLeft: `2px solid ${ia ? 'var(--accent2)' : (preenchido ? 'rgba(47,217,141,.3)' : 'transparent')}` }}>
+      <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
+        <b style={{ fontSize: 11, color: 'var(--text)' }}>{a.nome}</b>
+        {a.obrigatorio && <Badge c="var(--danger)" bg="rgba(255,122,122,.12)">obrigatório</Badge>}
+        {ia && <Badge c="#cfaef5" bg="rgba(160,107,232,.18)"><Sparkles size={8} />IA</Badge>}
+        <div style={{ flex: 1 }} />
+        {preenchido && <Check size={12} style={{ color: 'var(--ok)' }} />}
+      </div>
+      {poucos ? (
+        <div className="row" style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+          {a.valores.map((v) => {
+            const on = val?.value_id === v.id || val?.value_name === v.nome
+            return <span key={v.id} onClick={() => setVal(on ? undefined : { value_id: v.id, value_name: v.nome })} style={{ fontSize: 10.5, fontWeight: 600, padding: '5px 11px', borderRadius: 99, cursor: 'pointer', color: on ? '#fff' : 'var(--dim)', background: on ? 'linear-gradient(135deg,var(--accent),rgba(214,0,127,.6))' : 'rgba(255,255,255,.04)', border: `1px solid ${on ? 'transparent' : 'var(--glass-border)'}` }}>{v.nome}</span>
+          })}
+        </div>
+      ) : temValores ? (
+        <select value={val?.value_id || ''} onChange={(e) => { const v = a.valores.find((x) => x.id === e.target.value); setVal(v ? { value_id: v.id, value_name: v.nome } : undefined) }} style={{ width: '100%', background: 'rgba(0,0,0,.2)', border: `1px solid ${brd}`, borderRadius: 9, color: 'var(--text)', fontSize: 11.5, padding: '8px 10px' }}>
+          <option value="">— selecione —</option>
+          {a.valores.map((v) => <option key={v.id} value={v.id}>{v.nome}</option>)}
+        </select>
+      ) : (
+        <input value={val?.value_name || ''} onChange={(e) => setVal(e.target.value ? { value_name: e.target.value } : undefined)} placeholder={a.exemplo || 'Digite o valor'} style={{ width: '100%', background: 'rgba(0,0,0,.2)', border: `1px solid ${brd}`, borderRadius: 9, color: 'var(--text)', fontSize: 11.5, padding: '8px 10px' }} />
+      )}
+    </div>
+  )
+}
+
 function AtacadoPxQ({ p, preco, ratio, precoBling, notify }) {
   const [faixas, setFaixas] = useState([{ q: 1, preco: preco || p.preco || 0 }])
   const setFaixa = (i, campo, v) => setFaixas((f) => f.map((x, idx) => idx === i ? { ...x, [campo]: Number(v) || 0 } : x))
   const addFaixa = () => setFaixas((f) => f.length >= 5 ? f : [...f, { q: (f[f.length - 1]?.q || 1) + 5, preco: Math.max(0, (preco || 0) - f.length) }])
   const rmFaixa = (i) => setFaixas((f) => f.filter((_, idx) => idx !== i))
   const liqFaixa = (pr) => ratio != null ? Math.round(pr * ratio * 100) / 100 : null
+  const minSeguro = (ratio && precoBling) ? Math.ceil((precoBling / ratio) * 100) / 100 : 0
+  const sugerir = () => {
+    const base = preco || p.preco || 0
+    if (!base) { notify('Defina o preço base do anúncio primeiro.', 'warn'); return }
+    const tiers = [{ q: 1, d: 0 }, { q: 6, d: 0.03 }, { q: 12, d: 0.06 }, { q: 24, d: 0.09 }]
+    const nv = tiers.map((t) => {
+      let pr = Math.round(base * (1 - t.d) * 100) / 100
+      if (minSeguro && pr < minSeguro) pr = minSeguro
+      return { q: t.q, preco: pr }
+    })
+    setFaixas(nv)
+    notify(minSeguro ? `Faixas sugeridas com desconto progressivo, travadas no mínimo seguro (${brl(minSeguro)}).` : 'Faixas sugeridas com desconto progressivo — ajuste como quiser.', 'ok')
+  }
   return (
     <div className="glass" style={{ padding: 11, marginBottom: 12, borderRadius: 12, border: '1px solid rgba(160,107,232,.32)' }}>
       <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 9 }}>
         <Boxes size={13} style={{ color: '#cfaef5' }} /><b style={{ fontSize: 10.5 }}>Atacado · preço por quantidade</b>
         <Badge c="var(--ok)" bg="rgba(47,217,141,.14)" style={{ marginLeft: 5 }}>SUAS FAIXAS</Badge>
         <div style={{ flex: 1 }} />
-        <MiniBtn icon={Sparkles} ai onClick={() => notify('Sugestão de faixas por IA em breve.', 'warn')}>Sugerir</MiniBtn>
+        <MiniBtn icon={Sparkles} ai onClick={sugerir}>Sugerir</MiniBtn>
       </div>
-      <div className="note" style={{ fontSize: 9.5, color: 'var(--faint)', display: 'flex', alignItems: 'flex-start', gap: 6, marginBottom: 9 }}><Info size={11} style={{ marginTop: 1, flex: 'none' }} /><b style={{ color: 'var(--text)', marginRight: 3 }}>Você define</b> quantidade e preço de cada faixa — validação de piso ao vivo.</div>
+      <div className="note" style={{ fontSize: 9.5, color: 'var(--faint)', display: 'flex', alignItems: 'flex-start', gap: 6, marginBottom: 9 }}><Info size={11} style={{ marginTop: 1, flex: 'none' }} /><b style={{ color: 'var(--text)', marginRight: 3 }}>Você define</b> quantidade e preço de cada faixa — validação de piso ao vivo.{minSeguro ? <span style={{ marginLeft: 3 }}>Mínimo seguro por unidade: <b className="num" style={{ color: 'var(--ok)' }}>{brl(minSeguro)}</b>.</span> : null}</div>
       {faixas.map((f, i) => {
         const liq = liqFaixa(f.preco)
         const furou = (liq != null && precoBling != null && liq < precoBling - 0.01)
@@ -1631,6 +1681,8 @@ function CriarPublicar({ notify }) {
   const [attrsLoad, setAttrsLoad] = useState(false)
   const [iaAttrLoad, setIaAttrLoad] = useState(false)
   const [iaFilled, setIaFilled] = useState(() => new Set())
+  const [attrBusca, setAttrBusca] = useState('')
+  const [showRec, setShowRec] = useState(false)
   const [fotos, setFotos] = useState([])
   const [novaFoto, setNovaFoto] = useState('')
   // publicar
@@ -1647,6 +1699,8 @@ function CriarPublicar({ notify }) {
     api.mlPublicarBling({ busca: buscaLive, somente_novos: soNovos, page: 1, page_size: 40 })
       .then(setBling).catch(() => setBling(null)).finally(() => setCarregandoBling(false))
   }, [buscaLive, soNovos, passo])
+  // ao entrar em Título & categoria, já prevê a categoria (destrava o Avançar)
+  useEffect(() => { if (passo === 1 && titulo.trim() && cats == null && !prevendo) prever() }, [passo]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const escolher = (p) => {
     setProd(p); setTitulo(p.nome || ''); setPreco(p.preco_regra || p.preco_bling || 0)
@@ -1832,35 +1886,53 @@ function CriarPublicar({ notify }) {
                 <div style={{ flex: 1 }} />
                 <button onClick={preencherIaAttrs} disabled={iaAttrLoad || !attrs} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 700, padding: '5.5px 10px', borderRadius: 9, cursor: 'pointer', color: '#e9dbfb', border: '1px solid rgba(160,107,232,.45)', background: 'linear-gradient(135deg,rgba(160,107,232,.24),rgba(214,0,127,.18))', opacity: (iaAttrLoad || !attrs) ? .6 : 1 }}>{iaAttrLoad ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}Preencher com IA</button>
               </div>
-              {attrs && (
-                <div className="note" style={{ fontSize: 9.5, color: 'var(--faint)', display: 'flex', alignItems: 'flex-start', gap: 6, marginBottom: 10 }}><Info size={11} style={{ flex: 'none', marginTop: 1 }} />{attrs.filter((a) => a.obrigatorio).length} obrigatórios · {attrs.filter((a) => !a.obrigatorio).length} recomendados da categoria.{iaFilled.size > 0 ? ` A IA sugeriu ${iaFilled.size} — confira os marcados em roxo.` : ' Use "Preencher com IA" para adiantar.'}</div>
-              )}
-              {attrsLoad ? Array.from({ length: 6 }).map((_, i) => <div key={i} className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7 }}><Skel h={30} w={132} r={8} /><Skel h={30} r={8} /></div>)
+              {attrsLoad ? Array.from({ length: 6 }).map((_, i) => <div key={i} className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 9 }}><Skel h={34} w={140} r={8} /><Skel h={34} r={8} /></div>)
                 : !attrs ? <Empty texto="Volte ao passo anterior e escolha a categoria para carregar a ficha." />
-                  : attrs.slice(0, 16).map((a) => {
-                    const ia = iaFilled.has(a.id)
-                    const preenchido = attrVals[a.id] && (attrVals[a.id].value_name || attrVals[a.id].value_id)
-                    const brd = ia ? 'rgba(160,107,232,.5)' : (preenchido ? 'rgba(47,217,141,.35)' : 'var(--glass-border)')
+                  : (() => {
+                    const obrig = attrs.filter((a) => a.obrigatorio)
+                    const rec = attrs.filter((a) => !a.obrigatorio)
+                    const filtro = (arr) => attrBusca.trim() ? arr.filter((a) => (a.nome || '').toLowerCase().includes(attrBusca.trim().toLowerCase())) : arr
+                    const obrigOkN = obrig.filter((a) => { const v = attrVals[a.id]; return v && (v.value_name || v.value_id) }).length
+                    const recVis = filtro(rec)
+                    const recMostrados = showRec ? recVis : recVis.slice(0, 6)
+                    const compl = obrig.length ? obrigOkN >= obrig.length : true
                     return (
-                    <div key={a.id} className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7, paddingLeft: 8, borderLeft: `2px solid ${ia ? 'var(--accent2)' : 'transparent'}` }}>
-                      <div style={{ width: 132, flex: 'none' }}>
-                        <div style={{ fontSize: 10.5, color: a.obrigatorio ? 'var(--text)' : 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.nome}</div>
-                        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 1 }}>
-                          {a.obrigatorio ? <span style={{ fontSize: 7.5, fontWeight: 800, color: 'var(--danger)', textTransform: 'uppercase' }}>obrigatório</span> : <span style={{ fontSize: 7.5, fontWeight: 700, color: 'var(--faint)', textTransform: 'uppercase' }}>recomendado</span>}
-                          {ia && <span style={{ fontSize: 7, fontWeight: 800, color: '#cfaef5', background: 'rgba(160,107,232,.18)', borderRadius: 99, padding: '0 5px' }}>IA</span>}
-                        </div>
-                      </div>
-                      {a.valores && a.valores.length > 0 && a.valores.length <= 30 ? (
-                        <select value={attrVals[a.id]?.value_id || ''} onChange={(e) => { const v = a.valores.find((x) => x.id === e.target.value); setAttrVals((s) => ({ ...s, [a.id]: v ? { value_id: v.id, value_name: v.nome } : undefined })); setIaFilled((f) => { const n = new Set(f); n.delete(a.id); return n }) }} style={{ flex: 1, background: 'rgba(0,0,0,.18)', border: `1px solid ${brd}`, borderRadius: 8, color: 'var(--text)', fontSize: 11, padding: '7px 9px' }}>
-                          <option value="">—</option>
-                          {a.valores.map((v) => <option key={v.id} value={v.id}>{v.nome}</option>)}
-                        </select>
-                      ) : (
-                        <input value={attrVals[a.id]?.value_name || ''} onChange={(e) => { setAttrVals((s) => ({ ...s, [a.id]: e.target.value ? { value_name: e.target.value } : undefined })); setIaFilled((f) => { const n = new Set(f); n.delete(a.id); return n }) }} placeholder="valor" style={{ flex: 1, background: 'rgba(0,0,0,.18)', border: `1px solid ${brd}`, borderRadius: 8, color: 'var(--text)', fontSize: 11, padding: '7px 9px' }} />
-                      )}
-                    </div>
+                      <>
+                        {obrig.length > 0 && (
+                          <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 12, background: compl ? 'rgba(47,217,141,.08)' : 'rgba(224,162,60,.07)', border: `1px solid ${compl ? 'rgba(47,217,141,.28)' : 'rgba(224,162,60,.25)'}` }}>
+                            <div className="row" style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
+                              <b style={{ fontSize: 10.5, color: compl ? 'var(--ok)' : 'var(--warn)' }}>{compl ? 'Obrigatórios completos — pronto para avançar' : 'Complete os atributos obrigatórios'}</b>
+                              <div style={{ flex: 1 }} />
+                              <span className="num" style={{ fontSize: 11, fontWeight: 800, color: compl ? 'var(--ok)' : 'var(--warn)' }}>{obrigOkN}/{obrig.length}</span>
+                            </div>
+                            <div style={{ height: 6, borderRadius: 99, background: 'rgba(255,255,255,.06)', overflow: 'hidden' }}><div style={{ width: `${obrig.length ? (obrigOkN / obrig.length) * 100 : 0}%`, height: '100%', borderRadius: 99, background: compl ? 'var(--ok)' : 'var(--warn)', transition: 'width .3s' }} /></div>
+                            <div className="note" style={{ fontSize: 9, color: 'var(--faint)', marginTop: 7, display: 'flex', gap: 5 }}><Sparkles size={10} style={{ color: '#cfaef5', flex: 'none', marginTop: 1 }} />{rec.length} recomendados elevam a saúde e a exposição. {iaFilled.size > 0 ? `A IA preencheu ${iaFilled.size} — revise os marcados em roxo.` : 'Use "Preencher com IA" para adiantar.'}</div>
+                          </div>
+                        )}
+                        {attrs.length > 8 && (
+                          <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(0,0,0,.2)', border: '1px solid var(--glass-border)', borderRadius: 10, padding: '7px 11px', marginBottom: 12 }}>
+                            <Search size={13} style={{ color: 'var(--faint)' }} />
+                            <input value={attrBusca} onChange={(e) => setAttrBusca(e.target.value)} placeholder="Filtrar atributos pelo nome…" style={{ flex: 1, background: 'none', border: 'none', outline: 'none', color: 'var(--text)', fontSize: 11.5 }} />
+                            {attrBusca && <X size={13} style={{ color: 'var(--faint)', cursor: 'pointer' }} onClick={() => setAttrBusca('')} />}
+                          </div>
+                        )}
+                        {filtro(obrig).length > 0 && (
+                          <div style={{ marginBottom: 16 }}>
+                            <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--danger)' }} /><b style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '.5px', color: 'var(--danger)' }}>Obrigatórios</b><span className="num" style={{ fontSize: 9, color: 'var(--faint)' }}>{filtro(obrig).length}</span></div>
+                            {filtro(obrig).map((a) => <AttrCampo key={a.id} a={a} attrVals={attrVals} setAttrVals={setAttrVals} iaFilled={iaFilled} setIaFilled={setIaFilled} />)}
+                          </div>
+                        )}
+                        {recVis.length > 0 && (
+                          <div>
+                            <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: '#cfaef5' }} /><b style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '.5px', color: '#cfaef5' }}>Recomendados</b><span className="num" style={{ fontSize: 9, color: 'var(--faint)' }}>{recVis.length}</span></div>
+                            {recMostrados.map((a) => <AttrCampo key={a.id} a={a} attrVals={attrVals} setAttrVals={setAttrVals} iaFilled={iaFilled} setIaFilled={setIaFilled} />)}
+                            {recVis.length > 6 && <button onClick={() => setShowRec((v) => !v)} style={{ marginTop: 4, display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 700, padding: '7px 12px', borderRadius: 9, cursor: 'pointer', color: '#cfaef5', border: '1px solid rgba(160,107,232,.35)', background: 'rgba(160,107,232,.1)' }}><ChevronRight size={12} style={{ transform: showRec ? 'rotate(-90deg)' : 'rotate(90deg)' }} />{showRec ? 'Mostrar menos' : `Ver mais ${recVis.length - 6} atributos`}</button>}
+                          </div>
+                        )}
+                        {attrBusca && filtro(obrig).length === 0 && recVis.length === 0 && <Empty texto="Nenhum atributo com esse nome." />}
+                      </>
                     )
-                  })}
+                  })()}
 
               <div style={{ marginTop: 14 }}>
                 <b style={{ fontSize: 11 }}>Fotos</b>
@@ -1923,7 +1995,7 @@ function CriarPublicar({ notify }) {
             <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12 }}>
               {passo > 0 && <MiniBtn icon={ArrowRight} onClick={() => setPasso((s) => s - 1)}>Voltar</MiniBtn>}
               <div style={{ flex: 1 }} />
-              {passo < 5 && <button onClick={() => { if (passo === 1) irAtributos(); else setPasso((s) => Math.min(5, s + 1)) }} disabled={!podeAvancar} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700, padding: '9px 16px', borderRadius: 11, color: '#fff', border: 'none', cursor: podeAvancar ? 'pointer' : 'default', opacity: podeAvancar ? 1 : .5, background: 'linear-gradient(135deg,var(--accent),#a00061)' }}>Avançar<ChevronRight size={14} /></button>}
+              {passo < 5 && <button onClick={() => { if (passo === 1) irAtributos(); else setPasso((s) => Math.min(5, s + 1)) }} disabled={!podeAvancar} title={!podeAvancar ? (passo === 0 ? 'Escolha um produto do Bling' : 'Preencha o título e selecione a categoria') : ''} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700, padding: '9px 16px', borderRadius: 11, color: '#fff', border: 'none', cursor: podeAvancar ? 'pointer' : 'not-allowed', opacity: podeAvancar ? 1 : .5, background: 'linear-gradient(135deg,var(--accent),#a00061)' }}>Avançar<ChevronRight size={14} /></button>}
             </div>
           )}
         </div>
