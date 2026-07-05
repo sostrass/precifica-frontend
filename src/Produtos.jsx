@@ -510,6 +510,11 @@ function Cockpit({ p, onClose, notify, onSaved }) {
   const [permitir, setPermitir] = useState(false)
   const [salvando, setSalvando] = useState(false)
   const [subtab, setSubtab] = useState('editar')
+  const [iaTitulos, setIaTitulos] = useState(null)
+  const [iaTituloLoad, setIaTituloLoad] = useState(false)
+  const [iaDesc, setIaDesc] = useState(null)
+  const [iaDescLoad, setIaDescLoad] = useState(false)
+  const [iaDescSaving, setIaDescSaving] = useState(false)
 
   useEffect(() => {
     api.mlProdutoUm(p.item_id).then((d) => {
@@ -553,6 +558,27 @@ function Cockpit({ p, onClose, notify, onSaved }) {
   }
   const alternarStatus = () => { const novo = status === 'active' ? 'paused' : 'active'; setStatus(novo) }
 
+  const gerarTitulos = async () => {
+    setIaTituloLoad(true); setIaTitulos(null)
+    try { const r = await api.mlProdutoIaTitulo({ item_id: p.item_id, titulo }); setIaTitulos(r.sugestoes || []) }
+    catch (e) { notify(e?.data?.detail || 'A IA não respondeu. Tente de novo.', 'danger') }
+    finally { setIaTituloLoad(false) }
+  }
+  const aplicarTitulo = (t) => { setTitulo(t); setIaTitulos(null); notify('Título aplicado — salve para sincronizar com o ML.', 'ok') }
+  const gerarDescricao = async () => {
+    setIaDescLoad(true)
+    try { const r = await api.mlProdutoIaDescricao({ item_id: p.item_id, titulo }); setIaDesc(r.texto || '') }
+    catch (e) { notify(e?.data?.detail || 'A IA não respondeu. Tente de novo.', 'danger') }
+    finally { setIaDescLoad(false) }
+  }
+  const salvarDescricao = async () => {
+    if (!iaDesc || !iaDesc.trim()) return
+    setIaDescSaving(true)
+    try { await api.mlSetDescricao(p.item_id, iaDesc.trim()); notify('Descrição salva no anúncio.', 'ok') }
+    catch (e) { notify(e?.data?.detail || 'Não foi possível salvar a descrição.', 'danger') }
+    finally { setIaDescSaving(false) }
+  }
+
   const SUBTABS = [['editar', 'Editar'], ['preco', 'Precificação'], ['atacado', 'Atacado PxQ'], ['fiscal', 'Fiscal'], ['hist', 'Histórico']]
 
   return (
@@ -583,15 +609,33 @@ function Cockpit({ p, onClose, notify, onSaved }) {
 
         {subtab === 'editar' && (
           <>
-            {/* título editável */}
+            {/* título editável + copiloto */}
             <div className="glass" style={{ padding: 11, marginBottom: 12, borderRadius: 12 }}>
               <div className="row" style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
                 <b style={{ fontSize: 10.5 }}>Título</b><div style={{ flex: 1 }} />
                 <span className="num" style={{ fontSize: 9, color: titulo.length > 60 ? 'var(--danger)' : 'var(--faint)' }}>{titulo.length}/60</span>
-                <span style={{ marginLeft: 8 }}><MiniBtn icon={Wand2} ai onClick={() => notify('Reescrita de título com IA entra com o endpoint de IA.', 'warn')}>IA</MiniBtn></span>
+                <span style={{ marginLeft: 8 }}>
+                  <button onClick={gerarTitulos} disabled={iaTituloLoad} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 700, padding: '5.5px 10px', borderRadius: 9, cursor: iaTituloLoad ? 'default' : 'pointer', color: '#e9dbfb', border: '1px solid rgba(160,107,232,.45)', background: 'linear-gradient(135deg,rgba(160,107,232,.24),rgba(214,0,127,.18))', opacity: iaTituloLoad ? .6 : 1 }}>
+                    {iaTituloLoad ? <Loader2 size={11} className="animate-spin" /> : <Wand2 size={11} />}Reescrever com IA
+                  </button>
+                </span>
               </div>
               <input value={titulo} maxLength={70} onChange={(e) => setTitulo(e.target.value)} style={{ width: '100%', background: 'rgba(0,0,0,.18)', border: '1px solid var(--glass-border)', borderRadius: 10, color: 'var(--text)', fontSize: 12.5, padding: '9px 11px' }} />
               {det.catalogo && <div className="note" style={{ fontSize: 9, color: 'var(--faint)', marginTop: 6, display: 'flex', gap: 5 }}><Info size={10} />Anúncio de catálogo: o ML pode recusar mudança de título.</div>}
+              {(iaTituloLoad || iaTitulos) && (
+                <div style={{ marginTop: 10, padding: 10, borderRadius: 11, background: 'linear-gradient(135deg,rgba(160,107,232,.13),rgba(214,0,127,.08))', border: '1px solid rgba(160,107,232,.3)' }}>
+                  <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}><Sparkles size={12} style={{ color: '#cfaef5' }} /><b style={{ fontSize: 10, color: '#e9dbfb' }}>Copiloto sugere</b><div style={{ flex: 1 }} />{iaTitulos && <X size={13} style={{ color: 'var(--faint)', cursor: 'pointer' }} onClick={() => setIaTitulos(null)} />}</div>
+                  {iaTituloLoad ? <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 0', color: 'var(--faint)', fontSize: 11 }}><Loader2 size={14} className="animate-spin" />gerando 3 variações otimizadas…</div>
+                    : (iaTitulos || []).map((t, i) => (
+                      <div key={i} onClick={() => aplicarTitulo(t)} className="lift" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 9, cursor: 'pointer', marginBottom: 5, background: 'rgba(0,0,0,.18)', border: '1px solid var(--glass-border)' }}>
+                        <div style={{ flex: 1, fontSize: 11.5, color: 'var(--text)' }}>{t}</div>
+                        <span className="num" style={{ fontSize: 8.5, color: t.length > 60 ? 'var(--danger)' : 'var(--faint)' }}>{t.length}</span>
+                        <span style={{ fontSize: 9, fontWeight: 700, color: '#cfaef5', display: 'inline-flex', alignItems: 'center', gap: 3 }}><Check size={11} />usar</span>
+                      </div>
+                    ))}
+                  {iaTitulos && <div className="note" style={{ fontSize: 8.5, color: 'var(--faint)', display: 'flex', gap: 5, marginTop: 3 }}><Info size={10} style={{ flex: 'none', marginTop: 1 }} />Clique para aplicar no campo. Nada é enviado ao ML até você salvar.</div>}
+                </div>
+              )}
             </div>
 
             {/* preço + trava de piso ao vivo */}
@@ -644,6 +688,29 @@ function Cockpit({ p, onClose, notify, onSaved }) {
                   ))}
                 </div>
               </div>
+            </div>
+
+            {/* descrição por IA */}
+            <div className="glass" style={{ padding: 11, marginBottom: 12, borderRadius: 12, border: '1px solid rgba(160,107,232,.28)' }}>
+              <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                <FileText size={13} style={{ color: '#cfaef5' }} /><b style={{ fontSize: 10.5 }}>Descrição</b>
+                <Badge c="#cfaef5" bg="rgba(160,107,232,.14)" style={{ marginLeft: 4 }}>texto puro</Badge>
+                <div style={{ flex: 1 }} />
+                <button onClick={gerarDescricao} disabled={iaDescLoad} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 700, padding: '5.5px 10px', borderRadius: 9, cursor: iaDescLoad ? 'default' : 'pointer', color: '#e9dbfb', border: '1px solid rgba(160,107,232,.45)', background: 'linear-gradient(135deg,rgba(160,107,232,.24),rgba(214,0,127,.18))', opacity: iaDescLoad ? .6 : 1 }}>
+                  {iaDescLoad ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}{iaDesc ? 'Gerar outra' : 'Gerar com IA'}
+                </button>
+              </div>
+              {iaDescLoad && !iaDesc ? <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 0', color: 'var(--faint)', fontSize: 11 }}><Loader2 size={14} className="animate-spin" />escrevendo uma descrição vendedora…</div>
+                : iaDesc != null ? (
+                  <>
+                    <textarea value={iaDesc} onChange={(e) => setIaDesc(e.target.value)} rows={7} style={{ width: '100%', background: 'rgba(0,0,0,.18)', border: '1px solid var(--glass-border)', borderRadius: 10, color: 'var(--text)', fontSize: 11.5, padding: '9px 11px', resize: 'vertical', lineHeight: 1.5 }} />
+                    <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8 }}>
+                      <button onClick={salvarDescricao} disabled={iaDescSaving} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10.5, fontWeight: 700, padding: '7px 12px', borderRadius: 9, color: '#fff', border: 'none', cursor: iaDescSaving ? 'default' : 'pointer', background: 'linear-gradient(135deg,var(--accent),#a00061)', opacity: iaDescSaving ? .6 : 1 }}>{iaDescSaving ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}Salvar no anúncio</button>
+                      <MiniBtn icon={Copy} onClick={() => { navigator.clipboard?.writeText(iaDesc); notify('Descrição copiada.', 'ok') }}>Copiar</MiniBtn>
+                      <div style={{ flex: 1 }} /><span className="num" style={{ fontSize: 9, color: 'var(--faint)' }}>{iaDesc.length} car.</span>
+                    </div>
+                  </>
+                ) : <div className="note" style={{ fontSize: 10, color: 'var(--faint)', display: 'flex', gap: 6 }}><Info size={11} style={{ flex: 'none', marginTop: 1 }} />O ML não aceita HTML desde 2021 — a IA já gera em texto puro, pronto para colar. Salvar envia direto para o anúncio.</div>}
             </div>
           </>
         )}
