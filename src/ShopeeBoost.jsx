@@ -144,7 +144,10 @@ export default function ShopeeBoost({ conectado, notify }) {
     try { await api.shopeeBoostSincronizarNomes(); notify('Nomes sincronizados.', 'ok'); carregar() }
     catch (e) { notify(e.message, 'danger') } finally { setSincNomes(false) }
   }
-  const fixar = async (id, fixo) => { try { await api.shopeeBoostFixar(id, fixo); carregar() } catch (e) { notify(e.message, 'danger') } }
+  const fixar = async (id, fixo) => {
+    setP((s) => s ? { ...s, fila: (s.fila || []).map((f) => String(f.item_id) === String(id) ? { ...f, fixo } : f) } : s)
+    try { await api.shopeeBoostFixar(id, fixo); notify(fixo ? 'Produto fixado no destaque.' : 'Produto desafixado.', 'ok'); carregar() } catch (e) { notify(e.message, 'danger'); carregar() }
+  }
   const removerFila = async (id) => { try { await api.shopeeBoostRemove(id); notify('Removido da fila.', 'ok'); carregar() } catch (e) { notify(e.message, 'danger') } }
   const moverNaFila = async (id, dir) => {
     const ids = (p?.fila || []).map((f) => f.item_id)
@@ -181,6 +184,7 @@ export default function ShopeeBoost({ conectado, notify }) {
   const filaPaginas = Math.max(1, Math.ceil(filaFiltrada.length / FILA_PP))
   const pagAtual = Math.min(filaPag, filaPaginas - 1)
   const filaVisiveis = filaFiltrada.slice(pagAtual * FILA_PP, pagAtual * FILA_PP + FILA_PP)
+  const maxEstoque = Math.max(...(p?.fila || []).map((f) => f.estoque || 0), 1)
 
   return (
     <div>
@@ -261,12 +265,12 @@ export default function ShopeeBoost({ conectado, notify }) {
                     <span style={{ fontSize: 6.5, textTransform: 'uppercase', letterSpacing: '.5px', fontWeight: 800, color: 'var(--faint)' }}>restante</span>
                   </Ring>
                 </div>
-                <div style={{ width: '100%', height: 56, borderRadius: 9, marginBottom: 8, position: 'relative', overflow: 'hidden', background: cprod ? `linear-gradient(135deg,${cprod},rgba(0,0,0,.35))` : 'linear-gradient(135deg,rgba(238,77,45,.35),rgba(160,107,232,.3))' }}>
-                  {v.imagem ? <img src={v.imagem} alt="" loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Package size={18} style={{ color: 'rgba(255,255,255,.9)' }} /></div>}
-                  <span style={{ position: 'absolute', top: 5, right: 6, width: 7, height: 7, borderRadius: '50%', background: '#fff', boxShadow: '0 0 0 2px rgba(0,0,0,.35)', animation: 'pulse 2s infinite' }} />
-                  {v.em_oferta && <span style={{ position: 'absolute', bottom: 4, left: 5 }}><Badge c="#fff" bg="rgba(238,77,45,.9)">oferta</Badge></span>}
+                <div style={{ width: '100%', height: 104, borderRadius: 10, marginBottom: 8, position: 'relative', overflow: 'hidden', background: 'radial-gradient(circle at 50% 38%, rgba(255,255,255,.07), rgba(0,0,0,.4))', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {v.imagem ? <img src={v.imagem} alt="" loading="lazy" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} /> : <Package size={26} style={{ color: 'rgba(255,255,255,.55)' }} />}
+                  <span style={{ position: 'absolute', top: 6, right: 7, width: 7, height: 7, borderRadius: '50%', background: '#fff', boxShadow: '0 0 0 2px rgba(0,0,0,.4)', animation: 'pulse 2s infinite' }} />
+                  {v.em_oferta && <span style={{ position: 'absolute', bottom: 5, left: 6 }}><Badge c="#fff" bg="rgba(238,77,45,.92)">oferta</Badge></span>}
                 </div>
-                <div style={{ fontSize: 10, fontWeight: 600, lineHeight: 1.25, height: 25, overflow: 'hidden' }}>{v.nome}</div>
+                <div title={v.nome} style={{ fontSize: 10.5, fontWeight: 600, lineHeight: 1.3, height: 28, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{v.nome}</div>
                 <div className="row num" style={{ display: 'flex', justifyContent: 'space-between', marginTop: 7, paddingTop: 7, borderTop: '1px solid var(--glass-border)', fontSize: 8.5 }}>
                   <span style={{ color: 'var(--faint)' }}>{v.impulsos}º imp.</span>
                   <span style={{ color: OK }}>{v.vendas} vendas</span>
@@ -414,13 +418,19 @@ export default function ShopeeBoost({ conectado, notify }) {
           ))}
         </div>
         {filaFiltrada.length === 0 ? <Empty icon={Package} texto={filaBusca || filaFiltro !== 'todos' ? 'Nenhum produto encontrado com esse filtro.' : 'Fila vazia. Ative a auto-seleção ou adicione produtos manualmente.'} />
-          : filaVisiveis.map((f) => {
+          : filaVisiveis.map((f, idx) => {
             const isA = f.auto
             const abcCor = f.abc === 'A' ? OK : f.abc === 'B' ? GOLD : DANGER
             const ineleg = f.elegivel === false
+            const pos = pagAtual * FILA_PP + idx + 1
+            const estFrac = Math.min(1, (f.estoque || 0) / maxEstoque)
+            const estCor = f.estoque == null ? 'var(--faint)' : f.estoque <= (f.giro || 0) * 3 && f.estoque > 0 ? WARN : PURPLE
             return (
-              <div key={f.item_id} className="glass lift" style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '10px 12px', borderRadius: 13, marginBottom: 8, borderLeft: `3px solid ${ineleg ? DANGER : isA ? PURPLE : WARN}`, opacity: ineleg ? .55 : 1 }}>
-                <span className="num" style={{ width: 20, textAlign: 'center', fontSize: 12, fontWeight: 800, color: 'var(--faint)' }}>{f.prioridade}</span>
+              <div key={f.item_id} className="glass lift" style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '10px 12px', borderRadius: 13, marginBottom: 8, borderLeft: `3px solid ${f.fixo ? GOLD : ineleg ? DANGER : isA ? PURPLE : WARN}`, opacity: ineleg ? .55 : 1 }}>
+                <div style={{ width: 24, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, flex: 'none' }}>
+                  <span className="num" style={{ fontSize: 13, fontWeight: 800, color: f.fixo ? GOLD : 'var(--dim)' }}>{pos}</span>
+                  {f.fixo && <Star size={9} style={{ color: GOLD }} fill={GOLD} />}
+                </div>
                 <div style={{ width: 40, height: 40, borderRadius: 10, overflow: 'hidden', flex: 'none', background: 'linear-gradient(135deg,rgba(238,77,45,.25),rgba(160,107,232,.2))', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{f.imagem ? <img src={f.imagem} alt="" loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Package size={17} style={{ color: 'var(--dim)' }} />}</div>
                 <div style={{ flex: 1.7, minWidth: 0 }}>
                   <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -429,16 +439,21 @@ export default function ShopeeBoost({ conectado, notify }) {
                   </div>
                   <div className="row" style={{ display: 'flex', gap: 6, marginTop: 3, flexWrap: 'wrap' }}>
                     <Badge c={isA ? PURPLE : WARN} bg={isA ? 'rgba(160,107,232,.14)' : 'rgba(224,162,60,.14)'}>{isA ? 'auto' : 'manual'}</Badge>
+                    {f.fixo && <Badge c={GOLD} bg="rgba(242,194,0,.14)"><Star size={8} fill={GOLD} />fixo</Badge>}
                     {f.em_oferta && <Badge c={SHOPEE} bg="rgba(238,77,45,.14)">em oferta</Badge>}
                     {f.preco_status === 'ok' && <Badge c={OK} bg="rgba(47,217,141,.13)"><Check size={8} />preço na régua</Badge>}
                     {f.preco_status === 'abaixo' && <Badge c={DANGER} bg="rgba(255,122,122,.14)"><AlertTriangle size={8} />preço abaixo{f.preco_sugerido ? ` · ideal R$ ${f.preco_sugerido}` : ''}</Badge>}
                     {f.preco_status === 'acima' && <Badge c={BLUE} bg="rgba(91,141,239,.14)">preço acima{f.preco_sugerido ? ` · ideal R$ ${f.preco_sugerido}` : ''}</Badge>}
                     {ineleg && <Badge c={DANGER} bg="rgba(255,122,122,.14)"><AlertTriangle size={8} />{f.motivo_ineleg || 'não elegível'}</Badge>}
-                    <span className="num" style={{ fontSize: 8.5, color: 'var(--faint)' }}>giro {f.giro}/dia · {f.impulsos} impulsos{f.estoque != null ? ` · ${f.estoque} un` : ''}</span>
+                    <span className="num" style={{ fontSize: 8.5, color: 'var(--faint)' }}>giro {f.giro}/dia · {f.impulsos} impulsos</span>
                   </div>
                 </div>
-                <div style={{ width: 66, textAlign: 'right' }}><div style={{ fontSize: 7, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)' }}>Vendas 30d</div><b className="num" style={{ fontSize: 12.5, color: f.vendas > 0 ? OK : 'var(--faint)' }}>{f.vendas}</b></div>
-                <div style={{ width: 70, textAlign: 'right' }}><div style={{ fontSize: 7, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)' }}>Entra em</div><b className="num" style={{ fontSize: 12, color: PURPLE }}>{f.entra_ciclos === 0 ? 'próximo' : `~${f.entra_ciclos * 4}h`}</b></div>
+                <div style={{ width: 96, flex: 'none' }}>
+                  <div className="row" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}><span style={{ fontSize: 7, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)' }}>Estoque</span><b className="num" style={{ fontSize: 9.5, color: estCor }}>{f.estoque != null ? `${f.estoque} un` : '—'}</b></div>
+                  <div style={{ height: 6, borderRadius: 3, background: 'rgba(255,255,255,.06)', overflow: 'hidden' }}><div style={{ width: `${estFrac * 100}%`, height: '100%', borderRadius: 3, background: estCor }} /></div>
+                </div>
+                <div style={{ width: 58, textAlign: 'right', flex: 'none' }}><div style={{ fontSize: 7, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)' }}>Vendas 30d</div><b className="num" style={{ fontSize: 12.5, color: f.vendas > 0 ? OK : 'var(--faint)' }}>{f.vendas}</b></div>
+                <div style={{ width: 64, textAlign: 'right', flex: 'none' }}><div style={{ fontSize: 7, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)' }}>Entra em</div><b className="num" style={{ fontSize: 12, color: f.fixo ? GOLD : PURPLE }}>{f.fixo ? 'sempre' : f.entra_ciclos === 0 ? 'próximo' : `~${f.entra_ciclos * 4}h`}</b></div>
                 <div className="row" style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                   <button onClick={() => moverNaFila(f.item_id, 'topo')} title="Mover para o topo" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '1px 4px', lineHeight: 0 }}><ChevronsUp size={13} style={{ color: 'var(--dim)' }} /></button>
                   <button onClick={() => moverNaFila(f.item_id, 'cima')} title="Subir uma posição" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '1px 4px', lineHeight: 0 }}><ChevronUp size={13} style={{ color: 'var(--faint)' }} /></button>

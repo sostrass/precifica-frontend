@@ -56,6 +56,28 @@ export default function ShopeeReputacao({ conectado, notify }) {
   const [ativ, setAtiv] = useState(null)
   const [estudio, setEstudio] = useState(false)
   const [cfg, setCfg] = useState(null)
+  const [foco, setFoco] = useState(null)          // {nota, busca, ts} — direciona o Inbox
+  const [focoComprador, setFocoComprador] = useState(null)  // {usuario, ts} — abre dossiê no Radar
+  const inboxRef = useRef(null)
+  const radarRef = useRef(null)
+
+  // executa a ação de um insight (cross-módulo de verdade)
+  const execInsight = async (ins) => {
+    if (ins.acao === 'mandar_boost' && ins.item_id) {
+      try { await api.shopeeBoostAdd([{ item_id: ins.item_id, nome: ins.nome }]); notify(`${ins.nome} entrou na fila do Boost.`, 'ok') } catch (e) { notify(e.message, 'danger') }
+      return
+    }
+    if (ins.acao === 'ver_criticas') {
+      setFoco({ nota: 'criticas', busca: ins.nome && !String(ins.nome).startsWith('#') ? ins.nome : '', ts: Date.now() })
+      if (inboxRef.current) inboxRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      return
+    }
+    if (ins.acao === 'ver_comprador' && ins.usuario) {
+      setFocoComprador({ usuario: ins.usuario, ts: Date.now() })
+      if (radarRef.current) radarRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      return
+    }
+  }
 
   const carregar = (forcar = 0) => {
     api.shopeeReputacaoPainel(forcar).then((d) => { setP(d); setCfg(d.config || {}); setErro(null) }).catch((e) => setErro(e.message))
@@ -127,6 +149,9 @@ export default function ShopeeReputacao({ conectado, notify }) {
         )}
       </div>
 
+      {/* ===== INSIGHTS ACIONÁVEIS ===== */}
+      {p && (p.insights || []).length > 0 && <Insights insights={p.insights} onAcao={execInsight} />}
+
       {/* ===== HERO: META + SAÚDE ===== */}
       {!p ? <div style={{ display: 'grid', gridTemplateColumns: '1.35fr 1fr', gap: 14 }}><Skel h={190} /><Skel h={190} /></div> : (
         <div style={{ display: 'grid', gridTemplateColumns: '1.35fr 1fr', gap: 14 }}>
@@ -159,14 +184,25 @@ export default function ShopeeReputacao({ conectado, notify }) {
         </div>
       )}
 
+      {/* ===== TEMAS POR IA ===== */}
+      <Temas notify={notify} />
+
       {/* ===== INBOX + COPILOTO ===== */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1.55fr 1fr', gap: 14, alignItems: 'start' }}>
-        <Inbox notify={notify} cfg={cfg} onRespondida={() => carregar()} />
+      <div ref={inboxRef} style={{ display: 'grid', gridTemplateColumns: '1.55fr 1fr', gap: 14, alignItems: 'start' }}>
+        <Inbox notify={notify} cfg={cfg} foco={foco} onRespondida={() => carregar()} />
         <Copiloto cfg={cfg} salvarCfg={salvarCfg} ativ={ativ} onMutirao={mutirao} onParar={async () => { try { await api.shopeeReviewParar(); notify('Agente pausado.', 'ok') } catch (e) { notify(e.message, 'danger') } }} onEstudio={() => setEstudio(true)} />
       </div>
 
       {/* ===== RADAR DE COMPRADORES ===== */}
-      {!p ? <Skel h={180} /> : <RadarCompradores dados={p.compradores} />}
+      <div ref={radarRef}>
+        {!p ? <Skel h={180} /> : <RadarCompradores dados={p.compradores} notify={notify} focoComprador={focoComprador} />}
+      </div>
+
+      {/* ===== REPUTAÇÃO POR PRODUTO ===== */}
+      {!p ? <Skel h={160} /> : <ReputacaoProdutos produtos={p.produtos} notify={notify} />}
+
+      {/* ===== LINHA DO TEMPO DA REPUTAÇÃO ===== */}
+      {!p ? <Skel h={160} /> : <LinhaDoTempo eventos={p.linha_tempo} />}
 
       {estudio && cfg && <Estudio cfg={cfg} onFechar={() => setEstudio(false)} onSalvar={async (novo) => { setCfg(novo); try { await api.shopeeReviewConfigSalvar(novo); notify('Configuração do copiloto salva.', 'ok'); setEstudio(false) } catch (e) { notify(e.message, 'danger') } }} notify={notify} />}
     </div>
@@ -335,7 +371,7 @@ function TendenciaChart({ tendencia }) {
 }
 
 /* ---------- INBOX DE RESPOSTAS ---------- */
-function Inbox({ notify, cfg, onRespondida }) {
+function Inbox({ notify, cfg, foco, onRespondida }) {
   const [status, setStatus] = useState('UNANSWERED')
   const [itens, setItens] = useState(null)
   const [cursor, setCursor] = useState('')
@@ -344,7 +380,11 @@ function Inbox({ notify, cfg, onRespondida }) {
   const [nota, setNota] = useState('todas')
   const [busca, setBusca] = useState('')
   const [pag, setPag] = useState(0)
+  const [modoSel, setModoSel] = useState(false)
+  const [sel, setSel] = useState(() => new Set())
+  const [lote, setLote] = useState(null)  // {feitas, total} durante o processamento
   const PP = 6
+  const toggleSel = (id) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
 
   const carregar = (st = status, cur = '', append = false) => {
     setCarregando(true)
@@ -358,6 +398,12 @@ function Inbox({ notify, cfg, onRespondida }) {
     }).catch((e) => { notify(e.message, 'danger'); if (!append) setItens([]) }).finally(() => setCarregando(false))
   }
   useEffect(() => { setItens(null); carregar(status, '') }, [status])
+  // foco vindo de um insight: pula pra fila sem resposta, filtro de críticas e busca do produto
+  useEffect(() => {
+    if (!foco || !foco.ts) return
+    setNota(foco.nota || 'criticas'); setBusca(foco.busca || ''); setPag(0)
+    setStatus('UNANSWERED')
+  }, [foco?.ts])
 
   const filtrados = (itens || []).filter((c) => {
     const s = c.rating_star || 0
@@ -374,12 +420,60 @@ function Inbox({ notify, cfg, onRespondida }) {
   const visiveis = filtrados.slice(pagAtual * PP, pagAtual * PP + PP)
   const nCriticas = (itens || []).filter((c) => (c.rating_star || 0) <= 2).length
 
+  // seleciona todas as 4-5★ visíveis (sem resposta) — atalho do modo massa
+  const selecionarAltas = () => {
+    const alvo = visiveis.filter((c) => (c.rating_star || 0) >= 4 && !(((c.comment_reply || {}).reply || '').trim()))
+    setSel(new Set(alvo.map((c) => c.comment_id)))
+  }
+  // aprova em lote: gera + envia cada selecionada, em sequência (anti-flood)
+  const aprovarLote = async () => {
+    const ids = [...sel]
+    const alvos = (itens || []).filter((c) => ids.includes(c.comment_id))
+    if (!alvos.length) { notify('Selecione ao menos uma avaliação.', 'warn'); return }
+    setLote({ feitas: 0, total: alvos.length }); let ok = 0
+    for (let i = 0; i < alvos.length; i++) {
+      const c = alvos[i]
+      try {
+        const r = await api.shopeeReviewSugerir({ nota: c.rating_star || 5, comentario: c.comment || '', produto: c.produto_nome || '', nome: c.buyer_username || '' })
+        const txt = typeof r === 'string' ? r : (r.texto || r.sugestao || '')
+        if (txt && txt.trim()) { await api.shopeeResponder({ comment_id: c.comment_id, texto: txt.trim() }); ok++ }
+      } catch (e) { /* segue o lote; erros não travam */ }
+      setLote({ feitas: i + 1, total: alvos.length })
+    }
+    setLote(null); setSel(new Set()); setModoSel(false)
+    notify(`Lote concluído: ${ok} de ${alvos.length} respondidas.`, ok ? 'ok' : 'warn')
+    if (onRespondida) onRespondida(); carregar(status, '')
+  }
+
+  const selVisiveis = visiveis.filter((c) => sel.has(c.comment_id)).length
+
   return (
     <div className="glass" style={{ padding: 16 }}>
       <Secao icon={MessageSquare} cor={SHOPEE} titulo={<>Inbox de respostas {itens && <span className="num" style={{ color: 'var(--faint)' }}>{filtrados.length} nesta lista</span>}</>} extra={<>
         <Badge c="#cfaef5" bg="rgba(160,107,232,.15)">RASCUNHO IA EM CADA CARD</Badge>
         <div style={{ flex: 1 }} />
+        <button onClick={() => { setModoSel((v) => !v); setSel(new Set()) }} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 9.5, fontWeight: 700, padding: '5px 11px', borderRadius: 8, cursor: 'pointer', color: modoSel ? '#0d0d0d' : 'var(--dim)', background: modoSel ? OK : 'var(--glass-bg)', border: `1px solid ${modoSel ? 'transparent' : 'var(--glass-border)'}` }}><Check size={11} />{modoSel ? 'Sair da seleção' : 'Selecionar em massa'}</button>
       </>} />
+      {modoSel && (
+        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 9, background: 'rgba(47,217,141,.06)', border: '1px solid rgba(47,217,141,.28)', borderRadius: 11, padding: '9px 12px', marginBottom: 11, flexWrap: 'wrap' }}>
+          {lote ? (
+            <>
+              <Loader2 size={14} className="animate-spin" style={{ color: OK }} />
+              <span style={{ fontSize: 10.5, color: 'var(--dim)', flex: 1 }}>Respondendo em lote com IA, com pausa entre cada…</span>
+              <b className="num" style={{ fontSize: 11, color: OK }}>{lote.feitas} / {lote.total}</b>
+            </>
+          ) : (
+            <>
+              <span style={{ fontSize: 10.5, color: 'var(--dim)' }}><b className="num" style={{ color: OK }}>{sel.size}</b> selecionada{sel.size === 1 ? '' : 's'}{selVisiveis !== sel.size ? ` (${selVisiveis} nesta página)` : ''}</span>
+              <button onClick={selecionarAltas} style={{ fontSize: 9.5, fontWeight: 700, padding: '5px 10px', borderRadius: 7, cursor: 'pointer', color: 'var(--dim)', background: 'var(--glass-bg)', border: '1px solid var(--glass-border)' }}>Marcar 4–5★ da página</button>
+              {sel.size > 0 && <button onClick={() => setSel(new Set())} style={{ fontSize: 9.5, fontWeight: 700, padding: '5px 10px', borderRadius: 7, cursor: 'pointer', color: 'var(--faint)', background: 'transparent', border: '1px solid var(--glass-border)' }}>Limpar</button>}
+              <div style={{ flex: 1 }} />
+              <button onClick={aprovarLote} disabled={!sel.size} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 800, padding: '6px 13px', borderRadius: 8, cursor: sel.size ? 'pointer' : 'default', color: '#0d0d0d', border: 'none', background: OK, opacity: sel.size ? 1 : .4 }}><Sparkles size={11} />Aprovar {sel.size || ''} com IA</button>
+            </>
+          )}
+        </div>
+      )}
+      {modoSel && <div style={{ fontSize: 8.5, color: 'var(--faint)', marginBottom: 10, marginTop: -4 }}>Recomendado para 4–5★: a IA gera e publica cada resposta em sequência. Críticas ficam de fora do lote — elas merecem um olhar seu.</div>}
       <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 11, flexWrap: 'wrap' }}>
         <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 11px', borderRadius: 9, background: 'rgba(0,0,0,.2)', border: '1px solid var(--glass-border)', width: 210 }}>
           <Search size={12} style={{ color: 'var(--faint)' }} />
@@ -401,7 +495,7 @@ function Inbox({ notify, cfg, onRespondida }) {
 
       {itens === null || (carregando && !itens.length) ? <div style={{ display: 'grid', gap: 9 }}>{[0, 1, 2].map((i) => <Skel key={i} h={110} />)}</div>
         : filtrados.length === 0 ? <Empty icon={MessageSquare} texto={busca || nota !== 'todas' ? 'Nenhuma avaliação com esse filtro.' : status === 'UNANSWERED' ? 'Fila zerada — nenhuma avaliação aguardando resposta. O copiloto agradece.' : 'Nenhuma avaliação nesta lista ainda.'} />
-          : visiveis.map((c) => <CardAvaliacao key={c.comment_id} c={c} cfg={cfg} notify={notify} onRespondida={onRespondida} />)}
+          : visiveis.map((c) => <CardAvaliacao key={c.comment_id} c={c} cfg={cfg} notify={notify} onRespondida={onRespondida} selecionavel={modoSel} selecionado={sel.has(c.comment_id)} onToggleSel={toggleSel} />)}
 
       {(filtrados.length > 0 || temMais) && (
         <div className="row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, marginTop: 11, flexWrap: 'wrap' }}>
@@ -416,7 +510,7 @@ function Inbox({ notify, cfg, onRespondida }) {
 }
 
 /* ---------- Card de avaliação com rascunho IA ---------- */
-function CardAvaliacao({ c, cfg, notify, onRespondida }) {
+function CardAvaliacao({ c, cfg, notify, onRespondida, selecionavel, selecionado, onToggleSel }) {
   const s = c.rating_star || 0
   const critica = s <= 2
   const morna = s === 3
@@ -428,6 +522,7 @@ function CardAvaliacao({ c, cfg, notify, onRespondida }) {
   const [enviando, setEnviando] = useState(false)
   const [enviada, setEnviada] = useState(false)
   const borda = critica ? DANGER : morna ? WARN : OK
+  const podeSelecionar = selecionavel && !respondida && !enviada
 
   const gerar = async () => {
     setGerando(true)
@@ -448,6 +543,9 @@ function CardAvaliacao({ c, cfg, notify, onRespondida }) {
   return (
     <div className="glass" style={{ padding: 13, borderRadius: 14, marginBottom: 9, borderLeft: `3px solid ${borda}` }}>
       <div className="row" style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+        {podeSelecionar && (
+          <div onClick={() => onToggleSel(c.comment_id)} style={{ width: 18, height: 18, borderRadius: 5, flex: 'none', marginTop: 12, cursor: 'pointer', border: `2px solid ${selecionado ? OK : 'var(--faint)'}`, background: selecionado ? OK : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{selecionado && <Check size={12} color="#0d0d0d" strokeWidth={3} />}</div>
+        )}
         <div style={{ width: 42, height: 42, borderRadius: 10, overflow: 'hidden', flex: 'none', background: 'linear-gradient(135deg,rgba(238,77,45,.3),rgba(160,107,232,.22))', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{c.produto_imagem ? <img src={c.produto_imagem} alt="" loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Package size={16} style={{ color: 'rgba(255,255,255,.8)' }} />}</div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
@@ -555,13 +653,28 @@ function Copiloto({ cfg, salvarCfg, ativ, onMutirao, onParar, onEstudio }) {
   )
 }
 
-/* ---------- Radar de compradores ---------- */
-function RadarCompradores({ dados }) {
+/* ---------- Radar de compradores + dossiê ---------- */
+function RadarCompradores({ dados, notify, focoComprador }) {
   const k = dados?.kpis || {}
   const lista = dados?.destaques || []
   const [filtro, setFiltro] = useState('todos')
+  const [aberto, setAberto] = useState(null)
+  const [dossie, setDossie] = useState(null)
+  const [carregando, setCarregando] = useState(false)
   const CLASSE = { promotor: [GOLD, 'PROMOTOR'], neutro: [BLUE, 'NEUTRO'], critico: [DANGER, 'ATENÇÃO'] }
   const visiveis = lista.filter((c) => filtro === 'todos' || c.classe === filtro)
+  const abrir = (usuario) => {
+    if (aberto === usuario) { setAberto(null); setDossie(null); return }
+    setAberto(usuario); setDossie(null); setCarregando(true)
+    api.shopeeReputacaoComprador(usuario).then(setDossie).catch((e) => notify(e.message, 'danger')).finally(() => setCarregando(false))
+  }
+  // abre o dossiê automaticamente quando um insight VIP pede foco neste comprador
+  useEffect(() => {
+    if (focoComprador && focoComprador.usuario && focoComprador.ts) {
+      setFiltro('todos'); setAberto(focoComprador.usuario); setDossie(null); setCarregando(true)
+      api.shopeeReputacaoComprador(focoComprador.usuario).then(setDossie).catch(() => {}).finally(() => setCarregando(false))
+    }
+  }, [focoComprador?.ts])
   return (
     <div className="glass" style={{ padding: 16, borderColor: 'rgba(91,141,239,.3)' }}>
       <Secao icon={Users} cor={BLUE} titulo="Radar de compradores · quem avalia a sua loja" extra={<>
@@ -571,7 +684,7 @@ function RadarCompradores({ dados }) {
         <Chip on={filtro === 'promotor'} onClick={() => setFiltro('promotor')}>Promotores ({k.promotores ?? 0})</Chip>
         <Chip on={filtro === 'critico'} onClick={() => setFiltro('critico')} cor={DANGER}>Atenção ({k.criticos ?? 0})</Chip>
       </>} />
-      <div style={{ fontSize: 9, color: 'var(--faint)', marginBottom: 11 }}>A Shopee não permite "dar nota" ao comprador — então o agente monta o perfil real: avaliações deixadas, média que dá, mídia enviada e recência.</div>
+      <div style={{ fontSize: 9, color: 'var(--faint)', marginBottom: 11 }}>A Shopee não permite "dar nota" ao comprador — então o agente monta o perfil real: avaliações deixadas, média que dá, mídia enviada e recência. Clique para abrir o dossiê.</div>
       {(k.total ?? 0) === 0 ? <Empty icon={Users} texto="Assim que as avaliações sincronizarem, cada comprador ganha um perfil com score e classificação — promotores, neutros e os que pedem atenção." /> : (
         <>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 9, marginBottom: 11 }}>
@@ -580,12 +693,14 @@ function RadarCompradores({ dados }) {
             <MiniStat label="Neutros" value={k.neutros} cor={WARN} />
             <MiniStat label="Críticos" value={k.criticos} sub="média abaixo de 3★" cor={DANGER} />
           </div>
+          {aberto && <Dossie usuario={aberto} dossie={dossie} carregando={carregando} onFechar={() => { setAberto(null); setDossie(null) }} />}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
             {visiveis.slice(0, 8).map((c) => {
               const cl = CLASSE[c.classe] || CLASSE.neutro
               const ini = (c.usuario || '?')[0].toUpperCase()
+              const sel = aberto === c.usuario
               return (
-                <div key={c.usuario} className="row lift" style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'rgba(0,0,0,.18)', borderRadius: 11, padding: '9px 12px' }}>
+                <div key={c.usuario} onClick={() => abrir(c.usuario)} className="lift" style={{ display: 'flex', alignItems: 'center', gap: 10, background: sel ? 'rgba(91,141,239,.1)' : 'rgba(0,0,0,.18)', border: `1px solid ${sel ? 'rgba(91,141,239,.4)' : 'transparent'}`, borderRadius: 11, padding: '9px 12px', cursor: 'pointer' }}>
                   <div style={{ width: 32, height: 32, borderRadius: '50%', background: `linear-gradient(135deg,${cl[0]},rgba(0,0,0,.35))`, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none', fontSize: 12, fontWeight: 800, color: c.classe === 'promotor' ? '#0d0d0d' : '#fff' }}>{ini}</div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6 }}><b style={{ fontSize: 11, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.usuario}</b><Badge c={cl[0]} bg="rgba(255,255,255,.06)">{cl[1]}</Badge></div>
@@ -597,6 +712,145 @@ function RadarCompradores({ dados }) {
             })}
           </div>
           {visiveis.length === 0 && <Empty icon={Users} texto="Nenhum comprador nessa classificação por enquanto." />}
+        </>
+      )}
+    </div>
+  )
+}
+
+function Dossie({ usuario, dossie, carregando, onFechar }) {
+  return (
+    <div style={{ background: 'rgba(91,141,239,.05)', border: '1px solid rgba(91,141,239,.3)', borderRadius: 13, padding: '13px 15px', marginBottom: 11 }}>
+      <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+        <div style={{ width: 34, height: 34, borderRadius: '50%', background: 'linear-gradient(135deg,var(--blue),#3a6fd8)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none', fontSize: 13, fontWeight: 800, color: '#fff' }}>{(usuario || '?')[0].toUpperCase()}</div>
+        <div style={{ flex: 1 }}><b style={{ fontSize: 13 }}>{usuario}</b><div style={{ fontSize: 8.5, color: 'var(--faint)' }}>dossiê do comprador</div></div>
+        <X size={15} style={{ color: 'var(--faint)', cursor: 'pointer' }} onClick={onFechar} />
+      </div>
+      {carregando ? <Skel h={80} /> : !dossie?.encontrado ? <Empty icon={Users} texto="Sem histórico deste comprador na coleta atual." /> : (
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8, marginBottom: 10 }}>
+            <MiniStat label="Pedidos" value={dossie.pedidos} />
+            <MiniStat label="Avaliações" value={dossie.avaliacoes} cor={BLUE} />
+            <MiniStat label="Média que dá" value={`${dossie.media}★`} cor={GOLD} />
+            <MiniStat label="Com mídia" value={`${dossie.com_midia}/${dossie.avaliacoes}`} cor={PURPLE} />
+          </div>
+          <div style={{ fontSize: 8, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)', marginBottom: 6 }}>Linha do tempo das avaliações</div>
+          {(dossie.linha_do_tempo || []).map((e, i) => (
+            <div key={i} className="row" style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '6px 0', borderBottom: i < dossie.linha_do_tempo.length - 1 ? '1px solid rgba(255,255,255,.04)' : 'none' }}>
+              <div style={{ width: 26, height: 26, borderRadius: 7, overflow: 'hidden', flex: 'none', background: 'rgba(255,255,255,.05)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{e.imagem ? <img src={e.imagem} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Package size={12} style={{ color: 'var(--faint)' }} />}</div>
+              <Estrelas n={e.nota} size={9} />
+              <span style={{ flex: 1, minWidth: 0, fontSize: 10, color: 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.produto}{e.comentario ? ` — "${e.comentario.slice(0, 40)}${e.comentario.length > 40 ? '…' : ''}"` : ''}</span>
+              {e.respondida ? <Badge c={OK} bg="rgba(47,217,141,.1)">respondida</Badge> : <Badge c={WARN} bg="rgba(224,162,60,.1)">sem resposta</Badge>}
+              <span className="num" style={{ fontSize: 8, color: 'var(--faint)', flex: 'none' }}>{tempoRel(e.quando)}</span>
+            </div>
+          ))}
+        </>
+      )}
+    </div>
+  )
+}
+
+/* ---------- Temas por IA ---------- */
+function Temas({ notify }) {
+  const [t, setT] = useState(null)
+  const [carregando, setCarregando] = useState(true)
+  const carregar = (forcar = 0) => { setCarregando(true); api.shopeeReputacaoTemas(forcar).then(setT).catch((e) => { notify(e.message, 'danger'); setT({ disponivel: false }) }).finally(() => setCarregando(false)) }
+  useEffect(() => { carregar() }, [])
+  return (
+    <div className="glass" style={{ padding: 16, borderColor: 'rgba(160,107,232,.35)' }}>
+      <Secao icon={Sparkles} cor={PURPLE} titulo="Temas dos comentários · lidos por IA" extra={<>
+        {t?.disponivel && <Badge c="#cfaef5" bg="rgba(160,107,232,.15)">{t.analisados} COMENTÁRIOS ANALISADOS</Badge>}
+        <div style={{ flex: 1 }} />
+        <button onClick={() => carregar(1)} disabled={carregando} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 9.5, fontWeight: 700, padding: '5px 11px', borderRadius: 8, cursor: 'pointer', color: '#cfaef5', background: 'rgba(160,107,232,.12)', border: '1px solid rgba(160,107,232,.3)' }}>{carregando ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}Reanalisar</button>
+      </>} />
+      {carregando && !t ? <Skel h={140} />
+        : !t?.disponivel ? <Empty icon={Sparkles} texto={t?.motivo === 'poucos comentários' ? 'Ainda há poucos comentários com texto para a IA extrair temas — conforme as avaliações chegam, os temas aparecem aqui.' : 'A análise de temas por IA está indisponível no momento. Tente reanalisar em instantes.'} />
+          : (
+            <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 16 }}>
+              <div>
+                {(t.temas || []).map((tema, i) => {
+                  const tot = Math.max(tema.mencoes, tema.positivas + tema.negativas, 1)
+                  const pPos = tema.positivas / tot * 100
+                  const pNeg = tema.negativas / tot * 100
+                  return (
+                    <div key={i} style={{ marginBottom: 10 }}>
+                      <div className="row" style={{ display: 'flex', alignItems: 'center', marginBottom: 3 }}><span style={{ fontSize: 10.5, fontWeight: 700 }}>{tema.tema}</span><div style={{ flex: 1 }} /><span className="num" style={{ fontSize: 9, color: 'var(--faint)' }}>{tema.mencoes} menções</span></div>
+                      <div className="row" style={{ display: 'flex', height: 10, borderRadius: 5, overflow: 'hidden', gap: 1 }}>
+                        <div title={`${tema.positivas} positivas`} style={{ width: `${pPos}%`, background: `linear-gradient(90deg,rgba(47,217,141,.4),${OK})` }} />
+                        <div title={`${tema.negativas} negativas`} style={{ width: `${pNeg}%`, background: DANGER }} />
+                        {pPos + pNeg < 1 && <div style={{ flex: 1, background: 'rgba(255,255,255,.05)' }} />}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+              <div>
+                <div style={{ background: 'rgba(0,0,0,.18)', borderRadius: 11, padding: '10px 12px', marginBottom: 8 }}>
+                  <div style={{ fontSize: 7.5, textTransform: 'uppercase', fontWeight: 800, color: OK, marginBottom: 4 }}>O que mais elogiam</div>
+                  {(t.elogios || []).length ? (t.elogios || []).map((e, i) => <div key={i} style={{ fontSize: 10, color: 'var(--dim)', fontStyle: 'italic', marginBottom: 2 }}>"{e}"</div>) : <div style={{ fontSize: 9.5, color: 'var(--faint)' }}>—</div>}
+                </div>
+                <div style={{ background: 'rgba(0,0,0,.18)', borderRadius: 11, padding: '10px 12px' }}>
+                  <div style={{ fontSize: 7.5, textTransform: 'uppercase', fontWeight: 800, color: DANGER, marginBottom: 4 }}>O que mais reclamam</div>
+                  {(t.reclamacoes || []).length ? (t.reclamacoes || []).map((e, i) => <div key={i} style={{ fontSize: 10, color: 'var(--dim)', fontStyle: 'italic', marginBottom: 2 }}>"{e}"</div>) : <div style={{ fontSize: 9.5, color: 'var(--faint)' }}>—</div>}
+                </div>
+              </div>
+            </div>
+          )}
+    </div>
+  )
+}
+
+/* ---------- Reputação por produto ---------- */
+function ReputacaoProdutos({ produtos, notify }) {
+  const [ordem, setOrdem] = useState('piores')
+  const [pag, setPag] = useState(0)
+  const PP = 8
+  const lista = [...(produtos || [])]
+  if (ordem === 'melhores') lista.sort((a, b) => b.media - a.media || b.avaliacoes - a.avaliacoes)
+  else if (ordem === 'mais') lista.sort((a, b) => b.avaliacoes - a.avaliacoes)
+  else lista.sort((a, b) => a.media - b.media || b.avaliacoes - a.avaliacoes)
+  const paginas = Math.max(1, Math.ceil(lista.length / PP))
+  const pa = Math.min(pag, paginas - 1)
+  const vis = lista.slice(pa * PP, pa * PP + PP)
+  const TEND = { sobe: [OK, '▲'], cai: [DANGER, '▼'], estavel: ['var(--faint)', '—'] }
+  return (
+    <div className="glass" style={{ padding: 16 }}>
+      <Secao icon={Package} cor={SHOPEE} titulo="Reputação por produto · cruzada com Boost e ofertas" extra={<>
+        <div style={{ flex: 1 }} />
+        <Chip on={ordem === 'piores'} onClick={() => { setOrdem('piores'); setPag(0) }}>Piores primeiro</Chip>
+        <Chip on={ordem === 'melhores'} onClick={() => { setOrdem('melhores'); setPag(0) }}>Melhores</Chip>
+        <Chip on={ordem === 'mais'} onClick={() => { setOrdem('mais'); setPag(0) }}>Mais avaliados</Chip>
+      </>} />
+      {lista.length === 0 ? <Empty icon={Package} texto="Assim que as avaliações sincronizarem, cada produto avaliado aparece aqui com nota, volume, % de críticas e cruzamento com o Boost e as ofertas." /> : (
+        <>
+          {vis.map((prod) => {
+            const cor = prod.media >= 4.5 ? OK : prod.media >= 3.5 ? WARN : DANGER
+            const td = TEND[prod.tendencia] || TEND.estavel
+            return (
+              <div key={prod.item_id} className="row lift" style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '9px 11px', borderRadius: 12, marginBottom: 7, borderLeft: `3px solid ${cor}`, background: prod.media < 3.5 ? 'rgba(255,122,122,.04)' : 'rgba(255,255,255,.02)' }}>
+                <div style={{ width: 40, height: 40, borderRadius: 9, overflow: 'hidden', flex: 'none', background: 'rgba(255,255,255,.05)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{prod.imagem ? <img src={prod.imagem} alt="" loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Package size={16} style={{ color: 'var(--faint)' }} />}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 11.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{prod.nome}</div>
+                  <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 2, flexWrap: 'wrap' }}>
+                    {prod.no_boost && <Badge c={PURPLE} bg="rgba(160,107,232,.12)">na fila do boost</Badge>}
+                    {prod.em_oferta && <Badge c={SHOPEE} bg="rgba(238,77,45,.12)">em oferta</Badge>}
+                    {prod.pct_midia > 0 && <span className="num" style={{ fontSize: 8, color: 'var(--faint)' }}>{prod.pct_midia}% com foto</span>}
+                  </div>
+                </div>
+                <div style={{ width: 62, textAlign: 'right', flex: 'none' }}><Estrelas n={Math.round(prod.media)} size={8} /><b className="num" style={{ fontSize: 12, color: cor, display: 'block' }}>{prod.media.toFixed(2)}</b></div>
+                <div style={{ width: 52, textAlign: 'right', flex: 'none' }}><div style={{ fontSize: 6.5, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)' }}>Aval.</div><b className="num" style={{ fontSize: 11 }}>{prod.avaliacoes}</b></div>
+                <div style={{ width: 52, textAlign: 'right', flex: 'none' }}><div style={{ fontSize: 6.5, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)' }}>Críticas</div><b className="num" style={{ fontSize: 11, color: prod.pct_criticas > 10 ? DANGER : 'var(--dim)' }}>{prod.pct_criticas}%</b></div>
+                <div style={{ width: 30, textAlign: 'center', flex: 'none', color: td[0], fontSize: 12 }}>{td[1]}</div>
+              </div>
+            )
+          })}
+          {lista.length > PP && (
+            <div className="row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, marginTop: 10 }}>
+              <button onClick={() => setPag((x) => Math.max(0, x - 1))} disabled={pa === 0} style={{ fontSize: 10.5, fontWeight: 700, padding: '5px 11px', borderRadius: 8, cursor: pa === 0 ? 'default' : 'pointer', color: 'var(--dim)', background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', opacity: pa === 0 ? .4 : 1 }}>← Anterior</button>
+              <span className="num" style={{ fontSize: 9.5, color: 'var(--faint)' }}>{pa * PP + 1}–{Math.min((pa + 1) * PP, lista.length)} de {lista.length}{paginas > 1 ? ` · pág. ${pa + 1}/${paginas}` : ''}</span>
+              <button onClick={() => setPag((x) => Math.min(paginas - 1, x + 1))} disabled={pa >= paginas - 1} style={{ fontSize: 10.5, fontWeight: 700, padding: '5px 11px', borderRadius: 8, cursor: pa >= paginas - 1 ? 'default' : 'pointer', color: 'var(--dim)', background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', opacity: pa >= paginas - 1 ? .4 : 1 }}>Próximo →</button>
+            </div>
+          )}
         </>
       )}
     </div>
@@ -717,6 +971,91 @@ function Estudio({ cfg, onFechar, onSalvar, notify }) {
           <button onClick={() => onSalvar(c)} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, fontWeight: 800, padding: '9px 17px', borderRadius: 10, cursor: 'pointer', color: '#fff', border: 'none', background: `linear-gradient(135deg,${SHOPEE},#c0341c)`, boxShadow: '0 6px 18px rgba(238,77,45,.35)' }}><Check size={13} />Salvar</button>
         </div>
       </div>
+    </div>
+  )
+}
+
+/* ---------- Insights acionáveis do agente ---------- */
+function Insights({ insights, onAcao }) {
+  const TOM = {
+    danger: [DANGER, 'rgba(255,122,122,.07)', 'rgba(255,122,122,.3)'],
+    warn: [WARN, 'rgba(224,162,60,.07)', 'rgba(224,162,60,.3)'],
+    gold: [GOLD, 'rgba(242,194,0,.07)', 'rgba(242,194,0,.3)'],
+    azul: [BLUE, 'rgba(91,141,239,.07)', 'rgba(91,141,239,.3)'],
+    roxo: [PURPLE, 'rgba(160,107,232,.07)', 'rgba(160,107,232,.3)'],
+    ok: [OK, 'rgba(47,217,141,.07)', 'rgba(47,217,141,.3)'],
+  }
+  const ICONE = { alerta: AlertTriangle, foguete: TrendingUp, relogio: Clock, coroa: Star, ok: Check }
+  const [feito, setFeito] = useState({})
+  const agir = (ins, i) => { onAcao(ins); if (ins.acao === 'mandar_boost') setFeito((s) => ({ ...s, [i]: true })) }
+  return (
+    <div className="glass" style={{ padding: '14px 16px', border: '1px solid transparent', background: 'linear-gradient(var(--surface),var(--surface)) padding-box,linear-gradient(110deg,rgba(160,107,232,.4),rgba(242,194,0,.3),rgba(238,77,45,.3)) border-box' }}>
+      <Secao icon={Sparkles} cor={PURPLE} titulo="Insights do agente de reputação" extra={<>
+        <Badge c="#cfaef5" bg="rgba(160,107,232,.15)">IA · AÇÃO EM 1 CLIQUE</Badge>
+        <div style={{ flex: 1 }} />
+        <span className="num" style={{ fontSize: 9, color: 'var(--faint)' }}>{insights.length} achado{insights.length === 1 ? '' : 's'}</span>
+      </>} />
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(insights.length, 4)},1fr)`, gap: 10 }}>
+        {insights.map((ins, i) => {
+          const t = TOM[ins.tom] || TOM.roxo
+          const Ic = ICONE[ins.icone] || Sparkles
+          const done = feito[i]
+          return (
+            <div key={i} style={{ background: t[1], border: `1px solid ${t[2]}`, borderRadius: 13, padding: '12px 13px', display: 'flex', flexDirection: 'column' }}>
+              <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 6 }}>
+                <div style={{ width: 24, height: 24, borderRadius: 7, background: `${t[0]}22`, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}><Ic size={13} style={{ color: t[0] }} /></div>
+                <b style={{ fontSize: 10.5, color: t[0], lineHeight: 1.2 }}>{ins.titulo}</b>
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--dim)', lineHeight: 1.45, flex: 1, marginBottom: 9 }}>{ins.texto}</div>
+              <button onClick={() => agir(ins, i)} disabled={done} className="row" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5, fontSize: 10, fontWeight: 800, padding: '7px 11px', borderRadius: 8, cursor: done ? 'default' : 'pointer', color: done ? OK : (ins.tom === 'gold' ? '#0d0d0d' : '#fff'), border: 'none', background: done ? 'rgba(47,217,141,.15)' : t[0], opacity: done ? 1 : 1 }}>
+                {done ? <><Check size={11} />No Boost</> : <>{ins.acao === 'mandar_boost' ? <TrendingUp size={11} /> : ins.acao === 'ver_comprador' ? <Users size={11} /> : <ChevronRight size={11} />}{ins.rotulo}</>}
+              </button>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+/* ---------- Linha do tempo da reputação ---------- */
+function LinhaDoTempo({ eventos }) {
+  const TOM = { danger: DANGER, warn: WARN, gold: GOLD, azul: BLUE, roxo: PURPLE, ok: OK }
+  const ICONE = { critica: AlertTriangle, prova_social: ImageIcon, recompra: Star, agente: Bot }
+  const [filtro, setFiltro] = useState('todos')
+  const vis = (eventos || []).filter((e) => filtro === 'todos' || e.tipo === filtro)
+  const cont = (tipo) => (eventos || []).filter((e) => e.tipo === tipo).length
+  return (
+    <div className="glass" style={{ padding: 16 }}>
+      <Secao icon={Activity} cor={PURPLE} titulo="Linha do tempo da reputação · marcos ao vivo" extra={<>
+        <Badge c="#cfaef5" bg="rgba(160,107,232,.15)">EVENTOS REAIS</Badge>
+        <div style={{ flex: 1 }} />
+        <Chip on={filtro === 'todos'} onClick={() => setFiltro('todos')}>Tudo</Chip>
+        {cont('critica') > 0 && <Chip on={filtro === 'critica'} onClick={() => setFiltro('critica')} cor={DANGER}>Críticas ({cont('critica')})</Chip>}
+        {cont('prova_social') > 0 && <Chip on={filtro === 'prova_social'} onClick={() => setFiltro('prova_social')}>Prova social ({cont('prova_social')})</Chip>}
+        {cont('recompra') > 0 && <Chip on={filtro === 'recompra'} onClick={() => setFiltro('recompra')}>Fiéis ({cont('recompra')})</Chip>}
+      </>} />
+      {vis.length === 0 ? <Empty icon={Activity} texto="Conforme as avaliações chegam, os marcos aparecem aqui: críticas, prova social (fotos/vídeos), clientes fiéis e cada resposta do copiloto — em ordem, com o horário real." /> : (
+        <div style={{ position: 'relative', paddingLeft: 20 }}>
+          <div style={{ position: 'absolute', left: 6, top: 4, bottom: 4, width: 2, background: 'linear-gradient(var(--glass-border),transparent)' }} />
+          {vis.map((e, i) => {
+            const cor = TOM[e.tom] || PURPLE
+            const Ic = ICONE[e.tipo] || Activity
+            return (
+              <div key={i} style={{ position: 'relative', paddingBottom: i < vis.length - 1 ? 13 : 0 }}>
+                <div style={{ position: 'absolute', left: -20, top: 1, width: 14, height: 14, borderRadius: '50%', background: 'var(--surface)', border: `2px solid ${cor}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><span style={{ width: 5, height: 5, borderRadius: '50%', background: cor }} /></div>
+                <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
+                  <Ic size={12} style={{ color: cor }} />
+                  <b style={{ fontSize: 10.5, color: cor }}>{e.titulo}</b>
+                  <span style={{ fontSize: 10.5, color: 'var(--dim)' }}>{e.texto}</span>
+                  <div style={{ flex: 1 }} />
+                  <span className="num" style={{ fontSize: 8.5, color: 'var(--faint)', flex: 'none' }}>{e.quando ? tempoRel(e.quando) : ''}</span>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
