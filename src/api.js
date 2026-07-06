@@ -88,6 +88,8 @@ export const api = {
   shopeeBoostRodar: () => req('/api/shopee/boost/rodar', { method: 'POST' }),
   shopeeBoostSincronizarNomes: () => req('/api/shopee/boost/sincronizar_nomes', { method: 'POST' }),
   shopeeBoostDesempenho: () => req('/api/shopee/boost/desempenho'),
+  shopeeBoostPainel: () => req('/api/shopee/boost/painel'),
+  shopeeBoostPico: () => req('/api/shopee/boost/pico'),
   shopeeBoostAutoSelecionar: (estrategia) => req('/api/shopee/boost/auto_selecionar', { method: 'POST', body: { estrategia } }),
   shopeeBoostCondGet: () => req('/api/shopee/boost/condicional'),
   shopeeBoostCondSalvar: (b) => req('/api/shopee/boost/condicional', { method: 'PUT', body: b }),
@@ -167,6 +169,7 @@ export const api = {
     return req(`/api/mercadolivre/produtos/painel?${p.toString()}`)
   },
   mlProdutoUm: (itemId) => req(`/api/mercadolivre/produtos/${itemId}`),
+  mlSetAtributos: (itemId, atributos) => req(`/api/mercadolivre/produtos/${itemId}/atributos`, { method: 'POST', body: { atributos } }),
   mlProdutoEditar: (itemId, body) => req(`/api/mercadolivre/produtos/${itemId}/editar`, { method: 'POST', body }),
   mlProdutoIaTitulo: (body) => req('/api/mercadolivre/produtos/ia/titulo', { method: 'POST', body }),
   mlProdutoIaDescricao: (body) => req('/api/mercadolivre/produtos/ia/descricao', { method: 'POST', body }),

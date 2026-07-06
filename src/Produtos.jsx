@@ -703,7 +703,7 @@ function Cockpit({ p, onClose, notify, onSaved }) {
     finally { setIaDescSaving(false) }
   }
 
-  const SUBTABS = [['editar', 'Editar'], ['preco', 'Precificação'], ['atacado', 'Atacado PxQ'], ['fiscal', 'Fiscal'], ['hist', 'Histórico']]
+  const SUBTABS = [['editar', 'Editar'], ['ficha', 'Ficha técnica'], ['preco', 'Precificação'], ['atacado', 'Atacado PxQ'], ['fiscal', 'Fiscal'], ['hist', 'Histórico']]
 
   return (
     <div style={{ position: 'sticky', top: 76, borderRadius: 18, border: '1px solid transparent', background: 'linear-gradient(180deg,var(--surface),#150b12) padding-box, linear-gradient(155deg,rgba(214,0,127,.65),rgba(214,0,127,.05) 42%,rgba(255,255,255,.10)) border-box', boxShadow: '0 22px 64px rgba(0,0,0,.5)' }}>
@@ -845,6 +845,7 @@ function Cockpit({ p, onClose, notify, onSaved }) {
           </>
         )}
 
+        {subtab === 'ficha' && <FichaTecnica det={det} notify={notify} />}
         {subtab === 'preco' && (
           <div className="glass" style={{ padding: 11, marginBottom: 12, borderRadius: 12 }}>
             <b style={{ fontSize: 10.5 }}>Cascata da regra (Bling → ML)</b>
@@ -878,6 +879,15 @@ function Cockpit({ p, onClose, notify, onSaved }) {
 }
 
 /* Atacado PxQ — faixas livres com validação de piso ao vivo */
+function gtinValido(s) {
+  const d = (s || '').replace(/\D/g, '')
+  if (![8, 12, 13, 14].includes(d.length)) return false
+  const nums = d.split('').map(Number)
+  const check = nums.pop()
+  let sum = 0
+  nums.reverse().forEach((n, i) => { sum += n * (i % 2 === 0 ? 3 : 1) })
+  return (10 - (sum % 10)) % 10 === check
+}
 function AttrCampo({ a, attrVals, setAttrVals, iaFilled, setIaFilled }) {
   const ia = iaFilled.has(a.id)
   const val = attrVals[a.id]
@@ -887,14 +897,15 @@ function AttrCampo({ a, attrVals, setAttrVals, iaFilled, setIaFilled }) {
   const setVal = (v) => { setAttrVals((s) => ({ ...s, [a.id]: v })); clearIa() }
   const temValores = a.valores && a.valores.length > 0
   const poucos = temValores && a.valores.length <= 6
+  const gtinOk = (a.gtin && val?.value_name) ? gtinValido(val.value_name) : null
   return (
-    <div style={{ marginBottom: 11, paddingLeft: 10, borderLeft: `2px solid ${ia ? 'var(--accent2)' : (preenchido ? 'rgba(47,217,141,.3)' : 'transparent')}` }}>
-      <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
-        <b style={{ fontSize: 11, color: 'var(--text)' }}>{a.nome}</b>
-        {a.obrigatorio && <Badge c="var(--danger)" bg="rgba(255,122,122,.12)">obrigatório</Badge>}
+    <div style={{ paddingLeft: 9, borderLeft: `2px solid ${ia ? 'var(--accent2)' : (preenchido ? 'rgba(47,217,141,.3)' : 'transparent')}` }}>
+      <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 5 }}>
+        <b style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '.4px', fontWeight: 800, color: 'var(--faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.nome}{a.obrigatorio && <span style={{ color: 'var(--danger)', marginLeft: 3 }}>*</span>}</b>
         {ia && <Badge c="#cfaef5" bg="rgba(160,107,232,.18)"><Sparkles size={8} />IA</Badge>}
         <div style={{ flex: 1 }} />
-        {preenchido && <Check size={12} style={{ color: 'var(--ok)' }} />}
+        {a.gtin && val?.value_name ? (gtinOk ? <Badge c="var(--ok)" bg="rgba(47,217,141,.14)">válido</Badge> : <Badge c="var(--danger)" bg="rgba(255,122,122,.14)">inválido</Badge>)
+          : (!a.gtin && preenchido && <Check size={11} style={{ color: 'var(--ok)' }} />)}
       </div>
       {poucos ? (
         <div className="row" style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
@@ -904,12 +915,137 @@ function AttrCampo({ a, attrVals, setAttrVals, iaFilled, setIaFilled }) {
           })}
         </div>
       ) : temValores ? (
-        <select value={val?.value_id || ''} onChange={(e) => { const v = a.valores.find((x) => x.id === e.target.value); setVal(v ? { value_id: v.id, value_name: v.nome } : undefined) }} style={{ width: '100%', background: 'rgba(0,0,0,.2)', border: `1px solid ${brd}`, borderRadius: 9, color: 'var(--text)', fontSize: 11.5, padding: '8px 10px' }}>
+        <select value={val?.value_id || ''} onChange={(e) => { const v = a.valores.find((x) => x.id === e.target.value); setVal(v ? { value_id: v.id, value_name: v.nome } : undefined) }} style={{ width: '100%', background: 'rgba(0,0,0,.2)', border: `1px solid ${brd}`, borderRadius: 9, color: 'var(--text)', fontSize: 11.5, padding: '9px 10px' }}>
           <option value="">— selecione —</option>
           {a.valores.map((v) => <option key={v.id} value={v.id}>{v.nome}</option>)}
         </select>
       ) : (
-        <input value={val?.value_name || ''} onChange={(e) => setVal(e.target.value ? { value_name: e.target.value } : undefined)} placeholder={a.exemplo || 'Digite o valor'} style={{ width: '100%', background: 'rgba(0,0,0,.2)', border: `1px solid ${brd}`, borderRadius: 9, color: 'var(--text)', fontSize: 11.5, padding: '8px 10px' }} />
+        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <input value={val?.value_name || ''} onChange={(e) => setVal(e.target.value ? { value_name: e.target.value } : undefined)} placeholder="Digite o valor" style={{ flex: 1, minWidth: 0, background: 'rgba(0,0,0,.2)', border: `1px solid ${brd}`, borderRadius: 9, color: 'var(--text)', fontSize: 11.5, padding: '9px 10px' }} />
+          {a.unidade && <span style={{ fontSize: 10.5, color: 'var(--faint)', flex: 'none' }}>{a.unidade}</span>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function AttrGrade({ attrs, attrVals, setAttrVals, iaFilled, setIaFilled, busca, setBusca, showRec, setShowRec }) {
+  const q = (busca || '').trim().toLowerCase()
+  const match = (a) => !q || (a.nome || '').toLowerCase().includes(q)
+  const todosObrig = attrs.filter((a) => a.obrigatorio)
+  const obrig = todosObrig.filter(match)
+  const recRel = attrs.filter((a) => !a.obrigatorio && a.relevante && match(a))
+  const recTail = attrs.filter((a) => !a.obrigatorio && !a.relevante && match(a))
+  const obrigOkN = todosObrig.filter((a) => { const v = attrVals[a.id]; return v && (v.value_name || v.value_id) }).length
+  const compl = todosObrig.length ? obrigOkN >= todosObrig.length : true
+  const grade = (items) => <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: '13px 16px' }}>{items.map((a) => <AttrCampo key={a.id} a={a} attrVals={attrVals} setAttrVals={setAttrVals} iaFilled={iaFilled} setIaFilled={setIaFilled} />)}</div>
+  return (
+    <>
+      {todosObrig.length > 0 && (
+        <div style={{ marginBottom: 14, padding: '10px 12px', borderRadius: 12, background: compl ? 'rgba(47,217,141,.08)' : 'rgba(224,162,60,.07)', border: `1px solid ${compl ? 'rgba(47,217,141,.28)' : 'rgba(224,162,60,.25)'}` }}>
+          <div className="row" style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
+            <b style={{ fontSize: 10.5, color: compl ? 'var(--ok)' : 'var(--warn)' }}>{compl ? 'Obrigatórios completos' : 'Complete os atributos obrigatórios'}</b>
+            <div style={{ flex: 1 }} />
+            <span className="num" style={{ fontSize: 11, fontWeight: 800, color: compl ? 'var(--ok)' : 'var(--warn)' }}>{obrigOkN}/{todosObrig.length}</span>
+          </div>
+          <div style={{ height: 6, borderRadius: 99, background: 'rgba(255,255,255,.06)', overflow: 'hidden' }}><div style={{ width: `${todosObrig.length ? (obrigOkN / todosObrig.length) * 100 : 0}%`, height: '100%', borderRadius: 99, background: compl ? 'var(--ok)' : 'var(--warn)', transition: 'width .3s' }} /></div>
+          <div className="note" style={{ fontSize: 9, color: 'var(--faint)', marginTop: 7, display: 'flex', gap: 5 }}><Sparkles size={10} style={{ color: '#cfaef5', flex: 'none', marginTop: 1 }} />Só os campos que a sua categoria realmente usa. {iaFilled.size > 0 ? `A IA preencheu ${iaFilled.size} — revise os marcados em roxo.` : 'Use "Preencher com IA" para adiantar.'}</div>
+        </div>
+      )}
+      {attrs.length > 10 && (
+        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(0,0,0,.2)', border: '1px solid var(--glass-border)', borderRadius: 10, padding: '7px 11px', marginBottom: 14 }}>
+          <Search size={13} style={{ color: 'var(--faint)' }} />
+          <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Filtrar atributos pelo nome…" style={{ flex: 1, background: 'none', border: 'none', outline: 'none', color: 'var(--text)', fontSize: 11.5 }} />
+          {busca && <X size={13} style={{ color: 'var(--faint)', cursor: 'pointer' }} onClick={() => setBusca('')} />}
+        </div>
+      )}
+      {obrig.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 11 }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--danger)' }} /><b style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '.5px', color: 'var(--danger)' }}>Obrigatórios</b><span className="num" style={{ fontSize: 9, color: 'var(--faint)' }}>{obrig.length}</span></div>
+          {grade(obrig)}
+        </div>
+      )}
+      {recRel.length > 0 && (
+        <div style={{ marginBottom: recTail.length ? 14 : 0 }}>
+          <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 11 }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: '#cfaef5' }} /><b style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '.5px', color: '#cfaef5' }}>Recomendados</b><span className="num" style={{ fontSize: 9, color: 'var(--faint)' }}>{recRel.length}</span></div>
+          {grade(recRel)}
+        </div>
+      )}
+      {recTail.length > 0 && (showRec ? (
+        <div>
+          <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 11 }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--faint)' }} /><b style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '.5px', color: 'var(--faint)' }}>Outros da categoria</b><span className="num" style={{ fontSize: 9, color: 'var(--faint)' }}>{recTail.length}</span></div>
+          {grade(recTail)}
+          <button onClick={() => setShowRec(false)} style={{ marginTop: 10, display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 700, padding: '7px 12px', borderRadius: 9, cursor: 'pointer', color: 'var(--dim)', border: '1px solid var(--glass-border)', background: 'rgba(255,255,255,.03)' }}><ChevronRight size={12} style={{ transform: 'rotate(-90deg)' }} />Mostrar menos</button>
+        </div>
+      ) : (
+        <button onClick={() => setShowRec(true)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10.5, fontWeight: 700, padding: '8px 13px', borderRadius: 9, cursor: 'pointer', color: 'var(--dim)', border: '1px solid var(--glass-border)', background: 'rgba(255,255,255,.03)' }}><ChevronRight size={12} style={{ transform: 'rotate(90deg)' }} />Ver outros {recTail.length} atributos da categoria</button>
+      ))}
+      {q && obrig.length + recRel.length + recTail.length === 0 && <Empty texto="Nenhum atributo com esse nome." />}
+    </>
+  )
+}
+
+const CORES_HEX = { prata: '#C0C0C0', prateada: '#C0C0C0', prateado: '#C0C0C0', dourada: '#D4AF37', dourado: '#D4AF37', ouro: '#D4AF37', preta: '#2a2a2a', preto: '#2a2a2a', branca: '#f0f0f0', branco: '#f0f0f0', vermelha: '#c0392b', vermelho: '#c0392b', azul: '#2980b9', verde: '#27ae60', rosa: '#e84393', amarela: '#f1c40f', amarelo: '#f1c40f', roxa: '#8e44ad', roxo: '#8e44ad', lilás: '#b39ddb', lilas: '#b39ddb', cinza: '#7f8c8d', marrom: '#795548', laranja: '#e67e22', bege: '#e3d5b8', nude: '#e8c9b0', transparente: 'rgba(255,255,255,.2)', cristal: 'rgba(255,255,255,.2)' }
+function corDe(nome) {
+  const k = (nome || '').trim().toLowerCase()
+  if (CORES_HEX[k]) return CORES_HEX[k]
+  for (const c of Object.keys(CORES_HEX)) if (k.includes(c)) return CORES_HEX[c]
+  return null
+}
+function Variacoes({ attrs, variacoes, setVariacoes }) {
+  const [addAberto, setAddAberto] = useState(false)
+  const varAttrs = (attrs || []).filter((a) => a.variacao && a.valores && a.valores.length > 0)
+  if (varAttrs.length === 0) return null
+  const ativo = !!variacoes
+  const attrAtual = varAttrs.find((a) => a.id === variacoes?.attrId) || varAttrs[0]
+  const ativar = () => { setVariacoes({ attrId: varAttrs[0].id, attrNome: varAttrs[0].nome, itens: [] }); setAddAberto(true) }
+  const desativar = () => { setVariacoes(null); setAddAberto(false) }
+  const trocarAttr = (id) => { const a = varAttrs.find((x) => x.id === id); setVariacoes({ attrId: id, attrNome: a.nome, itens: [] }); setAddAberto(true) }
+  const addValor = (v) => { setVariacoes((s) => ({ ...s, itens: [...s.itens, { value_id: v.id, value_name: v.nome, qtd: 0, sku: '' }] })); setAddAberto(false) }
+  const rmValor = (i) => setVariacoes((s) => ({ ...s, itens: s.itens.filter((_, idx) => idx !== i) }))
+  const setCampo = (i, campo, val) => setVariacoes((s) => ({ ...s, itens: s.itens.map((x, idx) => idx === i ? { ...x, [campo]: campo === 'qtd' ? Math.max(0, Number(val) || 0) : val } : x) }))
+  const usados = new Set((variacoes?.itens || []).map((x) => x.value_id))
+  const disponiveis = (attrAtual?.valores || []).filter((v) => !usados.has(v.id))
+  const totalVar = (variacoes?.itens || []).reduce((s, x) => s + (Number(x.qtd) || 0), 0)
+  return (
+    <div className="glass" style={{ padding: 13, marginBottom: 12, borderRadius: 12, border: '1px solid rgba(160,107,232,.28)' }}>
+      <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <Layers size={13} style={{ color: '#cfaef5' }} />
+        <b style={{ fontSize: 10.5 }}>Variações</b>
+        {ativo ? <Badge c="#cfaef5" bg="rgba(160,107,232,.16)">{attrAtual?.nome} · {(variacoes.itens || []).length}</Badge> : <Badge c="var(--dim)" bg="rgba(255,255,255,.05)">opcional</Badge>}
+        <div style={{ flex: 1 }} />
+        {ativo ? (<>{totalVar > 0 && <span className="num" style={{ fontSize: 9.5, color: 'var(--ok)', marginRight: 4 }}>{totalVar} un no total</span>}<MiniBtn icon={X} onClick={desativar}>Remover</MiniBtn></>)
+          : <button onClick={ativar} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 700, padding: '6px 12px', borderRadius: 9, cursor: 'pointer', color: '#e9dbfb', border: '1px solid rgba(160,107,232,.45)', background: 'linear-gradient(135deg,rgba(160,107,232,.22),rgba(214,0,127,.16))' }}><Plus size={12} />Ativar variações</button>}
+      </div>
+      {ativo && (
+        <div style={{ marginTop: 12 }}>
+          {varAttrs.length > 1 && (
+            <div className="row" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginBottom: 11 }}>
+              <span style={{ fontSize: 9, color: 'var(--faint)', textTransform: 'uppercase', fontWeight: 800 }}>varia por</span>
+              {varAttrs.map((a) => <span key={a.id} onClick={() => trocarAttr(a.id)} style={{ fontSize: 10, fontWeight: 700, padding: '4px 10px', borderRadius: 99, cursor: 'pointer', color: a.id === attrAtual.id ? '#fff' : 'var(--dim)', background: a.id === attrAtual.id ? 'var(--accent)' : 'rgba(255,255,255,.04)', border: `1px solid ${a.id === attrAtual.id ? 'transparent' : 'var(--glass-border)'}` }}>{a.nome}</span>)}
+            </div>
+          )}
+          {(variacoes.itens || []).length === 0 && <div className="note" style={{ fontSize: 9.5, color: 'var(--faint)', display: 'flex', gap: 6, marginBottom: 10 }}><Info size={11} style={{ flex: 'none', marginTop: 1 }} />Adicione cada variação (ex.: cores) com o estoque próprio — o estoque do anúncio passa a ser a soma.</div>}
+          {(variacoes.itens || []).map((x, i) => {
+            const cor = corDe(x.value_name)
+            return (
+              <div key={i} className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7, background: 'rgba(0,0,0,.16)', borderRadius: 9, padding: '7px 9px' }}>
+                <span style={{ width: 18, height: 18, borderRadius: '50%', flex: 'none', background: cor || 'rgba(255,255,255,.1)', border: '1px solid rgba(255,255,255,.25)' }} />
+                <b style={{ fontSize: 11.5, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{x.value_name}</b>
+                <input value={x.sku} onChange={(e) => setCampo(i, 'sku', e.target.value)} placeholder="SKU" className="num" style={{ width: 92, padding: '5px 8px', fontSize: 10, background: 'rgba(0,0,0,.2)', border: '1px solid var(--glass-border)', borderRadius: 7, color: 'var(--text)' }} />
+                <input type="number" value={x.qtd} onChange={(e) => setCampo(i, 'qtd', e.target.value)} className="num" style={{ width: 58, padding: '5px 8px', fontSize: 11, textAlign: 'center', background: 'rgba(0,0,0,.2)', border: `1px solid ${Number(x.qtd) > 0 ? 'rgba(47,217,141,.35)' : 'var(--glass-border)'}`, borderRadius: 7, color: 'var(--text)' }} />
+                <span style={{ fontSize: 8.5, color: 'var(--faint)' }}>un</span>
+                <X size={13} style={{ color: 'var(--faint)', cursor: 'pointer' }} onClick={() => rmValor(i)} />
+              </div>
+            )
+          })}
+          {disponiveis.length > 0 && (addAberto ? (
+            <div className="row" style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 9 }}>
+              {disponiveis.slice(0, 60).map((v) => { const cor = corDe(v.nome); return <span key={v.id} onClick={() => addValor(v)} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 600, padding: '5px 10px', borderRadius: 99, cursor: 'pointer', color: 'var(--dim)', background: 'rgba(255,255,255,.04)', border: '1px solid var(--glass-border)' }}><span style={{ width: 11, height: 11, borderRadius: '50%', background: cor || 'rgba(255,255,255,.15)', border: '1px solid rgba(255,255,255,.2)' }} />{v.nome}</span> })}
+              <MiniBtn icon={X} onClick={() => setAddAberto(false)}>fechar</MiniBtn>
+            </div>
+          ) : <div style={{ marginTop: 9 }}><MiniBtn icon={Plus} onClick={() => setAddAberto(true)}>variação</MiniBtn></div>)}
+        </div>
       )}
     </div>
   )
@@ -964,6 +1100,63 @@ function AtacadoPxQ({ p, preco, ratio, precoBling, notify }) {
         <div style={{ flex: 1 }} />
         <MiniBtn icon={Check} onClick={() => notify('Aplicar PxQ entra com o endpoint de preços por quantidade do ML.', 'warn')}>Aplicar no ML</MiniBtn>
       </div>
+    </div>
+  )
+}
+
+function FichaTecnica({ det, notify }) {
+  const [attrs, setAttrs] = useState(null)
+  const [attrVals, setAttrVals] = useState({})
+  const [carregando, setCarregando] = useState(true)
+  const [iaFilled, setIaFilled] = useState(() => new Set())
+  const [iaLoad, setIaLoad] = useState(false)
+  const [salvando, setSalvando] = useState(false)
+  const [busca, setBusca] = useState('')
+  const [showRec, setShowRec] = useState(false)
+  useEffect(() => {
+    if (!det.category_id) { setAttrs([]); setCarregando(false); return }
+    setCarregando(true)
+    api.mlCategoriaAtributos(det.category_id).then((r) => {
+      setAttrs(r.atributos || [])
+      const init = {}
+      ;(det.atributos || []).forEach((a) => { if (a.id && (a.value_id || a.value_name)) init[a.id] = { value_id: a.value_id, value_name: a.value_name } })
+      setAttrVals(init)
+    }).catch(() => setAttrs([])).finally(() => setCarregando(false))
+  }, [det.category_id])
+  const preencherIa = async () => {
+    if (!det.category_id) return
+    setIaLoad(true)
+    try {
+      const r = await api.mlCategoriaAtributosIa(det.category_id, { titulo: det.titulo })
+      setAttrVals((prev) => { const nv = { ...prev }; (r.sugestoes || []).forEach((s) => { nv[s.id] = { value_name: s.value_name, value_id: s.value_id } }); return nv })
+      setIaFilled(new Set((r.sugestoes || []).map((s) => s.id)))
+      notify(`IA sugeriu ${(r.sugestoes || []).length} atributo(s) — revise os roxos e salve.`, 'ok')
+    } catch (e) { notify(e?.data?.detail || 'IA indisponível agora.', 'danger') } finally { setIaLoad(false) }
+  }
+  const salvar = async () => {
+    const lista = Object.entries(attrVals).filter(([, v]) => v && (v.value_name || v.value_id)).map(([id, v]) => ({ id, value_name: v.value_name, value_id: v.value_id }))
+    if (!lista.length) { notify('Preencha ao menos um atributo.', 'warn'); return }
+    setSalvando(true)
+    try { await api.mlSetAtributos(det.item_id, lista); notify('Ficha técnica atualizada e sincronizada com o ML.', 'ok') }
+    catch (e) { notify(e?.data?.detail || 'Não foi possível salvar a ficha.', 'danger') } finally { setSalvando(false) }
+  }
+  if (!det.category_id) return <Empty icon={FileText} texto="Categoria do anúncio indisponível — não deu para carregar a ficha técnica. Sincronize o catálogo." />
+  return (
+    <div>
+      <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+        <Grid3x3 size={13} style={{ color: 'var(--accent)' }} /><b style={{ fontSize: 11 }}>Ficha técnica do anúncio</b>
+        <div style={{ flex: 1 }} />
+        <button onClick={preencherIa} disabled={iaLoad || carregando} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 700, padding: '6px 11px', borderRadius: 9, cursor: 'pointer', color: '#e9dbfb', border: '1px solid rgba(160,107,232,.45)', background: 'linear-gradient(135deg,rgba(160,107,232,.24),rgba(214,0,127,.18))', opacity: (iaLoad || carregando) ? .6 : 1 }}>{iaLoad ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}Preencher com IA</button>
+      </div>
+      {carregando ? <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 14 }}>{Array.from({ length: 6 }).map((_, i) => <Skel key={i} h={54} r={10} />)}</div>
+        : !attrs || attrs.length === 0 ? <Empty texto="Sem atributos editáveis para esta categoria." />
+          : <AttrGrade attrs={attrs} attrVals={attrVals} setAttrVals={setAttrVals} iaFilled={iaFilled} setIaFilled={setIaFilled} busca={busca} setBusca={setBusca} showRec={showRec} setShowRec={setShowRec} />}
+      {attrs && attrs.length > 0 && (
+        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--glass-border)' }}>
+          <button onClick={salvar} disabled={salvando} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700, padding: '9px 16px', borderRadius: 11, cursor: salvando ? 'default' : 'pointer', color: '#fff', border: 'none', background: 'linear-gradient(135deg,var(--accent),#a00061)', opacity: salvando ? .7 : 1 }}>{salvando ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}Salvar ficha no ML</button>
+          <span style={{ fontSize: 9.5, color: 'var(--faint)' }}>grava os atributos direto no anúncio (PUT /items)</span>
+        </div>
+      )}
     </div>
   )
 }
@@ -1678,6 +1871,7 @@ function CriarPublicar({ notify }) {
   // atributos & fotos
   const [attrs, setAttrs] = useState(null)
   const [attrVals, setAttrVals] = useState({})
+  const [variacoes, setVariacoes] = useState(null)  // { attrId, attrNome, itens:[{value_id,value_name,qtd,sku}] }
   const [attrsLoad, setAttrsLoad] = useState(false)
   const [iaAttrLoad, setIaAttrLoad] = useState(false)
   const [iaFilled, setIaFilled] = useState(() => new Set())
@@ -1741,7 +1935,8 @@ function CriarPublicar({ notify }) {
   const irAtributos = async () => { if (!catSel) { notify('Escolha a categoria.', 'warn'); return } if (!attrs) await carregarAttrs(catSel); setPasso(2) }
 
   const montarAtributos = () => Object.entries(attrVals).filter(([, v]) => v && (v.value_name || v.value_id)).map(([id, v]) => ({ id, value_name: v.value_name, value_id: v.value_id }))
-  const corpoBase = () => ({ titulo, category_id: catSel?.category_id, preco: Number(preco), quantidade: Number(estoque), listing_type_id: tipo, condicao: 'new', pictures: fotos, atributos: montarAtributos(), sku: prod?.sku, descricao: undefined })
+  const varItens = (variacoes?.itens || []).filter((x) => Number(x.qtd) > 0)
+  const corpoBase = () => ({ titulo, category_id: catSel?.category_id, preco: Number(preco), quantidade: Number(estoque), listing_type_id: tipo, condicao: 'new', pictures: fotos, atributos: montarAtributos(), sku: prod?.sku, descricao: undefined, variations: (variacoes && varItens.length) ? varItens.map((x) => ({ attribute_combinations: [{ id: variacoes.attrId, value_id: x.value_id, value_name: x.value_name }], available_quantity: Number(x.qtd), ...(x.sku ? { seller_custom_field: x.sku } : {}) })) : undefined })
   const validar = async () => {
     setValidando(true); setValidacao(null)
     try { const r = await api.mlProdutoValidar(corpoBase()); setValidacao(r) }
@@ -1768,7 +1963,7 @@ function CriarPublicar({ notify }) {
     ['Título (até 60)', !!titulo.trim() && titulo.length <= 60],
     ['Categoria folha', !!catSel],
     ['Preço na régua da regra', precoOkRegra],
-    ['Estoque disponível', Number(estoque) > 0],
+    ['Estoque disponível', Number(estoque) > 0 || (variacoes && varItens.reduce((s, x) => s + Number(x.qtd), 0) > 0)],
     ['Fotos (2+)', fotos.length >= 2],
     ['Atributos obrigatórios', obrigAttrs.length > 0 ? obrigOk >= obrigAttrs.length : (attrs != null)],
   ]
@@ -1777,7 +1972,7 @@ function CriarPublicar({ notify }) {
     (titulo.trim() ? Math.min(titulo.length / 55, 1) * (titulo.length <= 60 ? 25 : 15) : 0) +
     (catSel ? 20 : 0) +
     (Number(preco) > 0 ? (precoOkRegra ? 15 : 8) : 0) +
-    (Number(estoque) > 0 ? 10 : 0) +
+    (Number(estoque) > 0 || (variacoes && varItens.reduce((s, x) => s + Number(x.qtd), 0) > 0) ? 10 : 0) +
     (Math.min(fotos.length / 6, 1) * 20) +
     (obrigAttrs.length > 0 ? (obrigOk / obrigAttrs.length) * 10 : (attrs != null ? 10 : 0)),
   )
@@ -1888,51 +2083,9 @@ function CriarPublicar({ notify }) {
               </div>
               {attrsLoad ? Array.from({ length: 6 }).map((_, i) => <div key={i} className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 9 }}><Skel h={34} w={140} r={8} /><Skel h={34} r={8} /></div>)
                 : !attrs ? <Empty texto="Volte ao passo anterior e escolha a categoria para carregar a ficha." />
-                  : (() => {
-                    const obrig = attrs.filter((a) => a.obrigatorio)
-                    const rec = attrs.filter((a) => !a.obrigatorio)
-                    const filtro = (arr) => attrBusca.trim() ? arr.filter((a) => (a.nome || '').toLowerCase().includes(attrBusca.trim().toLowerCase())) : arr
-                    const obrigOkN = obrig.filter((a) => { const v = attrVals[a.id]; return v && (v.value_name || v.value_id) }).length
-                    const recVis = filtro(rec)
-                    const recMostrados = showRec ? recVis : recVis.slice(0, 6)
-                    const compl = obrig.length ? obrigOkN >= obrig.length : true
-                    return (
-                      <>
-                        {obrig.length > 0 && (
-                          <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 12, background: compl ? 'rgba(47,217,141,.08)' : 'rgba(224,162,60,.07)', border: `1px solid ${compl ? 'rgba(47,217,141,.28)' : 'rgba(224,162,60,.25)'}` }}>
-                            <div className="row" style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
-                              <b style={{ fontSize: 10.5, color: compl ? 'var(--ok)' : 'var(--warn)' }}>{compl ? 'Obrigatórios completos — pronto para avançar' : 'Complete os atributos obrigatórios'}</b>
-                              <div style={{ flex: 1 }} />
-                              <span className="num" style={{ fontSize: 11, fontWeight: 800, color: compl ? 'var(--ok)' : 'var(--warn)' }}>{obrigOkN}/{obrig.length}</span>
-                            </div>
-                            <div style={{ height: 6, borderRadius: 99, background: 'rgba(255,255,255,.06)', overflow: 'hidden' }}><div style={{ width: `${obrig.length ? (obrigOkN / obrig.length) * 100 : 0}%`, height: '100%', borderRadius: 99, background: compl ? 'var(--ok)' : 'var(--warn)', transition: 'width .3s' }} /></div>
-                            <div className="note" style={{ fontSize: 9, color: 'var(--faint)', marginTop: 7, display: 'flex', gap: 5 }}><Sparkles size={10} style={{ color: '#cfaef5', flex: 'none', marginTop: 1 }} />{rec.length} recomendados elevam a saúde e a exposição. {iaFilled.size > 0 ? `A IA preencheu ${iaFilled.size} — revise os marcados em roxo.` : 'Use "Preencher com IA" para adiantar.'}</div>
-                          </div>
-                        )}
-                        {attrs.length > 8 && (
-                          <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(0,0,0,.2)', border: '1px solid var(--glass-border)', borderRadius: 10, padding: '7px 11px', marginBottom: 12 }}>
-                            <Search size={13} style={{ color: 'var(--faint)' }} />
-                            <input value={attrBusca} onChange={(e) => setAttrBusca(e.target.value)} placeholder="Filtrar atributos pelo nome…" style={{ flex: 1, background: 'none', border: 'none', outline: 'none', color: 'var(--text)', fontSize: 11.5 }} />
-                            {attrBusca && <X size={13} style={{ color: 'var(--faint)', cursor: 'pointer' }} onClick={() => setAttrBusca('')} />}
-                          </div>
-                        )}
-                        {filtro(obrig).length > 0 && (
-                          <div style={{ marginBottom: 16 }}>
-                            <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--danger)' }} /><b style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '.5px', color: 'var(--danger)' }}>Obrigatórios</b><span className="num" style={{ fontSize: 9, color: 'var(--faint)' }}>{filtro(obrig).length}</span></div>
-                            {filtro(obrig).map((a) => <AttrCampo key={a.id} a={a} attrVals={attrVals} setAttrVals={setAttrVals} iaFilled={iaFilled} setIaFilled={setIaFilled} />)}
-                          </div>
-                        )}
-                        {recVis.length > 0 && (
-                          <div>
-                            <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: '#cfaef5' }} /><b style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '.5px', color: '#cfaef5' }}>Recomendados</b><span className="num" style={{ fontSize: 9, color: 'var(--faint)' }}>{recVis.length}</span></div>
-                            {recMostrados.map((a) => <AttrCampo key={a.id} a={a} attrVals={attrVals} setAttrVals={setAttrVals} iaFilled={iaFilled} setIaFilled={setIaFilled} />)}
-                            {recVis.length > 6 && <button onClick={() => setShowRec((v) => !v)} style={{ marginTop: 4, display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 700, padding: '7px 12px', borderRadius: 9, cursor: 'pointer', color: '#cfaef5', border: '1px solid rgba(160,107,232,.35)', background: 'rgba(160,107,232,.1)' }}><ChevronRight size={12} style={{ transform: showRec ? 'rotate(-90deg)' : 'rotate(90deg)' }} />{showRec ? 'Mostrar menos' : `Ver mais ${recVis.length - 6} atributos`}</button>}
-                          </div>
-                        )}
-                        {attrBusca && filtro(obrig).length === 0 && recVis.length === 0 && <Empty texto="Nenhum atributo com esse nome." />}
-                      </>
-                    )
-                  })()}
+                  : <AttrGrade attrs={attrs} attrVals={attrVals} setAttrVals={setAttrVals} iaFilled={iaFilled} setIaFilled={setIaFilled} busca={attrBusca} setBusca={setAttrBusca} showRec={showRec} setShowRec={setShowRec} />}
+
+              {attrs && <div style={{ marginTop: 16 }}><Variacoes attrs={attrs} variacoes={variacoes} setVariacoes={setVariacoes} /></div>}
 
               <div style={{ marginTop: 14 }}>
                 <b style={{ fontSize: 11 }}>Fotos</b>
