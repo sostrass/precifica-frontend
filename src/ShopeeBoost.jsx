@@ -29,6 +29,20 @@ const corProduto = (nome) => {
   for (const c of Object.keys(CORES_HEX)) if (k.includes(c)) return CORES_HEX[c]
   return null
 }
+function hEmJanelas(h, janelas) { return (janelas || []).some(([a, b]) => (a <= b ? (h >= a && h < b) : (h >= a || h < b))) }
+function janelasPico(pico, maxJanelas = 2) {
+  const horas = pico?.horas || []
+  if (!horas.length || !pico?.total) return []
+  const max = Math.max(...horas)
+  const limite = max * 0.55
+  const js = []; let ini = null
+  for (let h = 0; h < 24; h++) {
+    if (horas[h] >= limite) { if (ini == null) ini = h } else if (ini != null) { js.push([ini, h]); ini = null }
+  }
+  if (ini != null) js.push([ini, 24])
+  js.sort((a, b) => horas.slice(b[0], b[1]).reduce((s, x) => s + x, 0) - horas.slice(a[0], a[1]).reduce((s, x) => s + x, 0))
+  return js.slice(0, maxJanelas).sort((a, b) => a[0] - b[0])
+}
 
 /* ---------- átomos ---------- */
 function Badge({ children, c, bg }) {
@@ -71,10 +85,13 @@ function Skel({ h = 40 }) { return <div style={{ height: h, borderRadius: 10, ba
 export default function ShopeeBoost({ conectado, notify }) {
   const [p, setP] = useState(null)
   const [pico, setPico] = useState(null)
+  const [hist, setHist] = useState(null)
   const [carregando, setCarregando] = useState(true)
   const [rodando, setRodando] = useState(false)
   const [sincNomes, setSincNomes] = useState(false)
   const [autoSel, setAutoSel] = useState(false)
+  const [jnIni, setJnIni] = useState(11)
+  const [jnFim, setJnFim] = useState(14)
   const [, forceTick] = useState(0)
   const baseRef = useRef(Date.now())
   const editJanela = useRef(false)
@@ -86,6 +103,7 @@ export default function ShopeeBoost({ conectado, notify }) {
 
   useEffect(() => { carregar(); const t = setInterval(carregar, 15000); return () => clearInterval(t) }, [])
   useEffect(() => { api.shopeeBoostPico().then(setPico).catch(() => setPico({ horas: [], total: 0 })) }, [])
+  useEffect(() => { const f = () => api.shopeeBoostHistorico().then(setHist).catch(() => setHist({ eventos: [], resumo: [], kpis: {} })); f(); const t = setInterval(f, 60000); return () => clearInterval(t) }, [])
   useEffect(() => { const t = setInterval(() => forceTick((x) => x + 1), 1000); return () => clearInterval(t) }, [])
 
   const cfg = p?.config || {}
@@ -200,7 +218,7 @@ export default function ShopeeBoost({ conectado, notify }) {
               <div key={i} className="glass lift" style={{ padding: 12, borderRadius: 14, borderTop: `2.5px solid ${t[1]}` }}>
                 <div className="row" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 9 }}>
                   <Badge c={t[1]} bg={t[2]}>{t[0]}</Badge>
-                  <Badge c="var(--faint)" bg="rgba(255,255,255,.05)">vaga {i + 1}</Badge>
+                  {v.em_oferta ? <Badge c={SHOPEE} bg="rgba(238,77,45,.14)">oferta</Badge> : <Badge c="var(--faint)" bg="rgba(255,255,255,.05)">vaga {i + 1}</Badge>}
                 </div>
                 <div style={{ margin: '0 auto 9px', width: 70 }}>
                   <Ring size={70} val={frac} cor={ringCor} w={5}>
@@ -266,17 +284,33 @@ export default function ShopeeBoost({ conectado, notify }) {
 
           {/* heatmap */}
           <div style={{ fontSize: 8.5, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)', marginBottom: 7, display: 'flex', alignItems: 'center', gap: 6 }}><Clock size={11} />Janela × horário de pico da loja <span style={{ color: OK, textTransform: 'none', fontWeight: 700 }}>(pedidos por hora, 30d)</span></div>
-          <Heatmap pico={pico} janela={[cfg.janela_inicio ?? 0, cfg.janela_fim ?? 23]} />
-          <div className="row" style={{ display: 'flex', justifyContent: 'space-between', fontSize: 7.5, color: 'var(--faint)', marginTop: 4, marginBottom: 12 }}><span>00h</span><span>06h</span><span>12h</span><span>18h</span><span>23h</span></div>
-          <div className="row" style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
-            <span style={{ fontSize: 8.5, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)' }}>Janela de impulso</span>
-            <div style={{ flex: 1 }} />
-            <span className="num" style={{ fontSize: 10.5, color: 'var(--text)' }}>{String(cfg.janela_inicio ?? 0).padStart(2, '0')}h → {String(cfg.janela_fim ?? 23).padStart(2, '0')}h</span>
-          </div>
-          <div className="row" style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            <input type="range" min={0} max={23} value={cfg.janela_inicio ?? 0} onChange={(e) => setConfig({ janela_inicio: Math.min(Number(e.target.value), (cfg.janela_fim ?? 23)) })} style={{ flex: 1 }} />
-            <input type="range" min={0} max={23} value={cfg.janela_fim ?? 23} onChange={(e) => setConfig({ janela_fim: Math.max(Number(e.target.value), (cfg.janela_inicio ?? 0)) })} style={{ flex: 1 }} />
-          </div>
+          {(() => {
+            const janelas = (cfg.janelas && cfg.janelas.length) ? cfg.janelas : ((cfg.janela_inicio || cfg.janela_fim) ? [[cfg.janela_inicio, cfg.janela_fim]] : [])
+            const diaTodo = janelas.length === 0
+            return (
+              <>
+                <Heatmap pico={pico} janelas={janelas} diaTodo={diaTodo} />
+                <div className="row" style={{ display: 'flex', justifyContent: 'space-between', fontSize: 7.5, color: 'var(--faint)', marginTop: 4, marginBottom: 12 }}><span>00h</span><span>06h</span><span>12h</span><span>18h</span><span>23h</span></div>
+                <div className="row" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 9 }}>
+                  <span style={{ fontSize: 8.5, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)' }}>Janelas de impulso</span>
+                  {diaTodo ? <Badge c={OK} bg="rgba(47,217,141,.12)">dia todo</Badge>
+                    : janelas.map((j, i) => (
+                      <span key={i} className="row num" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 700, color: '#cfaef5', background: 'rgba(160,107,232,.14)', border: '1px solid rgba(160,107,232,.3)', borderRadius: 99, padding: '4px 6px 4px 11px' }}>{String(j[0]).padStart(2, '0')}h–{String(Math.min(j[1], 24)).padStart(2, '0')}h<X size={12} style={{ cursor: 'pointer', color: 'var(--faint)' }} onClick={() => setConfig({ janelas: janelas.filter((_, x) => x !== i) })} /></span>
+                    ))}
+                  <div style={{ flex: 1 }} />
+                  {pico?.total > 0 && <button onClick={() => { const jp = janelasPico(pico); if (jp.length) setConfig({ janelas: jp }); else notify('Sem pico claro para sugerir.', 'warn') }} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 800, padding: '6px 11px', borderRadius: 9, cursor: 'pointer', color: '#fff', border: 'none', background: 'linear-gradient(135deg,var(--accent2),var(--accent))' }}><Sparkles size={11} />Aplicar pico da loja</button>}
+                  <button onClick={() => setConfig({ janelas: null, janela_inicio: 0, janela_fim: 0 })} className="glass" style={{ fontSize: 10, fontWeight: 700, padding: '6px 11px', borderRadius: 9, cursor: 'pointer', color: 'var(--dim)', background: 'var(--glass-bg)' }}>Dia todo</button>
+                </div>
+                <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                  <span style={{ fontSize: 9, color: 'var(--faint)' }}>adicionar janela:</span>
+                  <input type="number" min={0} max={23} value={jnIni} onChange={(e) => setJnIni(Number(e.target.value))} className="num" style={{ width: 52, padding: '5px 8px', fontSize: 11, textAlign: 'center', background: 'rgba(0,0,0,.2)', border: '1px solid var(--glass-border)', borderRadius: 7, color: 'var(--text)' }} />
+                  <span style={{ fontSize: 9, color: 'var(--faint)' }}>até</span>
+                  <input type="number" min={1} max={24} value={jnFim} onChange={(e) => setJnFim(Number(e.target.value))} className="num" style={{ width: 52, padding: '5px 8px', fontSize: 11, textAlign: 'center', background: 'rgba(0,0,0,.2)', border: '1px solid var(--glass-border)', borderRadius: 7, color: 'var(--text)' }} />
+                  <button onClick={() => { if (jnFim > jnIni) setConfig({ janelas: [...janelas, [jnIni, jnFim]] }); else notify('O fim deve ser maior que o início.', 'warn') }} style={{ fontSize: 10, fontWeight: 700, padding: '5px 11px', borderRadius: 8, cursor: 'pointer', color: '#fff', border: 'none', background: 'var(--accent)' }}>+ janela</button>
+                </div>
+              </>
+            )
+          })()}
         </div>
 
         {/* DESEMPENHO / CAMPEÕES */}
@@ -307,13 +341,14 @@ export default function ShopeeBoost({ conectado, notify }) {
 
       {/* ===== FILA ===== */}
       <div className="glass" style={{ padding: 16, marginBottom: 14 }}>
-        <Secao icon={Package} cor={PURPLE} titulo={<>Fila inteligente <span className="num" style={{ color: 'var(--faint)' }}>{(p?.fila || []).length} produtos</span></>} extra={<><Badge c={PURPLE} bg="rgba(160,107,232,.14)">ORDENADA POR {(cfg.criterio || 'prioridade').toUpperCase()}</Badge><div style={{ flex: 1 }} /><button onClick={() => autoSelecionar()} disabled={autoSel} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 700, padding: '7px 12px', borderRadius: 9, cursor: 'pointer', color: '#e9dbfb', border: '1px solid rgba(160,107,232,.45)', background: 'linear-gradient(135deg,rgba(160,107,232,.22),rgba(214,0,127,.16))' }}>{autoSel ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}Renovar auto-seleção</button></>} />
+        <Secao icon={Package} cor={PURPLE} titulo={<>Fila inteligente <span className="num" style={{ color: 'var(--faint)' }}>{(p?.fila || []).length} produtos</span></>} extra={<><Badge c={PURPLE} bg="rgba(160,107,232,.14)">ORDENADA POR {(cfg.criterio || 'prioridade').toUpperCase()}</Badge>{(kpis.nao_elegiveis ?? 0) > 0 && <Badge c={DANGER} bg="rgba(255,122,122,.12)"><AlertTriangle size={8} />{kpis.nao_elegiveis} não elegíveis</Badge>}<div style={{ flex: 1 }} /><button onClick={() => autoSelecionar()} disabled={autoSel} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 700, padding: '7px 12px', borderRadius: 9, cursor: 'pointer', color: '#e9dbfb', border: '1px solid rgba(160,107,232,.45)', background: 'linear-gradient(135deg,rgba(160,107,232,.22),rgba(214,0,127,.16))' }}>{autoSel ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}Renovar auto-seleção</button></>} />
         {(p?.fila || []).length === 0 ? <Empty icon={Package} texto="Fila vazia. Ative a auto-seleção ou adicione produtos manualmente." />
           : (p?.fila || []).slice(0, 12).map((f) => {
             const isA = f.auto
             const abcCor = f.abc === 'A' ? OK : f.abc === 'B' ? GOLD : DANGER
+            const ineleg = f.elegivel === false
             return (
-              <div key={f.item_id} className="glass lift" style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '10px 12px', borderRadius: 13, marginBottom: 8, borderLeft: `3px solid ${isA ? PURPLE : WARN}` }}>
+              <div key={f.item_id} className="glass lift" style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '10px 12px', borderRadius: 13, marginBottom: 8, borderLeft: `3px solid ${ineleg ? DANGER : isA ? PURPLE : WARN}`, opacity: ineleg ? .55 : 1 }}>
                 <span className="num" style={{ width: 20, textAlign: 'center', fontSize: 12, fontWeight: 800, color: 'var(--faint)' }}>{f.prioridade}</span>
                 <div style={{ width: 40, height: 40, borderRadius: 10, background: 'linear-gradient(135deg,rgba(238,77,45,.25),rgba(160,107,232,.2))', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}><Package size={17} style={{ color: 'var(--dim)' }} /></div>
                 <div style={{ flex: 1.7, minWidth: 0 }}>
@@ -323,7 +358,9 @@ export default function ShopeeBoost({ conectado, notify }) {
                   </div>
                   <div className="row" style={{ display: 'flex', gap: 6, marginTop: 3 }}>
                     <Badge c={isA ? PURPLE : WARN} bg={isA ? 'rgba(160,107,232,.14)' : 'rgba(224,162,60,.14)'}>{isA ? 'auto' : 'manual'}</Badge>
-                    <span className="num" style={{ fontSize: 8.5, color: 'var(--faint)' }}>giro {f.giro}/dia · {f.impulsos} impulsos</span>
+                    {f.em_oferta && <Badge c={SHOPEE} bg="rgba(238,77,45,.14)">em oferta</Badge>}
+                    {ineleg && <Badge c={DANGER} bg="rgba(255,122,122,.14)"><AlertTriangle size={8} />{f.motivo_ineleg || 'não elegível'}</Badge>}
+                    <span className="num" style={{ fontSize: 8.5, color: 'var(--faint)' }}>giro {f.giro}/dia · {f.impulsos} impulsos{f.estoque != null ? ` · ${f.estoque} un` : ''}</span>
                   </div>
                 </div>
                 <div style={{ width: 66, textAlign: 'right' }}><div style={{ fontSize: 7, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)' }}>Vendas 30d</div><b className="num" style={{ fontSize: 12.5, color: f.vendas > 0 ? OK : 'var(--faint)' }}>{f.vendas}</b></div>
@@ -336,9 +373,12 @@ export default function ShopeeBoost({ conectado, notify }) {
         {(p?.fila || []).length > 12 && <div className="row" style={{ display: 'flex', justifyContent: 'center', marginTop: 10 }}><span style={{ fontSize: 10, color: 'var(--faint)' }}>mostrando 12 de {(p?.fila || []).length} · "entra em" estimado pela posição × vagas de 4h</span></div>}
       </div>
 
+      {/* ===== HISTÓRICO & ATRIBUIÇÃO ===== */}
+      <Historico hist={hist} />
+
       {/* ===== RADAR + DIÁRIO ===== */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
-        <Radar radar={p?.radar} />
+        <Radar radar={p?.radar} cfg={cfg} setConfig={setConfig} />
         <div className="glass" style={{ padding: 16 }}>
           <Secao icon={Clock} cor="var(--dim)" titulo="Diário de bordo do motor" extra={<><div style={{ flex: 1 }} /><Badge c="var(--faint)" bg="rgba(255,255,255,.05)">RECENTES</Badge></>} />
           {(p?.diario || []).length === 0 ? <Empty icon={Clock} texto="Sem eventos do motor ainda. Assim que ele impulsionar, entrar em espera ou pular um item, aparece aqui." />
@@ -442,51 +482,137 @@ function Timeline({ vagas, fila, decorrido }) {
 }
 
 /* ---------- Heatmap ---------- */
-function Heatmap({ pico, janela }) {
+function Heatmap({ pico, janelas, diaTodo }) {
   const horas = pico?.horas || []
   const total = pico?.total || 0
   if (!pico) return <Skel h={30} />
   if (total === 0) return <div style={{ padding: '14px 10px', textAlign: 'center', fontSize: 10, color: 'var(--faint)', background: 'rgba(0,0,0,.15)', borderRadius: 10 }}>Coletando histórico de horário dos pedidos — o mapa de calor aparece conforme os pedidos sincronizam.</div>
   const max = Math.max(...horas, 1)
+  const pk = janelasPico(pico)
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(24,1fr)', gap: 3, marginBottom: 5 }}>
       {Array.from({ length: 24 }).map((_, h) => {
         const v = (horas[h] || 0) / max
-        const pico2 = (h >= 11 && h < 14) || (h >= 19 && h < 22)
-        const dentro = h >= janela[0] && h <= janela[1]
-        return <div key={h} title={`${h}h — ${horas[h] || 0} pedidos`} style={{ height: 30, borderRadius: 5, background: `rgba(238,77,45,${0.06 + v * 0.75})`, outline: pico2 ? '1.5px solid rgba(160,107,232,.55)' : 'none', outlineOffset: -1.5, opacity: dentro ? 1 : .25 }} />
+        const ehPico = hEmJanelas(h, pk)
+        const dentro = diaTodo || hEmJanelas(h, janelas)
+        return <div key={h} title={`${h}h — ${horas[h] || 0} pedidos`} style={{ height: 30, borderRadius: 5, background: `rgba(238,77,45,${0.06 + v * 0.75})`, outline: ehPico ? '1.5px solid rgba(160,107,232,.55)' : 'none', outlineOffset: -1.5, opacity: dentro ? 1 : .22 }} />
       })}
     </div>
   )
 }
 
+/* ---------- Histórico & Atribuição ---------- */
+function Historico({ hist }) {
+  const TIPO_COR = { auto: PURPLE, manual: WARN, radar: BLUE }
+  if (!hist) return <div className="glass" style={{ padding: 16, marginBottom: 14 }}><Secao icon={TrendingUp} cor={OK} titulo="Histórico & atribuição de vendas" /><Skel h={60} /></div>
+  const k = hist.kpis || {}
+  const eventos = hist.eventos || []
+  const resumo = hist.resumo || []
+  const maxPB = Math.max(...resumo.map((x) => x.por_boost || 0), 1)
+  return (
+    <div className="glass" style={{ padding: 16, marginBottom: 14 }}>
+      <Secao icon={TrendingUp} cor={OK} titulo="Histórico & atribuição de vendas" extra={<><Badge c={OK} bg="rgba(47,217,141,.12)">VENDAS DENTRO DA JANELA DE 4H</Badge><div style={{ flex: 1 }} /></>} />
+      {eventos.length === 0 ? <Empty icon={TrendingUp} texto="Ainda não houve boost registrado. Cada impulso (automático ou manual) passa a ser gravado aqui, com as vendas que aconteceram durante as 4h em destaque." />
+        : (
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 11, marginBottom: 15 }}>
+              <MiniStat label="Boosts registrados" value={k.total_boosts ?? 0} />
+              <MiniStat label="Vendas atribuídas" value={k.total_vendas_atrib ?? 0} cor={OK} />
+              <MiniStat label="Vendas por boost" value={k.vendas_por_boost != null ? k.vendas_por_boost : '—'} cor={GOLD} />
+              <MiniStat label="Produtos girados" value={k.produtos ?? 0} cor={PURPLE} />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div>
+                <div style={{ fontSize: 8.5, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)', marginBottom: 10 }}>Retorno por produto (vendas / boost)</div>
+                {resumo.slice(0, 6).map((r) => (
+                  <div key={r.item_id} className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                    <span style={{ flex: 1, minWidth: 0, fontSize: 10.5, color: 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.nome}</span>
+                    <span className="num" style={{ fontSize: 8.5, color: 'var(--faint)' }}>{r.boosts}x</span>
+                    <div style={{ width: 84, height: 13, borderRadius: 7, background: 'rgba(255,255,255,.05)', overflow: 'hidden' }}><div style={{ width: `${(r.por_boost || 0) / maxPB * 100}%`, height: '100%', borderRadius: 7, background: `linear-gradient(90deg,rgba(47,217,141,.5),${OK})` }} /></div>
+                    <b className="num" style={{ width: 64, textAlign: 'right', fontSize: 10.5, color: r.por_boost ? OK : 'var(--faint)' }}>{r.por_boost != null ? `${r.por_boost}/boost` : '—'}</b>
+                  </div>
+                ))}
+              </div>
+              <div>
+                <div style={{ fontSize: 8.5, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)', marginBottom: 10 }}>Boosts recentes</div>
+                <div style={{ maxHeight: 200, overflow: 'auto' }}>
+                  {eventos.slice(0, 14).map((e, i) => (
+                    <div key={i} className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: i < Math.min(13, eventos.length - 1) ? '1px solid rgba(255,255,255,.04)' : 'none' }}>
+                      <span style={{ width: 7, height: 7, borderRadius: '50%', background: TIPO_COR[e.tipo] || PURPLE, flex: 'none' }} title={e.tipo} />
+                      <span style={{ flex: 1, minWidth: 0, fontSize: 10, color: 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.nome}</span>
+                      {e.vendas != null ? <Badge c={e.vendas > 0 ? OK : 'var(--faint)'} bg={e.vendas > 0 ? 'rgba(47,217,141,.12)' : 'rgba(255,255,255,.05)'}>{e.vendas} vendas</Badge> : <Badge c="var(--faint)" bg="rgba(255,255,255,.05)">s/ atrib.</Badge>}
+                      <span className="num" style={{ fontSize: 8, color: 'var(--faint)', flex: 'none' }}>{tempoRel(e.inicio)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div style={{ fontSize: 9, color: 'var(--faint)', display: 'flex', gap: 6, marginTop: 12, paddingTop: 11, borderTop: '1px solid var(--glass-border)' }}>
+              <Info size={11} style={{ color: OK, flex: 'none', marginTop: 1 }} />Atribuição real: contamos as unidades vendidas de cada produto <b style={{ color: 'var(--text)', margin: '0 3px' }}>dentro</b> da janela de 4h em que esteve em destaque. Boosts sem venda no período aparecem sem atribuição.
+            </div>
+          </>
+        )}
+    </div>
+  )
+}
+
 /* ---------- Radar ---------- */
-function Radar({ radar }) {
-  const cfg = radar?.config || {}
+function Radar({ radar, cfg, setConfig }) {
+  const c = cfg || {}
   const diag = radar?.diagnostico || {}
   const ameacados = radar?.ameacados || []
+  const sinais = radar?.sinais || []
+  const SINAL = { estoque: [WARN, 'rgba(224,162,60,.14)', Boxes, 'Prestes a esgotar'], surto: [OK, 'rgba(47,217,141,.14)', TrendingUp, 'Surto de vendas'] }
+  const Gatilho = ({ on, onClick, label }) => (
+    <span onClick={onClick} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 10, fontWeight: 700, padding: '5px 10px', borderRadius: 99, color: on ? '#fff' : 'var(--dim)', background: on ? 'linear-gradient(135deg,var(--accent2),var(--accent))' : 'rgba(255,255,255,.04)', border: `1px solid ${on ? 'transparent' : 'var(--glass-border)'}` }}>
+      <span style={{ width: 7, height: 7, borderRadius: '50%', background: on ? '#fff' : 'var(--faint)' }} />{label}
+    </span>
+  )
   return (
     <div className="glass" style={{ padding: 16, borderColor: 'rgba(91,141,239,.3)' }}>
-      <Secao icon={RadarIcon} cor={BLUE} titulo="Boost condicional · Radar" extra={<><Badge c={BLUE} bg="rgba(91,141,239,.14)">FURA A FILA SE HOUVER AMEAÇA</Badge><div style={{ flex: 1 }} /></>} />
+      <Secao icon={RadarIcon} cor={BLUE} titulo="Boost condicional · Radar" extra={<><Badge c={BLUE} bg="rgba(91,141,239,.14)">FURA A FILA POR PRIORIDADE</Badge><div style={{ flex: 1 }} /></>} />
+      {/* gatilhos */}
+      <div className="row" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 7, marginBottom: 13 }}>
+        <span style={{ fontSize: 8.5, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)', marginRight: 2 }}>Gatilhos</span>
+        <Gatilho on={!!c.cond_ativo} onClick={() => setConfig({ cond_ativo: !c.cond_ativo })} label="Concorrente furou preço" />
+        <Gatilho on={!!c.cond_estoque} onClick={() => setConfig({ cond_estoque: !c.cond_estoque })} label="Prestes a esgotar" />
+        <Gatilho on={!!c.cond_surto} onClick={() => setConfig({ cond_surto: !c.cond_surto })} label="Surto de vendas" />
+      </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10, marginBottom: 12 }}>
         <MiniStat label="Monitorados" value={diag.skus_monitorados ?? 0} />
         <MiniStat label="Com concorrente" value={diag.com_preco_concorrente ?? diag.com_preco_meu ?? 0} cor={BLUE} />
         <MiniStat label="Sob ameaça" value={ameacados.length} cor={ameacados.length ? DANGER : OK} />
-        <MiniStat label="Gatilho" value={cfg.gatilho_pct != null ? `-${cfg.gatilho_pct}%` : '—'} cor={WARN} />
+        <MiniStat label="Sinais ao vivo" value={sinais.length} cor={sinais.length ? WARN : OK} />
       </div>
-      {ameacados.length === 0 ? (
+      {/* sinais ao vivo */}
+      {sinais.length > 0 && (
+        <div style={{ marginBottom: 10 }}>
+          {sinais.slice(0, 5).map((s, i) => {
+            const sc = SINAL[s.tipo] || SINAL.estoque
+            const ScIcon = sc[2]
+            return (
+              <div key={i} className="row" style={{ display: 'flex', alignItems: 'center', gap: 9, background: sc[1], border: `1px solid ${sc[0]}44`, borderRadius: 11, padding: '9px 12px', marginBottom: 7 }}>
+                <ScIcon size={14} style={{ color: sc[0], flex: 'none' }} />
+                <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.nome}</div><div className="num" style={{ fontSize: 8.5, color: 'var(--faint)' }}>{s.detalhe}</div></div>
+                <Badge c={sc[0]} bg="rgba(255,255,255,.06)">{sc[3]}</Badge>
+              </div>
+            )
+          })}
+        </div>
+      )}
+      {ameacados.length === 0 && sinais.length === 0 ? (
         <div className="row" style={{ display: 'flex', gap: 10, background: 'rgba(47,217,141,.06)', border: '1px solid rgba(47,217,141,.22)', borderRadius: 12, padding: '12px 15px' }}>
           <Check size={16} style={{ color: OK, flex: 'none' }} />
-          <div style={{ flex: 1 }}><b style={{ fontSize: 11.5, color: OK }}>Nenhum produto sob ameaça</b><div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 2 }}>Se um concorrente cravar preço abaixo do gatilho, o Radar coloca o produto ameaçado em boost prioritário na frente da fila — automaticamente.</div></div>
+          <div style={{ flex: 1 }}><b style={{ fontSize: 11.5, color: OK }}>Tudo sob controle</b><div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 2 }}>Se um concorrente furar o preço, um produto estiver prestes a esgotar ou houver surto de vendas, o Radar coloca esse item em boost prioritário na frente da fila — pelos gatilhos ligados acima.</div></div>
         </div>
-      ) : ameacados.slice(0, 4).map((a, i) => (
+      ) : ameacados.slice(0, 3).map((a, i) => (
         <div key={i} className="row" style={{ display: 'flex', gap: 10, background: 'rgba(255,122,122,.06)', border: '1px solid rgba(255,122,122,.25)', borderRadius: 11, padding: '10px 12px', marginBottom: 7 }}>
           <ShieldAlert size={15} style={{ color: DANGER, flex: 'none' }} />
           <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.nome || a.sku || a.item_id}</div><div className="num" style={{ fontSize: 8.5, color: 'var(--faint)' }}>{a.detalhe || 'concorrente furou o preço'}</div></div>
           <Badge c={DANGER} bg="rgba(255,122,122,.14)">AMEAÇA</Badge>
         </div>
       ))}
-      {radar?.erro && <div style={{ fontSize: 9, color: 'var(--faint)', marginTop: 8 }}>Radar indisponível: {radar.erro}</div>}
+      {radar?.erro && <div style={{ fontSize: 9, color: 'var(--faint)', marginTop: 8 }}>Radar de preço indisponível: {radar.erro}</div>}
     </div>
   )
 }
@@ -510,6 +636,11 @@ function derivarInsights(p, pico) {
   // campeão descoberto
   if (campeoes[0] && campeoes[0].vendas >= 8) {
     out.push({ icon: Trophy, cor: OK, titulo: 'Campeão do destaque', texto: `"${campeoes[0].nome}" lidera com ${campeoes[0].vendas} vendas em 30 dias. Fixar como pin garante presença em todas as janelas de pico.` })
+  }
+  // boost + promoção: exposição dobrada
+  const emOferta = (p?.kpis || {}).em_oferta || 0
+  if (emOferta > 0) {
+    out.push({ icon: Sparkles, cor: SHOPEE, titulo: 'Exposição dobrada', texto: `${emOferta} produto(s) da fila já têm oferta ativa. Impulsionar quem está em promoção multiplica a conversão — eles aparecem marcados como "em oferta".` })
   }
   // vaga desperdiçada: item com impulsos e 0 vendas
   const desperd = fila.find((f) => (f.impulsos || 0) >= 2 && (f.vendas || 0) === 0)

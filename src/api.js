@@ -90,6 +90,7 @@ export const api = {
   shopeeBoostDesempenho: () => req('/api/shopee/boost/desempenho'),
   shopeeBoostPainel: () => req('/api/shopee/boost/painel'),
   shopeeBoostPico: () => req('/api/shopee/boost/pico'),
+  shopeeBoostHistorico: () => req('/api/shopee/boost/historico'),
   shopeeBoostAutoSelecionar: (estrategia) => req('/api/shopee/boost/auto_selecionar', { method: 'POST', body: { estrategia } }),
   shopeeBoostCondGet: () => req('/api/shopee/boost/condicional'),
   shopeeBoostCondSalvar: (b) => req('/api/shopee/boost/condicional', { method: 'PUT', body: b }),
