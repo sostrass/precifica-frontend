@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { api, setToken } from './api'
 import ShopeeBoost from './ShopeeBoost.jsx'
+import ShopeeReputacao from './ShopeeReputacao.jsx'
 import { useToast } from './toast.jsx'
 import { CampaignCard, fmtDur, useAgora, cicloInfo, TIPO_META, fmtDataHora } from './CampaignCard'
 import qrcode from 'qrcode-generator'
@@ -157,7 +158,7 @@ export default function Shopee() {
 
       {aba === 'diagnostico' && <Diagnostico status={status} />}
       {aba === 'boost' && <ShopeeBoost conectado={status?.ok} notify={notify} />}
-      {aba === 'avaliacoes' && <Avaliacoes conectado={status?.ok} notify={notify} />}
+      {aba === 'avaliacoes' && <ShopeeReputacao conectado={status?.ok} notify={notify} />}
       {aba === 'qa' && <Perguntas conectado={status?.ok} notify={notify} />}
       {aba === 'catalogo' && <Divergencia conectado={status?.ok} notify={notify} />}
       {aba === 'promocoes' && <Promocoes conectado={status?.ok} notify={notify} />}

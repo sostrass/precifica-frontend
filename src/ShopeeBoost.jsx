@@ -3,6 +3,7 @@ import {
   Rocket, Zap, Clock, Star, TrendingUp, Settings2, RefreshCw, Radar as RadarIcon,
   Package, ChevronRight, Loader2, Play, Square, Plus, X, Info, Sparkles,
   Calendar, AlertTriangle, Check, Trophy, Lightbulb, Gauge, Boxes, ShieldAlert,
+  ChevronUp, ChevronsUp, Search, PackagePlus,
 } from 'lucide-react'
 import { api } from './api'
 
@@ -92,6 +93,10 @@ export default function ShopeeBoost({ conectado, notify }) {
   const [autoSel, setAutoSel] = useState(false)
   const [jnIni, setJnIni] = useState(11)
   const [jnFim, setJnFim] = useState(14)
+  const [seletorAberto, setSeletorAberto] = useState(false)
+  const [filaBusca, setFilaBusca] = useState('')
+  const [filaFiltro, setFilaFiltro] = useState('todos')
+  const [filaPag, setFilaPag] = useState(0)
   const [, forceTick] = useState(0)
   const baseRef = useRef(Date.now())
   const editJanela = useRef(false)
@@ -141,11 +146,41 @@ export default function ShopeeBoost({ conectado, notify }) {
   }
   const fixar = async (id, fixo) => { try { await api.shopeeBoostFixar(id, fixo); carregar() } catch (e) { notify(e.message, 'danger') } }
   const removerFila = async (id) => { try { await api.shopeeBoostRemove(id); notify('Removido da fila.', 'ok'); carregar() } catch (e) { notify(e.message, 'danger') } }
+  const moverNaFila = async (id, dir) => {
+    const ids = (p?.fila || []).map((f) => f.item_id)
+    const i = ids.indexOf(id)
+    if (i < 0) return
+    const novo = [...ids]
+    if (dir === 'topo') { novo.splice(i, 1); novo.unshift(id) }
+    else if (dir === 'cima' && i > 0) { const t = novo[i - 1]; novo[i - 1] = novo[i]; novo[i] = t }
+    else if (dir === 'baixo' && i < novo.length - 1) { const t = novo[i + 1]; novo[i + 1] = novo[i]; novo[i] = t }
+    else return
+    setP((s) => ({ ...s, fila: novo.map((x) => s.fila.find((f) => f.item_id === x)).filter(Boolean) }))
+    try { await api.shopeeBoostReordenar(novo); carregar() } catch (e) { notify(e.message, 'danger'); carregar() }
+  }
+  const adicionarProdutos = async (itens) => { try { await api.shopeeBoostAdd(itens); notify(`${itens.length} produto(s) na fila.`, 'ok'); carregar() } catch (e) { notify(e.message, 'danger') } }
+  const execInsight = (ins) => {
+    if (ins.acaoTipo === 'fixar') fixar(ins.acaoArg, true)
+    else if (ins.acaoTipo === 'remover') removerFila(ins.acaoArg)
+    else if (ins.acaoTipo === 'janela') { const jp = janelasPico(pico); if (jp.length) { setConfig({ janelas: jp }); notify('Janela otimizada para os horários de pico.', 'ok') } else notify('Sem pico claro ainda para otimizar.', 'warn') }
+  }
 
   if (!conectado) return <div className="glass" style={{ padding: 20, borderRadius: 16 }}><Empty icon={Rocket} texto="Conecte a Shopee para usar o impulsionamento." /></div>
   if (carregando && !p) return <div style={{ display: 'grid', gap: 12 }}>{[80, 120, 180].map((h, i) => <Skel key={i} h={h} />)}</div>
 
   const insights = derivarInsights(p, pico)
+  const FILA_PP = 12
+  const filaFiltrada = (p?.fila || []).filter((f) => {
+    if (filaFiltro === 'auto' && !f.auto) return false
+    if (filaFiltro === 'manual' && f.auto) return false
+    if (filaFiltro === 'fixos' && !f.fixo) return false
+    const q = filaBusca.trim().toLowerCase()
+    if (q && !((f.nome || '').toLowerCase().includes(q) || String(f.item_id).includes(q))) return false
+    return true
+  })
+  const filaPaginas = Math.max(1, Math.ceil(filaFiltrada.length / FILA_PP))
+  const pagAtual = Math.min(filaPag, filaPaginas - 1)
+  const filaVisiveis = filaFiltrada.slice(pagAtual * FILA_PP, pagAtual * FILA_PP + FILA_PP)
 
   return (
     <div>
@@ -226,9 +261,10 @@ export default function ShopeeBoost({ conectado, notify }) {
                     <span style={{ fontSize: 6.5, textTransform: 'uppercase', letterSpacing: '.5px', fontWeight: 800, color: 'var(--faint)' }}>restante</span>
                   </Ring>
                 </div>
-                <div style={{ width: '100%', height: 44, borderRadius: 9, background: cprod ? `linear-gradient(135deg,${cprod},rgba(0,0,0,.35))` : 'linear-gradient(135deg,rgba(238,77,45,.35),rgba(160,107,232,.3))', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 8, position: 'relative' }}>
-                  <Package size={18} style={{ color: 'rgba(255,255,255,.9)' }} />
-                  <span style={{ position: 'absolute', top: 5, right: 6, width: 7, height: 7, borderRadius: '50%', background: '#fff', animation: 'pulse 2s infinite' }} />
+                <div style={{ width: '100%', height: 56, borderRadius: 9, marginBottom: 8, position: 'relative', overflow: 'hidden', background: cprod ? `linear-gradient(135deg,${cprod},rgba(0,0,0,.35))` : 'linear-gradient(135deg,rgba(238,77,45,.35),rgba(160,107,232,.3))' }}>
+                  {v.imagem ? <img src={v.imagem} alt="" loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Package size={18} style={{ color: 'rgba(255,255,255,.9)' }} /></div>}
+                  <span style={{ position: 'absolute', top: 5, right: 6, width: 7, height: 7, borderRadius: '50%', background: '#fff', boxShadow: '0 0 0 2px rgba(0,0,0,.35)', animation: 'pulse 2s infinite' }} />
+                  {v.em_oferta && <span style={{ position: 'absolute', bottom: 4, left: 5 }}><Badge c="#fff" bg="rgba(238,77,45,.9)">oferta</Badge></span>}
                 </div>
                 <div style={{ fontSize: 10, fontWeight: 600, lineHeight: 1.25, height: 25, overflow: 'hidden' }}>{v.nome}</div>
                 <div className="row num" style={{ display: 'flex', justifyContent: 'space-between', marginTop: 7, paddingTop: 7, borderTop: '1px solid var(--glass-border)', fontSize: 8.5 }}>
@@ -308,6 +344,24 @@ export default function ShopeeBoost({ conectado, notify }) {
                   <input type="number" min={1} max={24} value={jnFim} onChange={(e) => setJnFim(Number(e.target.value))} className="num" style={{ width: 52, padding: '5px 8px', fontSize: 11, textAlign: 'center', background: 'rgba(0,0,0,.2)', border: '1px solid var(--glass-border)', borderRadius: 7, color: 'var(--text)' }} />
                   <button onClick={() => { if (jnFim > jnIni) setConfig({ janelas: [...janelas, [jnIni, jnFim]] }); else notify('O fim deve ser maior que o início.', 'warn') }} style={{ fontSize: 10, fontWeight: 700, padding: '5px 11px', borderRadius: 8, cursor: 'pointer', color: '#fff', border: 'none', background: 'var(--accent)' }}>+ janela</button>
                 </div>
+                {(() => {
+                  const jp = janelasPico(pico)
+                  if (!pico?.total || !jp.length) {
+                    return <div className="row" style={{ display: 'flex', gap: 9, alignItems: 'flex-start', marginTop: 12, background: 'rgba(160,107,232,.06)', border: '1px solid rgba(160,107,232,.2)', borderRadius: 11, padding: '10px 12px' }}><Sparkles size={13} style={{ color: PURPLE, flex: 'none', marginTop: 1 }} /><div style={{ fontSize: 10, color: 'var(--dim)' }}><b style={{ color: '#cfaef5' }}>Sugestão do agente:</b> assim que houver histórico de pedidos, o agente identifica os horários de pico que concentram suas vendas e você aplica a janela ideal com um clique.</div></div>
+                  }
+                  const horas = pico.horas || []
+                  const totalPico = jp.reduce((s, [a, b]) => s + horas.slice(a, b).reduce((x, y) => x + y, 0), 0)
+                  const pct = Math.round(totalPico / pico.total * 100)
+                  const txt = jp.map(([a, b]) => `${String(a).padStart(2, '0')}h–${String(Math.min(b, 24)).padStart(2, '0')}h`).join(' e ')
+                  const jaAplicado = JSON.stringify(janelas) === JSON.stringify(jp)
+                  return (
+                    <div className="row" style={{ display: 'flex', gap: 9, alignItems: 'center', marginTop: 12, background: 'rgba(160,107,232,.07)', border: '1px solid rgba(160,107,232,.22)', borderRadius: 11, padding: '10px 12px' }}>
+                      <Sparkles size={14} style={{ color: PURPLE, flex: 'none' }} />
+                      <div style={{ flex: 1, fontSize: 10, color: 'var(--dim)' }}><b style={{ color: '#cfaef5' }}>Sugestão do agente:</b> concentre a janela em <b style={{ color: 'var(--text)' }}>{txt}</b> — {pct}% das suas vendas acontecem nesses picos. Fora deles, o boost rende bem menos views.</div>
+                      <button onClick={() => setConfig({ janelas: jp })} disabled={jaAplicado} style={{ fontSize: 10, fontWeight: 800, padding: '7px 12px', borderRadius: 9, cursor: jaAplicado ? 'default' : 'pointer', color: '#fff', border: 'none', background: jaAplicado ? 'rgba(255,255,255,.1)' : 'linear-gradient(135deg,var(--accent2),var(--accent))', flex: 'none', opacity: jaAplicado ? .6 : 1 }}>{jaAplicado ? 'aplicada' : 'Aplicar janela'}</button>
+                    </div>
+                  )
+                })()}
               </>
             )
           })()}
@@ -315,7 +369,13 @@ export default function ShopeeBoost({ conectado, notify }) {
 
         {/* DESEMPENHO / CAMPEÕES */}
         <div className="glass" style={{ padding: 16 }}>
-          <Secao icon={Trophy} cor={GOLD} titulo="Campeões do destaque · 30 dias" extra={<><div style={{ flex: 1 }} />{kpis.tem_vendas && <Badge c={OK} bg="rgba(47,217,141,.12)">{kpis.vendas_30d} un no total</Badge>}</>} />
+          <Secao icon={TrendingUp} cor={OK} titulo="Desempenho · vendas com e sem destaque" extra={<><div style={{ flex: 1 }} />{(() => { const s = hist?.serie || []; const tot = s.reduce((a, d) => a + d.total, 0); const bo = s.reduce((a, d) => a + d.boost, 0); return bo > 0 ? <Badge c={OK} bg="rgba(47,217,141,.12)">{Math.round(bo / Math.max(tot, 1) * 100)}% via destaque</Badge> : null })()}</>} />
+          <DesempenhoChart serie={hist?.serie} />
+          <div className="row" style={{ display: 'flex', gap: 13, fontSize: 9, color: 'var(--faint)', margin: '8px 0 14px', flexWrap: 'wrap' }}>
+            <span className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><span style={{ width: 10, height: 4, borderRadius: 2, background: OK }} />vendas em período de boost</span>
+            <span className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><span style={{ width: 10, height: 4, borderRadius: 2, background: 'rgba(255,255,255,.28)' }} />total de vendas</span>
+          </div>
+          <div style={{ fontSize: 8.5, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)', marginBottom: 8 }}>Campeões do destaque · 30d{kpis.tem_vendas ? <span className="num" style={{ color: 'var(--faint)', fontWeight: 700 }}> · {kpis.vendas_30d} un</span> : null}</div>
           {!kpis.tem_vendas ? <Empty icon={TrendingUp} texto="Estamos sincronizando o histórico de pedidos da Shopee. Os campeões aparecem assim que os dados chegam." />
             : (p?.campeoes || []).length === 0 ? <Empty icon={Trophy} texto="Sem vendas registradas nos produtos do boost ainda." />
               : (
@@ -341,36 +401,61 @@ export default function ShopeeBoost({ conectado, notify }) {
 
       {/* ===== FILA ===== */}
       <div className="glass" style={{ padding: 16, marginBottom: 14 }}>
-        <Secao icon={Package} cor={PURPLE} titulo={<>Fila inteligente <span className="num" style={{ color: 'var(--faint)' }}>{(p?.fila || []).length} produtos</span></>} extra={<><Badge c={PURPLE} bg="rgba(160,107,232,.14)">ORDENADA POR {(cfg.criterio || 'prioridade').toUpperCase()}</Badge>{(kpis.nao_elegiveis ?? 0) > 0 && <Badge c={DANGER} bg="rgba(255,122,122,.12)"><AlertTriangle size={8} />{kpis.nao_elegiveis} não elegíveis</Badge>}<div style={{ flex: 1 }} /><button onClick={() => autoSelecionar()} disabled={autoSel} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 700, padding: '7px 12px', borderRadius: 9, cursor: 'pointer', color: '#e9dbfb', border: '1px solid rgba(160,107,232,.45)', background: 'linear-gradient(135deg,rgba(160,107,232,.22),rgba(214,0,127,.16))' }}>{autoSel ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}Renovar auto-seleção</button></>} />
-        {(p?.fila || []).length === 0 ? <Empty icon={Package} texto="Fila vazia. Ative a auto-seleção ou adicione produtos manualmente." />
-          : (p?.fila || []).slice(0, 12).map((f) => {
+        <Secao icon={Package} cor={PURPLE} titulo={<>Fila inteligente <span className="num" style={{ color: 'var(--faint)' }}>{(p?.fila || []).length} produtos</span></>} extra={<><Badge c={PURPLE} bg="rgba(160,107,232,.14)">ORDENADA POR {(cfg.criterio || 'prioridade').toUpperCase()}</Badge>{(kpis.nao_elegiveis ?? 0) > 0 && <Badge c={DANGER} bg="rgba(255,122,122,.12)"><AlertTriangle size={8} />{kpis.nao_elegiveis} não elegíveis</Badge>}{(kpis.preco_alerta ?? 0) > 0 && <Badge c={DANGER} bg="rgba(255,122,122,.12)">{kpis.preco_alerta} preço abaixo</Badge>}<div style={{ flex: 1 }} /><button onClick={() => setSeletorAberto(true)} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 700, padding: '7px 12px', borderRadius: 9, cursor: 'pointer', color: '#fff', border: 'none', background: `linear-gradient(135deg,${SHOPEE},#c0341c)`, marginRight: 7 }}><PackagePlus size={12} />Adicionar produto</button><button onClick={() => autoSelecionar()} disabled={autoSel} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 700, padding: '7px 12px', borderRadius: 9, cursor: 'pointer', color: '#e9dbfb', border: '1px solid rgba(160,107,232,.45)', background: 'linear-gradient(135deg,rgba(160,107,232,.22),rgba(214,0,127,.16))' }}>{autoSel ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}Renovar auto-seleção</button></>} />
+        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+          <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 11px', borderRadius: 9, background: 'rgba(0,0,0,.2)', border: '1px solid var(--glass-border)', width: 240 }}>
+            <Search size={12} style={{ color: 'var(--faint)' }} />
+            <input value={filaBusca} onChange={(e) => { setFilaBusca(e.target.value); setFilaPag(0) }} placeholder="Buscar produto na fila…" style={{ flex: 1, background: 'none', border: 'none', outline: 'none', color: 'var(--text)', fontSize: 11 }} />
+            {filaBusca && <X size={12} style={{ color: 'var(--faint)', cursor: 'pointer' }} onClick={() => setFilaBusca('')} />}
+          </div>
+          <div style={{ flex: 1 }} />
+          {[['todos', 'Todos'], ['auto', 'Automáticos'], ['manual', 'Manuais'], ['fixos', 'Fixos ★']].map(([k, lbl]) => (
+            <span key={k} onClick={() => { setFilaFiltro(k); setFilaPag(0) }} style={{ fontSize: 10.5, fontWeight: 700, padding: '6px 11px', borderRadius: 99, cursor: 'pointer', color: filaFiltro === k ? '#fff' : 'var(--dim)', background: filaFiltro === k ? 'linear-gradient(135deg,var(--accent2),var(--accent))' : 'rgba(255,255,255,.04)', border: `1px solid ${filaFiltro === k ? 'transparent' : 'var(--glass-border)'}` }}>{lbl}</span>
+          ))}
+        </div>
+        {filaFiltrada.length === 0 ? <Empty icon={Package} texto={filaBusca || filaFiltro !== 'todos' ? 'Nenhum produto encontrado com esse filtro.' : 'Fila vazia. Ative a auto-seleção ou adicione produtos manualmente.'} />
+          : filaVisiveis.map((f) => {
             const isA = f.auto
             const abcCor = f.abc === 'A' ? OK : f.abc === 'B' ? GOLD : DANGER
             const ineleg = f.elegivel === false
             return (
               <div key={f.item_id} className="glass lift" style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '10px 12px', borderRadius: 13, marginBottom: 8, borderLeft: `3px solid ${ineleg ? DANGER : isA ? PURPLE : WARN}`, opacity: ineleg ? .55 : 1 }}>
                 <span className="num" style={{ width: 20, textAlign: 'center', fontSize: 12, fontWeight: 800, color: 'var(--faint)' }}>{f.prioridade}</span>
-                <div style={{ width: 40, height: 40, borderRadius: 10, background: 'linear-gradient(135deg,rgba(238,77,45,.25),rgba(160,107,232,.2))', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}><Package size={17} style={{ color: 'var(--dim)' }} /></div>
+                <div style={{ width: 40, height: 40, borderRadius: 10, overflow: 'hidden', flex: 'none', background: 'linear-gradient(135deg,rgba(238,77,45,.25),rgba(160,107,232,.2))', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{f.imagem ? <img src={f.imagem} alt="" loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Package size={17} style={{ color: 'var(--dim)' }} />}</div>
                 <div style={{ flex: 1.7, minWidth: 0 }}>
                   <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <span style={{ fontSize: 8, fontWeight: 900, width: 16, height: 16, borderRadius: 5, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 'none', color: f.abc === 'B' ? '#0d0d0d' : '#fff', background: abcCor }}>{f.abc}</span>
                     <span style={{ fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.nome}</span>
                   </div>
-                  <div className="row" style={{ display: 'flex', gap: 6, marginTop: 3 }}>
+                  <div className="row" style={{ display: 'flex', gap: 6, marginTop: 3, flexWrap: 'wrap' }}>
                     <Badge c={isA ? PURPLE : WARN} bg={isA ? 'rgba(160,107,232,.14)' : 'rgba(224,162,60,.14)'}>{isA ? 'auto' : 'manual'}</Badge>
                     {f.em_oferta && <Badge c={SHOPEE} bg="rgba(238,77,45,.14)">em oferta</Badge>}
+                    {f.preco_status === 'ok' && <Badge c={OK} bg="rgba(47,217,141,.13)"><Check size={8} />preço na régua</Badge>}
+                    {f.preco_status === 'abaixo' && <Badge c={DANGER} bg="rgba(255,122,122,.14)"><AlertTriangle size={8} />preço abaixo{f.preco_sugerido ? ` · ideal R$ ${f.preco_sugerido}` : ''}</Badge>}
+                    {f.preco_status === 'acima' && <Badge c={BLUE} bg="rgba(91,141,239,.14)">preço acima{f.preco_sugerido ? ` · ideal R$ ${f.preco_sugerido}` : ''}</Badge>}
                     {ineleg && <Badge c={DANGER} bg="rgba(255,122,122,.14)"><AlertTriangle size={8} />{f.motivo_ineleg || 'não elegível'}</Badge>}
                     <span className="num" style={{ fontSize: 8.5, color: 'var(--faint)' }}>giro {f.giro}/dia · {f.impulsos} impulsos{f.estoque != null ? ` · ${f.estoque} un` : ''}</span>
                   </div>
                 </div>
                 <div style={{ width: 66, textAlign: 'right' }}><div style={{ fontSize: 7, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)' }}>Vendas 30d</div><b className="num" style={{ fontSize: 12.5, color: f.vendas > 0 ? OK : 'var(--faint)' }}>{f.vendas}</b></div>
                 <div style={{ width: 70, textAlign: 'right' }}><div style={{ fontSize: 7, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)' }}>Entra em</div><b className="num" style={{ fontSize: 12, color: PURPLE }}>{f.entra_ciclos === 0 ? 'próximo' : `~${f.entra_ciclos * 4}h`}</b></div>
+                <div className="row" style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                  <button onClick={() => moverNaFila(f.item_id, 'topo')} title="Mover para o topo" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '1px 4px', lineHeight: 0 }}><ChevronsUp size={13} style={{ color: 'var(--dim)' }} /></button>
+                  <button onClick={() => moverNaFila(f.item_id, 'cima')} title="Subir uma posição" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '1px 4px', lineHeight: 0 }}><ChevronUp size={13} style={{ color: 'var(--faint)' }} /></button>
+                </div>
                 <button onClick={() => fixar(f.item_id, !f.fixo)} title="Fixar" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}><Star size={14} style={{ color: f.fixo ? GOLD : 'var(--faint)' }} fill={f.fixo ? GOLD : 'none'} /></button>
                 <button onClick={() => removerFila(f.item_id)} title="Remover" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}><X size={14} style={{ color: 'var(--faint)' }} /></button>
               </div>
             )
           })}
-        {(p?.fila || []).length > 12 && <div className="row" style={{ display: 'flex', justifyContent: 'center', marginTop: 10 }}><span style={{ fontSize: 10, color: 'var(--faint)' }}>mostrando 12 de {(p?.fila || []).length} · "entra em" estimado pela posição × vagas de 4h</span></div>}
+        {filaFiltrada.length > 0 && (
+          <div className="row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, marginTop: 12 }}>
+            <button onClick={() => setFilaPag((x) => Math.max(0, x - 1))} disabled={pagAtual === 0} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, fontWeight: 700, padding: '6px 11px', borderRadius: 8, cursor: pagAtual === 0 ? 'default' : 'pointer', color: 'var(--dim)', background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', opacity: pagAtual === 0 ? .4 : 1 }}><ChevronRight size={13} style={{ transform: 'rotate(180deg)' }} />Anterior</button>
+            <span className="num" style={{ fontSize: 10.5, color: 'var(--faint)' }}>{pagAtual * FILA_PP + 1}–{Math.min((pagAtual + 1) * FILA_PP, filaFiltrada.length)} de {filaFiltrada.length}{filaPaginas > 1 ? ` · pág. ${pagAtual + 1}/${filaPaginas}` : ''}</span>
+            <button onClick={() => setFilaPag((x) => Math.min(filaPaginas - 1, x + 1))} disabled={pagAtual >= filaPaginas - 1} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, fontWeight: 700, padding: '6px 11px', borderRadius: 8, cursor: pagAtual >= filaPaginas - 1 ? 'default' : 'pointer', color: 'var(--dim)', background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', opacity: pagAtual >= filaPaginas - 1 ? .4 : 1 }}>Próximo<ChevronRight size={13} /></button>
+          </div>
+        )}
+        <div className="row" style={{ display: 'flex', justifyContent: 'center', marginTop: 8 }}><span style={{ fontSize: 9, color: 'var(--faint)' }}>a coluna "entra em" é estimada pela posição na fila × vagas de 4h</span></div>
       </div>
 
       {/* ===== HISTÓRICO & ATRIBUIÇÃO ===== */}
@@ -382,13 +467,21 @@ export default function ShopeeBoost({ conectado, notify }) {
         <div className="glass" style={{ padding: 16 }}>
           <Secao icon={Clock} cor="var(--dim)" titulo="Diário de bordo do motor" extra={<><div style={{ flex: 1 }} /><Badge c="var(--faint)" bg="rgba(255,255,255,.05)">RECENTES</Badge></>} />
           {(p?.diario || []).length === 0 ? <Empty icon={Clock} texto="Sem eventos do motor ainda. Assim que ele impulsionar, entrar em espera ou pular um item, aparece aqui." />
-            : (p?.diario || []).map((e, i) => (
-              <div key={i} className="row" style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 0', borderBottom: i < (p.diario.length - 1) ? '1px solid rgba(255,255,255,.04)' : 'none' }}>
-                <span style={{ width: 8, height: 8, borderRadius: '50%', background: e.tipo === 'ok' ? OK : WARN, flex: 'none', marginTop: 5 }} />
-                <div style={{ flex: 1, fontSize: 10.5, color: 'var(--dim)', lineHeight: 1.5 }}><b style={{ color: 'var(--text)' }}>{e.titulo}</b>{e.texto ? ` — ${e.texto}` : ''}</div>
-                <span className="num" style={{ fontSize: 8.5, color: 'var(--faint)', flex: 'none', marginTop: 2 }}>{tempoRel(e.quando)}</span>
-              </div>
-            ))}
+            : (p?.diario || []).map((e, i) => {
+              const t = (e.titulo || '').toLowerCase()
+              const cor = e.tipo !== 'ok' ? WARN
+                : (t.includes('radar') || t.includes('concorrente')) ? BLUE
+                  : t.includes('vaga') ? GOLD
+                    : (t.includes('impuls') || t.includes('rodíz') || t.includes('rodiz') || t.includes('auto') || t.includes('renov')) ? PURPLE
+                      : OK
+              return (
+                <div key={i} className="row" style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 0', borderBottom: i < (p.diario.length - 1) ? '1px solid rgba(255,255,255,.04)' : 'none' }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: cor, flex: 'none', marginTop: 5, boxShadow: `0 0 6px ${cor}66` }} />
+                  <div style={{ flex: 1, fontSize: 10.5, color: 'var(--dim)', lineHeight: 1.5 }}><b style={{ color: 'var(--text)' }}>{e.titulo}</b>{e.texto ? ` — ${e.texto}` : ''}</div>
+                  <span className="num" style={{ fontSize: 8.5, color: 'var(--faint)', flex: 'none', marginTop: 2 }}>{tempoRel(e.quando)}</span>
+                </div>
+              )
+            })}
         </div>
       </div>
 
@@ -401,12 +494,14 @@ export default function ShopeeBoost({ conectado, notify }) {
               <div key={i} className="glass lift" style={{ padding: 13, borderRadius: 13, borderLeft: `3px solid ${ins.cor}` }}>
                 <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 6 }}><ins.icon size={13} style={{ color: ins.cor }} /><b style={{ fontSize: 11, color: ins.cor }}>{ins.titulo}</b></div>
                 <div style={{ fontSize: 10.5, color: 'var(--dim)', lineHeight: 1.5 }}>{ins.texto}</div>
-                {ins.acao && <button onClick={ins.onClick} style={{ marginTop: 9, fontSize: 10, fontWeight: 800, padding: '6px 12px', borderRadius: 8, cursor: 'pointer', color: ins.cor === WARN || ins.cor === OK ? '#0d0d0d' : '#fff', border: 'none', background: ins.cor }}>{ins.acao}</button>}
+                {ins.acao && <button onClick={() => execInsight(ins)} style={{ marginTop: 9, fontSize: 10, fontWeight: 800, padding: '6px 12px', borderRadius: 8, cursor: 'pointer', color: ins.cor === WARN || ins.cor === OK ? '#0d0d0d' : '#fff', border: 'none', background: ins.cor }}>{ins.acao}</button>}
               </div>
             ))}
           </div>
         </div>
       )}
+
+      {seletorAberto && <SeletorProdutos jaNaFila={new Set((p?.fila || []).map((f) => String(f.item_id)))} onFechar={() => setSeletorAberto(false)} onAdicionar={adicionarProdutos} notify={notify} />}
     </div>
   )
 }
@@ -425,58 +520,62 @@ function MiniCard({ label, value, tag, cor = 'var(--text)' }) {
 
 /* ---------- Timeline 24h (forecast do rodízio) ---------- */
 function Timeline({ vagas, fila, decorrido }) {
-  const start = Date.now()
-  const span = 24 * 3600000
-  const H = 3600000
-  const laneH = 118 / 5
-  const ocup = vagas.filter((v) => v.ocupada)
+  const start = Date.now(); const span = 24 * 3600000; const H = 3600000
+  const laneH = 30, eixo = 20, altura = laneH * 5
   const filaNomes = fila.map((f) => f.nome).filter(Boolean)
   const blocks = []
   vagas.forEach((v, lane) => {
+    let t = start
     if (v.ocupada) {
       const rem = v.termina_ms == null ? 2 * H : v.termina_ms - decorrido
-      const fim = start + Math.max(0, rem)
+      const fim = start + Math.max(5 * 60000, rem)
       blocks.push({ lane, a: start, b: fim, tipo: v.tipo, nome: v.nome, agora: true })
-      let t = fim, k = 0
-      while (t < start + span && k < 6) {
-        const nome = filaNomes.length ? filaNomes[(lane + k) % filaNomes.length] : 'próximo da fila'
-        blocks.push({ lane, a: t, b: Math.min(t + 4 * H, start + span), tipo: 'previsto', nome })
-        t += 4 * H; k++
-      }
-    } else {
-      // vaga livre: já entra o próximo e segue o rodízio
-      let t = start, k = 0
-      while (t < start + span && k < 6) {
-        const nome = filaNomes.length ? filaNomes[(lane + k) % filaNomes.length] : 'próximo da fila'
-        blocks.push({ lane, a: t, b: Math.min(t + 4 * H, start + span), tipo: 'previsto', nome })
-        t += 4 * H; k++
-      }
+      t = fim
+    }
+    let k = 0
+    while (t < start + span && k < 6) {
+      const nome = filaNomes.length ? filaNomes[(lane + k) % filaNomes.length] : 'próximo da fila'
+      blocks.push({ lane, a: t, b: Math.min(t + 4 * H, start + span), tipo: 'previsto', nome })
+      t += 4 * H; k++
     }
   })
-  const picos = []
-  const base = new Date(); base.setMinutes(0, 0, 0)
+  const picos = []; const base = new Date(); base.setMinutes(0, 0, 0)
   for (let d = 0; d < 2; d++) {
-    [[11, 14], [19, 22]].forEach(([h1, h2]) => {
+    ;[[11, 14], [19, 22]].forEach(([h1, h2]) => {
       const a = new Date(base); a.setDate(a.getDate() + d); a.setHours(h1)
       const b = new Date(base); b.setDate(b.getDate() + d); b.setHours(h2)
       picos.push([a.getTime(), b.getTime()])
     })
   }
+  const ag = new Date(start)
   return (
     <div style={{ marginTop: 15 }}>
-      <div style={{ fontSize: 8.5, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}><Calendar size={11} />Agenda do rodízio · próximas 24h <span style={{ color: PURPLE, textTransform: 'none', fontWeight: 700 }}>(estimada pela fila e janela de pico)</span></div>
-      <div style={{ position: 'relative', height: 118, background: 'rgba(0,0,0,.22)', borderRadius: 12, border: '1px solid var(--glass-border)', overflow: 'hidden' }}>
-        {picos.map(([a, b], i) => { const l = Math.max(0, (a - start) / span * 100), w = Math.min(100, (b - a) / span * 100); if (l > 100 || l + w < 0) return null; return <div key={'p' + i} style={{ position: 'absolute', top: 0, bottom: 0, left: `${l}%`, width: `${w}%`, background: 'rgba(160,107,232,.08)', borderLeft: '1px dashed rgba(160,107,232,.35)', borderRight: '1px dashed rgba(160,107,232,.35)' }} /> })}
-        {blocks.map((b, i) => {
-          const l = Math.max(0, (b.a - start) / span * 100), r0 = Math.min(100, (b.b - start) / span * 100), w = Math.max(.7, r0 - l)
-          const cor = b.agora ? (TIPOS[b.tipo] ? TIPOS[b.tipo][1] : PURPLE) : 'rgba(255,255,255,.13)'
-          const bg = b.agora ? (b.tipo === 'auto' ? 'rgba(160,107,232,.4)' : b.tipo === 'radar' ? 'rgba(91,141,239,.4)' : 'rgba(224,162,60,.4)') : 'rgba(255,255,255,.06)'
-          return <div key={i} title={b.nome} style={{ position: 'absolute', left: `${l}%`, width: `${w}%`, top: b.lane * laneH + 4, height: laneH - 8, borderRadius: 6, background: bg, border: `1px solid ${cor}`, overflow: 'hidden', display: 'flex', alignItems: 'center', padding: '0 6px' }}><span style={{ fontSize: 7.5, fontWeight: 700, color: b.agora ? 'var(--text)' : 'var(--faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.nome}</span></div>
-        })}
-        <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: 2, background: SHOPEE, boxShadow: '0 0 8px rgba(238,77,45,.8)' }} />
-        <Badge c="#fff" bg={SHOPEE}>AGORA</Badge>
+      <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 8.5, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)', display: 'inline-flex', alignItems: 'center', gap: 6 }}><Calendar size={11} />Agenda do rodízio · próximas 24h</span>
+        <span style={{ fontSize: 8.5, color: PURPLE, fontWeight: 700 }}>(estimada pela fila e janela de pico)</span>
+        <div style={{ flex: 1 }} />
+        <span className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 8.5, color: 'var(--faint)' }}><span style={{ width: 9, height: 3, borderRadius: 2, background: 'rgba(160,107,232,.5)' }} />pico da loja</span>
+        <span className="num" style={{ fontSize: 9, fontWeight: 800, color: SHOPEE }}>agora {String(ag.getHours()).padStart(2, '0')}:{String(ag.getMinutes()).padStart(2, '0')}</span>
       </div>
-      <div className="row num" style={{ display: 'flex', justifyContent: 'space-between', fontSize: 8, color: 'var(--faint)', marginTop: 4 }}>{[0, 1, 2, 3, 4, 5, 6].map((i) => { const t = new Date(start + i * 4 * H); return <span key={i}>{String(t.getHours()).padStart(2, '0')}h</span> })}</div>
+      <div className="row" style={{ display: 'flex', alignItems: 'stretch' }}>
+        <div style={{ width: 28, flex: 'none', display: 'flex', flexDirection: 'column' }}>
+          {[0, 1, 2, 3, 4].map((l) => <div key={l} style={{ height: laneH, display: 'flex', alignItems: 'center' }}><span className="num" style={{ fontSize: 7.5, fontWeight: 800, color: 'var(--faint)' }}>V{l + 1}</span></div>)}
+        </div>
+        <div style={{ flex: 1, position: 'relative', height: altura + eixo, background: 'rgba(0,0,0,.22)', borderRadius: 10, border: '1px solid var(--glass-border)', overflow: 'hidden' }}>
+          {picos.map(([a, b], i) => { const l = Math.max(0, (a - start) / span * 100), w = Math.min(100, (b - a) / span * 100); if (l > 100 || l + w < 0) return null; return <div key={'p' + i} style={{ position: 'absolute', top: 0, bottom: eixo, left: `${l}%`, width: `${w}%`, background: 'rgba(160,107,232,.07)', borderLeft: '1px dashed rgba(160,107,232,.3)', borderRight: '1px dashed rgba(160,107,232,.3)' }} /> })}
+          {[0, 1, 2, 3, 4].map((l) => <div key={'l' + l} style={{ position: 'absolute', left: 0, right: 0, top: l * laneH, height: laneH, background: l % 2 ? 'rgba(255,255,255,.018)' : 'transparent', borderBottom: '1px solid rgba(255,255,255,.04)' }} />)}
+          {blocks.map((b, i) => {
+            const l = Math.max(0, (b.a - start) / span * 100), r0 = Math.min(100, (b.b - start) / span * 100), w = Math.max(.6, r0 - l)
+            const cor = b.agora ? (TIPOS[b.tipo] ? TIPOS[b.tipo][1] : PURPLE) : 'rgba(255,255,255,.14)'
+            const bg = b.agora ? (b.tipo === 'auto' ? 'rgba(160,107,232,.42)' : b.tipo === 'radar' ? 'rgba(91,141,239,.42)' : 'rgba(224,162,60,.42)') : 'rgba(255,255,255,.05)'
+            return <div key={i} title={b.nome} style={{ position: 'absolute', left: `${l}%`, width: `calc(${w}% - 2px)`, top: b.lane * laneH + 3, height: laneH - 6, borderRadius: 5, background: bg, border: `1px solid ${cor}`, overflow: 'hidden', display: 'flex', alignItems: 'center', paddingLeft: 5 }}>{w >= 8 && <span style={{ fontSize: 7.5, fontWeight: 700, color: b.agora ? 'var(--text)' : 'var(--faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.nome}</span>}</div>
+          })}
+          <div style={{ position: 'absolute', top: 0, bottom: eixo, left: 0, width: 2, background: SHOPEE, boxShadow: '0 0 8px rgba(238,77,45,.8)', zIndex: 3 }} />
+          <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: eixo, borderTop: '1px solid rgba(255,255,255,.06)', background: 'rgba(0,0,0,.2)' }}>
+            {[0, 1, 2, 3, 4, 5, 6].map((i) => { const t = new Date(start + i * 4 * H); return <span key={i} className="num" style={{ position: 'absolute', top: 5, left: `${i / 6 * 100}%`, transform: i === 0 ? 'none' : i === 6 ? 'translateX(-100%)' : 'translateX(-50%)', fontSize: 7.5, color: 'var(--faint)', paddingLeft: i === 0 ? 4 : 0 }}>{String(t.getHours()).padStart(2, '0')}h</span> })}
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
@@ -502,6 +601,33 @@ function Heatmap({ pico, janelas, diaTodo }) {
 }
 
 /* ---------- Histórico & Atribuição ---------- */
+/* ---------- Gráfico de desempenho (vendas com/sem destaque) ---------- */
+function DesempenhoChart({ serie }) {
+  const dados = serie || []
+  const temDados = dados.some((d) => d.total > 0)
+  if (!temDados) return <div style={{ height: 110, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: 'var(--faint)', background: 'rgba(0,0,0,.15)', borderRadius: 10, textAlign: 'center', padding: 12 }}>Sem histórico de vendas ainda — o gráfico de desempenho aparece conforme os pedidos sincronizam e os primeiros boosts acontecem.</div>
+  const W = 320, H = 110, pad = 6
+  const n = dados.length
+  const max = Math.max(...dados.map((d) => d.total), 1)
+  const x = (i) => pad + (n <= 1 ? 0 : i / (n - 1) * (W - 2 * pad))
+  const y = (v) => H - pad - (v / max) * (H - 2 * pad)
+  const linha = (key) => dados.map((d, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(d[key]).toFixed(1)}`).join(' ')
+  const area = (key) => `${linha(key)} L${x(n - 1).toFixed(1)},${(H - pad).toFixed(1)} L${x(0).toFixed(1)},${(H - pad).toFixed(1)} Z`
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="none" style={{ display: 'block' }}>
+      <defs>
+        <linearGradient id="gTot" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="rgba(255,255,255,.14)" /><stop offset="100%" stopColor="rgba(255,255,255,0)" /></linearGradient>
+        <linearGradient id="gBoost" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="rgba(47,217,141,.4)" /><stop offset="100%" stopColor="rgba(47,217,141,0)" /></linearGradient>
+      </defs>
+      <path d={area('total')} fill="url(#gTot)" />
+      <path d={linha('total')} fill="none" stroke="rgba(255,255,255,.32)" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+      <path d={area('boost')} fill="url(#gBoost)" />
+      <path d={linha('boost')} fill="none" stroke="#2FD98D" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+    </svg>
+  )
+}
+
+/* ---------- Histórico & atribuição ---------- */
 function Historico({ hist }) {
   const TIPO_COR = { auto: PURPLE, manual: WARN, radar: BLUE }
   if (!hist) return <div className="glass" style={{ padding: 16, marginBottom: 14 }}><Secao icon={TrendingUp} cor={OK} titulo="Histórico & atribuição de vendas" /><Skel h={60} /></div>
@@ -635,26 +761,104 @@ function derivarInsights(p, pico) {
   const fila = p?.fila || []
   // campeão descoberto
   if (campeoes[0] && campeoes[0].vendas >= 8) {
-    out.push({ icon: Trophy, cor: OK, titulo: 'Campeão do destaque', texto: `"${campeoes[0].nome}" lidera com ${campeoes[0].vendas} vendas em 30 dias. Fixar como pin garante presença em todas as janelas de pico.` })
-  }
-  // boost + promoção: exposição dobrada
-  const emOferta = (p?.kpis || {}).em_oferta || 0
-  if (emOferta > 0) {
-    out.push({ icon: Sparkles, cor: SHOPEE, titulo: 'Exposição dobrada', texto: `${emOferta} produto(s) da fila já têm oferta ativa. Impulsionar quem está em promoção multiplica a conversão — eles aparecem marcados como "em oferta".` })
+    out.push({ icon: Trophy, cor: OK, titulo: 'Campeão do destaque', texto: `"${campeoes[0].nome}" lidera com ${campeoes[0].vendas} vendas em 30 dias. Fixar como pin garante presença em todas as janelas de pico.`, acao: 'Fixar produto ★', acaoTipo: 'fixar', acaoArg: campeoes[0].item_id })
   }
   // vaga desperdiçada: item com impulsos e 0 vendas
   const desperd = fila.find((f) => (f.impulsos || 0) >= 2 && (f.vendas || 0) === 0)
   if (desperd) {
-    out.push({ icon: AlertTriangle, cor: WARN, titulo: 'Vaga desperdiçada', texto: `"${desperd.nome}" já teve ${desperd.impulsos} impulsos e 0 vendas. Vale revisar preço/foto ou dar a vez ao próximo da fila.` })
+    out.push({ icon: AlertTriangle, cor: WARN, titulo: 'Vaga desperdiçada', texto: `"${desperd.nome}" já teve ${desperd.impulsos} impulsos e 0 vendas. Vale revisar preço/foto ou dar a vez ao próximo da fila.`, acao: 'Remover da fila', acaoTipo: 'remover', acaoArg: desperd.item_id })
   }
   // janela ociosa: heatmap com horas fracas dentro da janela
   if (pico && pico.total > 0) {
     const horas = pico.horas || []
     const madruga = horas.slice(2, 6).reduce((a, b) => a + b, 0)
     const total = horas.reduce((a, b) => a + b, 0) || 1
-    if (madruga / total < 0.08) {
-      out.push({ icon: Clock, cor: BLUE, titulo: 'Janela ociosa', texto: `Entre 02h e 06h saem só ${Math.round(madruga / total * 100)}% dos seus pedidos. Encurtar a janela concentra os impulsos nos horários que vendem.` })
+    if (madruga / total < 0.08 && janelasPico(pico).length) {
+      out.push({ icon: Clock, cor: BLUE, titulo: 'Janela ociosa', texto: `Entre 02h e 06h saem só ${Math.round(madruga / total * 100)}% dos seus pedidos. Concentrar a janela nos horários de pico rende mais views por impulso.`, acao: 'Otimizar janela', acaoTipo: 'janela' })
     }
   }
+  // boost + promoção: exposição dobrada (informativo)
+  const emOferta = (p?.kpis || {}).em_oferta || 0
+  if (emOferta > 0) {
+    out.push({ icon: Sparkles, cor: SHOPEE, titulo: 'Exposição dobrada', texto: `${emOferta} produto(s) da fila já têm oferta ativa. Impulsionar quem está em promoção multiplica a conversão — eles aparecem marcados como "em oferta".` })
+  }
   return out.slice(0, 3)
+}
+
+/* ---------- Seletor de produtos do catálogo (adicionar à fila) ---------- */
+function SeletorProdutos({ jaNaFila, onFechar, onAdicionar, notify }) {
+  const [itens, setItens] = useState([])
+  const [offset, setOffset] = useState(0)
+  const [carregando, setCarregando] = useState(true)
+  const [temMais, setTemMais] = useState(true)
+  const [busca, setBusca] = useState('')
+  const [sel, setSel] = useState(new Set())
+
+  const carregar = (off) => {
+    setCarregando(true)
+    api.shopeeProdutos(off, 50).then((r) => {
+      const lista = ((r && r.response && r.response.item) || []).map((it) => ({
+        item_id: String(it.item_id), nome: it.item_name || `#${it.item_id}`, sku: it.item_sku,
+        imagem: it.image, preco: it.price, estoque: it.stock,
+      }))
+      setItens((old) => (off === 0 ? lista : [...old, ...lista]))
+      setTemMais(lista.length >= 50)
+      setOffset(off + lista.length)
+    }).catch((e) => notify(e.message, 'danger')).finally(() => setCarregando(false))
+  }
+  useEffect(() => { carregar(0) }, [])
+
+  const q = busca.trim().toLowerCase()
+  const filtrados = q ? itens.filter((it) => (it.nome || '').toLowerCase().includes(q) || (it.sku || '').toLowerCase().includes(q)) : itens
+  const toggle = (id) => setSel((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n })
+  const confirmar = () => {
+    const escolhidos = itens.filter((it) => sel.has(it.item_id)).map((it) => ({ item_id: it.item_id, nome: it.nome }))
+    if (!escolhidos.length) { notify('Selecione ao menos um produto.', 'warn'); return }
+    onAdicionar(escolhidos); onFechar()
+  }
+
+  return (
+    <div onClick={onFechar} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)', backdropFilter: 'blur(3px)', WebkitBackdropFilter: 'blur(3px)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: 'min(760px,96vw)', maxHeight: '86vh', display: 'flex', flexDirection: 'column', background: 'var(--surface)', borderRadius: 18, border: '1px solid var(--glass-border)', boxShadow: '0 30px 80px rgba(0,0,0,.5)' }}>
+        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '15px 18px', borderBottom: '1px solid var(--glass-border)' }}>
+          <div style={{ width: 36, height: 36, borderRadius: 10, background: `linear-gradient(145deg,${SHOPEE},#a52c15)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}><PackagePlus size={18} color="#fff" /></div>
+          <div style={{ flex: 1 }}><div className="serif" style={{ fontSize: 16, fontWeight: 800 }}>Adicionar produtos à fila</div><div style={{ fontSize: 10.5, color: 'var(--dim)' }}>escolha do seu catálogo Shopee quais quer impulsionar</div></div>
+          <button onClick={onFechar} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} style={{ color: 'var(--dim)' }} /></button>
+        </div>
+        <div style={{ padding: '12px 18px' }}>
+          <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderRadius: 10, background: 'rgba(0,0,0,.2)', border: '1px solid var(--glass-border)' }}>
+            <Search size={14} style={{ color: 'var(--faint)' }} />
+            <input autoFocus value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar por nome ou SKU nos produtos carregados…" style={{ flex: 1, background: 'none', border: 'none', outline: 'none', color: 'var(--text)', fontSize: 13 }} />
+            {busca && <X size={13} style={{ color: 'var(--faint)', cursor: 'pointer' }} onClick={() => setBusca('')} />}
+          </div>
+        </div>
+        <div style={{ flex: 1, overflow: 'auto', padding: '0 18px 12px' }}>
+          {carregando && itens.length === 0 ? <div style={{ display: 'grid', gap: 8 }}>{[0, 1, 2, 3, 4].map((i) => <Skel key={i} h={54} />)}</div>
+            : filtrados.length === 0 ? <Empty icon={Search} texto={busca ? 'Nenhum produto encontrado para essa busca.' : 'Nenhum produto disponível.'} />
+              : filtrados.map((it) => {
+                const jaTem = jaNaFila.has(it.item_id)
+                const marcado = sel.has(it.item_id)
+                return (
+                  <div key={it.item_id} onClick={() => !jaTem && toggle(it.item_id)} style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '9px 11px', borderRadius: 12, marginBottom: 7, cursor: jaTem ? 'default' : 'pointer', background: marcado ? 'rgba(238,77,45,.12)' : 'rgba(255,255,255,.03)', border: `1px solid ${marcado ? 'rgba(238,77,45,.5)' : 'var(--glass-border)'}`, opacity: jaTem ? .5 : 1 }}>
+                    <div style={{ width: 44, height: 44, borderRadius: 10, overflow: 'hidden', flex: 'none', background: 'rgba(255,255,255,.05)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{it.imagem ? <img src={it.imagem} alt="" loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Package size={18} style={{ color: 'var(--faint)' }} />}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.nome}</div>
+                      <div className="num" style={{ fontSize: 9, color: 'var(--faint)' }}>{it.sku ? `SKU ${it.sku} · ` : ''}{it.preco != null ? `R$ ${it.preco} · ` : ''}{it.estoque != null ? `${it.estoque} un` : ''}</div>
+                    </div>
+                    {jaTem ? <Badge c="var(--faint)" bg="rgba(255,255,255,.05)">na fila</Badge>
+                      : <span style={{ width: 20, height: 20, borderRadius: 6, border: `2px solid ${marcado ? SHOPEE : 'var(--faint)'}`, background: marcado ? SHOPEE : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}>{marcado && <Check size={13} color="#fff" />}</span>}
+                  </div>
+                )
+              })}
+          {temMais && !busca && itens.length > 0 && <div className="row" style={{ display: 'flex', justifyContent: 'center', padding: 8 }}><button onClick={() => carregar(offset)} disabled={carregando} style={{ fontSize: 11, fontWeight: 700, padding: '7px 16px', borderRadius: 9, cursor: 'pointer', color: 'var(--dim)', background: 'var(--glass-bg)', border: '1px solid var(--glass-border)' }}>{carregando ? <Loader2 size={12} className="animate-spin" /> : 'Carregar mais produtos'}</button></div>}
+        </div>
+        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '13px 18px', borderTop: '1px solid var(--glass-border)' }}>
+          <span style={{ fontSize: 11, color: 'var(--dim)' }}>{sel.size} selecionado(s)</span>
+          <div style={{ flex: 1 }} />
+          <button onClick={onFechar} style={{ fontSize: 12, fontWeight: 700, padding: '9px 15px', borderRadius: 10, cursor: 'pointer', color: 'var(--dim)', background: 'var(--glass-bg)', border: '1px solid var(--glass-border)' }}>Cancelar</button>
+          <button onClick={confirmar} disabled={!sel.size} style={{ fontSize: 12, fontWeight: 800, padding: '9px 17px', borderRadius: 10, cursor: 'pointer', color: '#fff', border: 'none', background: `linear-gradient(135deg,${SHOPEE},#c0341c)`, opacity: sel.size ? 1 : .5 }}>Adicionar {sel.size || ''} à fila</button>
+        </div>
+      </div>
+    </div>
+  )
 }
