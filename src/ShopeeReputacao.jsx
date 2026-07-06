@@ -858,25 +858,46 @@ function ReputacaoProdutos({ produtos, notify }) {
 }
 
 /* ---------- Estúdio da IA (modal de configuração potencializado) ---------- */
+/* editor de chips (frases da casa / frases proibidas) */
+function FrasesEditor({ titulo, cor, valores, onChange, placeholder }) {
+  const [txt, setTxt] = useState('')
+  const lista = valores || []
+  const add = () => { const v = txt.trim(); if (v && !lista.includes(v)) { onChange([...lista, v]); setTxt('') } }
+  return (
+    <div>
+      <div style={{ fontSize: 9.5, color: cor, marginBottom: 5 }}>{titulo}</div>
+      <div className="row" style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: 6 }}>
+        {lista.map((f, i) => (
+          <span key={i} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9.5, fontWeight: 700, padding: '4px 8px', borderRadius: 99, color: cor, background: `${cor}1a`, border: `1px solid ${cor}44` }}>{f}<X size={9} style={{ cursor: 'pointer' }} onClick={() => onChange(lista.filter((_, j) => j !== i))} /></span>
+        ))}
+        {lista.length === 0 && <span style={{ fontSize: 9, color: 'var(--faint)' }}>nenhuma ainda</span>}
+      </div>
+      <div className="row" style={{ display: 'flex', gap: 6 }}>
+        <input value={txt} onChange={(e) => setTxt(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add() } }} placeholder={placeholder} style={{ flex: 1, padding: '7px 10px', fontSize: 11, color: 'var(--text)', background: 'rgba(0,0,0,.25)', border: '1px solid var(--glass-border)', borderRadius: 9 }} />
+        <button onClick={add} style={{ fontSize: 13, fontWeight: 800, width: 32, borderRadius: 9, cursor: 'pointer', color: cor, background: `${cor}1a`, border: `1px solid ${cor}44` }}>+</button>
+      </div>
+    </div>
+  )
+}
+
 function Estudio({ cfg, onFechar, onSalvar, notify }) {
-  const [c, setC] = useState({ ...cfg })
+  const [c, setC] = useState({ emoji_intensidade: 'leve', cupom_quando: 'vips', frases_casa: [], frases_proibidas: [], ...cfg })
   const [previa, setPrevia] = useState('')
   const [gerando, setGerando] = useState(false)
   const [notaTeste, setNotaTeste] = useState(5)
   const mud = (k, v) => setC((s) => ({ ...s, [k]: v }))
   const estrelas = c.auto_estrelas || [4, 5]
   const EXEMPLOS = {
-    5: { comentario: 'Como sempre, perfeito! Cores lindas, chegou super rápido. Já é minha 4ª compra e nunca decepciona', produto: 'Miçanga Cristal 6mm Furta-Cor 500g', nome: 'ateliedaju' },
-    3: { comentario: 'O produto é bom mas achei que viria mais quantidade pelo preço', produto: 'Fio de Seda Rabo de Rato 1mm', nome: 'crislu' },
-    1: { comentario: 'Alguns fechos vieram com a mola travada, não abrem. Uns 10 não servem pra nada', produto: 'Fecho Lagosta 12mm Prata 100 Peças', nome: 'm****a_78' },
+    5: { comentario: 'Como sempre, perfeito! Cores lindas, chegou super rápido. Já é minha 4ª compra e nunca decepciona', produto: 'Miçanga Cristal 6mm Furta-Cor 500g', nome: 'ateliedaju', vip: true },
+    3: { comentario: 'O produto é bom mas achei que viria mais quantidade pelo preço', produto: 'Fio de Seda Rabo de Rato 1mm', nome: 'crislu', vip: false },
+    1: { comentario: 'Alguns fechos vieram com a mola travada, não abrem. Uns 10 não servem pra nada', produto: 'Fecho Lagosta 12mm Prata 100 Peças', nome: 'm****a_78', vip: false },
   }
   const gerarPrevia = async () => {
     setGerando(true)
     try {
-      // salva a config atual primeiro para a prévia refletir os ajustes
-      await api.shopeeReviewConfigSalvar(c)
+      await api.shopeeReviewConfigSalvar(c)  // salva pra prévia refletir tudo
       const ex = EXEMPLOS[notaTeste]
-      const r = await api.shopeeReviewSugerir({ nota: notaTeste, comentario: ex.comentario, produto: ex.produto, nome: ex.nome, tom: c.tom })
+      const r = await api.shopeeReviewSugerir({ nota: notaTeste, comentario: ex.comentario, produto: ex.produto, nome: ex.nome, tom: c.tom, vip: ex.vip })
       setPrevia(typeof r === 'string' ? r : (r.texto || r.sugestao || ''))
     } catch (e) { notify(e.message, 'danger') } finally { setGerando(false) }
   }
@@ -886,78 +907,155 @@ function Estudio({ cfg, onFechar, onSalvar, notify }) {
       <input type="range" min={min} max={max} step={passo || 1} value={valor} onChange={(e) => mud(campo, Number(e.target.value))} style={{ width: '100%' }} />
     </div>
   )
+  const Titulo = ({ icon: Ic, cor, children }) => (
+    <div style={{ fontSize: 8.5, textTransform: 'uppercase', fontWeight: 800, letterSpacing: '.5px', color: 'var(--faint)', margin: '4px 0 8px', display: 'flex', alignItems: 'center', gap: 6 }}>{Ic && <Ic size={12} style={{ color: cor }} />}{children}</div>
+  )
+  const inp = { width: '100%', padding: '9px 12px', fontSize: 12, color: 'var(--text)', background: 'rgba(0,0,0,.25)', border: '1px solid var(--glass-border)', borderRadius: 10 }
+  const cita = c.cupom_ativo && (c.cupom_quando === 'todas5' ? notaTeste === 5 : c.cupom_quando === 'vips' ? EXEMPLOS[notaTeste].vip : false) && notaTeste >= 4
+  const NOTA_INSTR = [['instrucoes_elogio', OK, 'Elogios · 5★ / 4★', 'Agradecer de coração, celebrar o projeto da cliente e convidar a voltar.'],
+                      ['instrucoes_morna', WARN, 'Mornas · 3★', 'Agradecer o retorno e perguntar o que faltou pra ser 5★.'],
+                      ['instrucoes_critica', DANGER, 'Críticas · 2★ / 1★', 'Pedir desculpa, assumir a resolução e chamar pro chat. Nunca discutir em público.']]
+
   return (
     <div onClick={onFechar} style={{ position: 'fixed', inset: 0, background: 'rgba(5,3,8,.8)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)', zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 18 }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ width: 'min(1080px,97vw)', maxHeight: '92vh', display: 'flex', flexDirection: 'column', background: 'var(--surface)', borderRadius: 20, border: '1px solid var(--glass-border)', boxShadow: '0 40px 120px rgba(0,0,0,.6)', overflow: 'hidden' }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: 'min(1120px,97vw)', maxHeight: '93vh', display: 'flex', flexDirection: 'column', background: 'var(--surface)', borderRadius: 20, border: '1px solid var(--glass-border)', boxShadow: '0 40px 120px rgba(0,0,0,.6)', overflow: 'hidden' }}>
         <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '14px 18px', borderBottom: '1px solid var(--glass-border)', background: 'linear-gradient(110deg,rgba(238,77,45,.1),rgba(160,107,232,.06),transparent)' }}>
           <div style={{ width: 38, height: 38, borderRadius: 11, background: `linear-gradient(145deg,${SHOPEE},#a52c15)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}><Bot size={19} color="#fff" /></div>
           <div style={{ flex: 1 }}>
             <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}><b className="serif" style={{ fontSize: 17 }}>Estúdio do Copiloto · Como a IA responde</b><Badge c="#e9dbfb" bg="rgba(160,107,232,.2)">PERSONALIDADE DA LOJA</Badge></div>
-            <div style={{ fontSize: 9.5, color: 'var(--dim)' }}>Ajuste e teste na prévia ao lado — você vê como o agente vai soar antes de salvar</div>
+            <div style={{ fontSize: 9.5, color: 'var(--dim)' }}>Cada ajuste muda a prévia ao lado — você vê como o agente vai soar antes de salvar</div>
           </div>
           <X size={17} style={{ color: 'var(--dim)', cursor: 'pointer' }} onClick={onFechar} />
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', flex: 1, minHeight: 0 }}>
-          {/* config */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1.25fr 1fr', flex: 1, minHeight: 0 }}>
+          {/* ===== CONFIG ===== */}
           <div style={{ padding: 16, borderRight: '1px solid var(--glass-border)', overflowY: 'auto' }}>
-            <div style={{ fontSize: 8, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)', marginBottom: 6 }}>Tom de voz</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 7, marginBottom: 13 }}>
-              {[['caloroso', 'Caloroso'], ['profissional', 'Profissional'], ['descontraido', 'Descontraído']].map(([v, l]) => (
-                <span key={v} onClick={() => mud('tom', v)} style={{ fontSize: 11, fontWeight: 700, padding: '8px 6px', borderRadius: 10, cursor: 'pointer', textAlign: 'center', color: c.tom === v ? '#fff' : 'var(--dim)', background: c.tom === v ? `linear-gradient(135deg,${SHOPEE},#c0341c)` : 'rgba(255,255,255,.04)', border: `1px solid ${c.tom === v ? 'transparent' : 'var(--glass-border)'}` }}>{l}</span>
+            {/* PERSONA */}
+            <div className="glass" style={{ padding: 14, borderRadius: 13, marginBottom: 12 }}>
+              <Titulo icon={Bot} cor={SHOPEE}>Persona da loja</Titulo>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 9, marginBottom: 11 }}>
+                <div><div style={{ fontSize: 9.5, color: 'var(--dim)', marginBottom: 4 }}>Assinatura (fim da resposta)</div><input value={c.assinatura || ''} onChange={(e) => mud('assinatura', e.target.value)} style={inp} /></div>
+                <div><div style={{ fontSize: 9.5, color: 'var(--dim)', marginBottom: 4 }}>Saudação (opcional)</div><input value={c.saudacao || ''} onChange={(e) => mud('saudacao', e.target.value)} style={inp} /></div>
+              </div>
+              <div style={{ fontSize: 9.5, color: 'var(--dim)', marginBottom: 5 }}>Tom de voz</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 7, marginBottom: 11 }}>
+                {[['caloroso', 'Caloroso'], ['profissional', 'Profissional'], ['descontraido', 'Descontraído']].map(([v, l]) => (
+                  <span key={v} onClick={() => mud('tom', v)} style={{ fontSize: 11, fontWeight: 700, padding: '8px 6px', borderRadius: 10, cursor: 'pointer', textAlign: 'center', color: c.tom === v ? '#fff' : 'var(--dim)', background: c.tom === v ? `linear-gradient(135deg,${SHOPEE},#c0341c)` : 'rgba(255,255,255,.04)', border: `1px solid ${c.tom === v ? 'transparent' : 'var(--glass-border)'}` }}>{l}</span>
+                ))}
+              </div>
+              <div className="row" style={{ display: 'flex', gap: 8, marginBottom: 11, flexWrap: 'wrap' }}>
+                {[['usar_nome', 'Chamar pelo nome'], ['usar_emoji', 'Permitir emojis']].map(([k2, l]) => (
+                  <div key={k2} className="glass row" style={{ display: 'flex', alignItems: 'center', padding: '8px 11px', borderRadius: 10, gap: 8, flex: 1, minWidth: 150 }}><span style={{ fontSize: 10.5, color: 'var(--dim)', flex: 1 }}>{l}</span><Toggle on={!!c[k2]} onClick={() => mud(k2, !c[k2])} /></div>
+                ))}
+              </div>
+              <div style={{ fontSize: 9.5, color: 'var(--dim)', marginBottom: 5 }}>Intensidade de emoji</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginBottom: 11, opacity: c.usar_emoji ? 1 : .4, pointerEvents: c.usar_emoji ? 'auto' : 'none' }}>
+                {[['nenhum', 'Nenhum'], ['leve', 'Leve · 1'], ['animado', 'Animado · 2-3']].map(([v, l]) => (
+                  <span key={v} onClick={() => mud('emoji_intensidade', v)} style={{ fontSize: 10, fontWeight: 700, padding: '7px 4px', borderRadius: 9, cursor: 'pointer', textAlign: 'center', color: (c.emoji_intensidade || 'leve') === v ? '#fff' : 'var(--dim)', background: (c.emoji_intensidade || 'leve') === v ? `linear-gradient(135deg,var(--accent2),var(--accent))` : 'rgba(255,255,255,.04)', border: `1px solid ${(c.emoji_intensidade || 'leve') === v ? 'transparent' : 'var(--glass-border)'}` }}>{l}</span>
+                ))}
+              </div>
+              <Sl label="Tamanho máximo da resposta" valor={c.limite_chars || 450} sufixo=" caracteres" min={120} max={800} passo={10} campo="limite_chars" />
+            </div>
+
+            {/* INSTRUÇÕES POR NOTA */}
+            <div className="glass" style={{ padding: 14, borderRadius: 13, marginBottom: 12, borderColor: 'rgba(160,107,232,.3)' }}>
+              <Titulo icon={Star} cor={PURPLE}>Instruções por nota · a IA muda de estratégia</Titulo>
+              {NOTA_INSTR.map(([campo, cor, rot, ph]) => (
+                <div key={campo} style={{ marginBottom: 9, background: 'rgba(0,0,0,.18)', borderRadius: 10, padding: '9px 11px', borderLeft: `3px solid ${cor}` }}>
+                  <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}><b style={{ fontSize: 10, color: cor }}>{rot}</b>{campo === 'instrucoes_critica' && <Badge c={DANGER} bg="rgba(255,122,122,.12)">SEMPRE COM SUA APROVAÇÃO</Badge>}</div>
+                  <textarea value={c[campo] || ''} onChange={(e) => mud(campo, e.target.value)} rows={2} placeholder={ph} style={{ width: '100%', fontSize: 11, color: 'var(--text)', background: 'rgba(0,0,0,.22)', border: '1px solid var(--glass-border)', borderRadius: 8, padding: '7px 10px', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.45 }} />
+                </div>
               ))}
+              <div className="glass row" style={{ display: 'flex', alignItems: 'center', padding: '8px 11px', borderRadius: 10, gap: 8, marginTop: 2 }}><span style={{ fontSize: 10.5, color: 'var(--dim)', flex: 1 }}>Em notas baixas, oferecer resolver pelo chat</span><Toggle on={!!c.oferecer_chat} onClick={() => mud('oferecer_chat', !c.oferecer_chat)} /></div>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 9, marginBottom: 12 }}>
-              <div><div style={{ fontSize: 9.5, color: 'var(--dim)', marginBottom: 4 }}>Assinatura (fim da resposta)</div><input value={c.assinatura || ''} onChange={(e) => mud('assinatura', e.target.value)} style={{ width: '100%', padding: '9px 12px', fontSize: 12, color: 'var(--text)', background: 'rgba(0,0,0,.25)', border: '1px solid var(--glass-border)', borderRadius: 10 }} /></div>
-              <div><div style={{ fontSize: 9.5, color: 'var(--dim)', marginBottom: 4 }}>Saudação (opcional)</div><input value={c.saudacao || ''} onChange={(e) => mud('saudacao', e.target.value)} style={{ width: '100%', padding: '9px 12px', fontSize: 12, color: 'var(--text)', background: 'rgba(0,0,0,.25)', border: '1px solid var(--glass-border)', borderRadius: 10 }} /></div>
+
+            {/* REGRAS + GUARD-RAILS */}
+            <div className="glass" style={{ padding: 14, borderRadius: 13, marginBottom: 12 }}>
+              <Titulo icon={ShieldCheck} cor={BLUE}>Regras da loja &amp; guard-rails</Titulo>
+              <div style={{ fontSize: 9.5, color: 'var(--dim)', marginBottom: 4 }}>Instruções livres (a IA segue sempre)</div>
+              <textarea value={c.instrucoes || ''} onChange={(e) => mud('instrucoes', e.target.value)} rows={2} placeholder="Ex.: sempre lembrar que enviamos em até 24h úteis; embalamos com plástico bolha; acima de R$ 99 tem brinde." style={{ width: '100%', fontSize: 11.5, color: 'var(--text)', background: 'rgba(0,0,0,.25)', border: '1px solid var(--glass-border)', borderRadius: 10, padding: '9px 12px', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5, marginBottom: 12 }} />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <FrasesEditor titulo="Frases da casa (a IA pode usar)" cor={OK} valores={c.frases_casa} onChange={(v) => mud('frases_casa', v)} placeholder="ex.: família Sóstrass" />
+                <FrasesEditor titulo="Nunca dizer (bloqueio duro)" cor={DANGER} valores={c.frases_proibidas} onChange={(v) => mud('frases_proibidas', v)} placeholder="ex.: reembolso garantido" />
+              </div>
             </div>
-            <Sl label="Tamanho máximo da resposta" valor={c.limite_chars || 450} sufixo=" caracteres" min={120} max={800} passo={10} campo="limite_chars" />
-            <div style={{ fontSize: 9.5, color: 'var(--dim)', marginBottom: 4 }}>Regras da loja (instruções livres pra IA)</div>
-            <textarea value={c.instrucoes || ''} onChange={(e) => mud('instrucoes', e.target.value)} rows={3} placeholder="Ex.: sempre lembrar que enviamos em até 24h; oferecer 5% na próxima compra com o cupom VOLTA5; nunca prometer reembolso sem avaliar." style={{ width: '100%', fontSize: 11.5, color: 'var(--text)', background: 'rgba(0,0,0,.25)', border: '1px solid var(--glass-border)', borderRadius: 10, padding: '9px 12px', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5, marginBottom: 12 }} />
-            {[['usar_nome', 'Chamar o cliente pelo nome'], ['usar_emoji', 'Permitir emojis leves'], ['oferecer_chat', 'Em notas baixas, oferecer resolver pelo chat']].map(([k2, l]) => (
-              <div key={k2} className="glass row" style={{ display: 'flex', alignItems: 'center', padding: '9px 12px', borderRadius: 10, gap: 9, marginBottom: 7 }}><span style={{ fontSize: 10.5, color: 'var(--dim)', flex: 1 }}>{l}</span><Toggle on={!!c[k2]} onClick={() => mud(k2, !c[k2])} /></div>
-            ))}
-            <div style={{ fontSize: 8, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)', margin: '12px 0 6px' }}>No modo automático, responder sozinho as notas:</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 6, marginBottom: 4 }}>
-              {[5, 4, 3, 2, 1].map((s) => {
-                const on = estrelas.includes(s)
-                return <span key={s} onClick={() => mud('auto_estrelas', on ? estrelas.filter((x) => x !== s) : [...estrelas, s].sort())} className="num" style={{ fontSize: 11, fontWeight: 800, padding: '8px 4px', borderRadius: 10, cursor: 'pointer', textAlign: 'center', color: on ? '#fff' : 'var(--dim)', background: on ? `linear-gradient(135deg,${SHOPEE},#c0341c)` : 'rgba(255,255,255,.04)', border: `1px solid ${on ? 'transparent' : 'var(--glass-border)'}` }}>{s} ★</span>
-              })}
+
+            {/* CUPOM */}
+            <div className="glass" style={{ padding: 14, borderRadius: 13, marginBottom: 12, borderColor: 'rgba(242,194,0,.3)' }}>
+              <div className="row" style={{ display: 'flex', alignItems: 'center', marginBottom: c.cupom_ativo ? 10 : 0 }}>
+                <Titulo icon={Sparkles} cor={GOLD}>Cupom de recompra nas respostas</Titulo>
+                <div style={{ flex: 1 }} /><Toggle on={!!c.cupom_ativo} onClick={() => mud('cupom_ativo', !c.cupom_ativo)} />
+              </div>
+              {c.cupom_ativo && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.6fr', gap: 10 }}>
+                  <div><div style={{ fontSize: 9.5, color: 'var(--dim)', marginBottom: 4 }}>Código</div><input value={c.cupom_codigo || ''} onChange={(e) => mud('cupom_codigo', e.target.value)} placeholder="VOLTA5" className="num" style={inp} /></div>
+                  <div>
+                    <div style={{ fontSize: 9.5, color: 'var(--dim)', marginBottom: 4 }}>Quando citar</div>
+                    <div className="row" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      {[['vips', 'Só VIPs e recompras'], ['todas5', 'Todas 5★'], ['nunca', 'Nunca']].map(([v, l]) => (
+                        <span key={v} onClick={() => mud('cupom_quando', v)} style={{ fontSize: 10, fontWeight: 700, padding: '6px 10px', borderRadius: 9, cursor: 'pointer', color: (c.cupom_quando || 'vips') === v ? '#fff' : 'var(--dim)', background: (c.cupom_quando || 'vips') === v ? `linear-gradient(135deg,var(--accent2),var(--accent))` : 'rgba(255,255,255,.04)', border: `1px solid ${(c.cupom_quando || 'vips') === v ? 'transparent' : 'var(--glass-border)'}` }}>{l}</span>
+                      ))}
+                    </div>
+                    <div style={{ fontSize: 8.5, color: 'var(--faint)', marginTop: 6 }}>O cupom nunca é citado em críticas — pra não parecer suborno.</div>
+                  </div>
+                </div>
+              )}
             </div>
-            <div style={{ fontSize: 8.5, color: 'var(--faint)', marginBottom: 12 }}>Recomendado deixar só 4 e 5. Notas baixas pedem um olhar humano.</div>
-            <div style={{ fontSize: 8, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)', marginBottom: 6 }}>Ritmo das respostas (anti-flood)</div>
-            <Sl label="Pausa entre respostas" valor={c.auto_pausa_seg ?? 5} sufixo=" s" min={1} max={60} campo="auto_pausa_seg" />
-            <Sl label="Máximo por ciclo" valor={c.auto_max_ciclo ?? 10} sufixo="" min={5} max={100} passo={5} campo="auto_max_ciclo" />
-            <div style={{ fontSize: 8.5, color: 'var(--faint)' }}>O agente roda a cada hora. Com pausa de {c.auto_pausa_seg ?? 5}s e teto {c.auto_max_ciclo ?? 10}, são respostas espaçadas — o suficiente pra ir limpando a fila sem parecer robô.</div>
+
+            {/* MODO AUTOMÁTICO + ANTI-FLOOD */}
+            <div className="glass" style={{ padding: 14, borderRadius: 13, borderColor: 'rgba(238,77,45,.3)' }}>
+              <Titulo icon={Bot} cor={SHOPEE}>No modo automático, responder sozinho as notas</Titulo>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 6, marginBottom: 5 }}>
+                {[5, 4, 3, 2, 1].map((s) => {
+                  const on = estrelas.includes(s)
+                  return <span key={s} onClick={() => mud('auto_estrelas', on ? estrelas.filter((x) => x !== s) : [...estrelas, s].sort())} className="num" style={{ fontSize: 11, fontWeight: 800, padding: '8px 4px', borderRadius: 10, cursor: 'pointer', textAlign: 'center', color: on ? '#fff' : 'var(--dim)', background: on ? `linear-gradient(135deg,${SHOPEE},#c0341c)` : 'rgba(255,255,255,.04)', border: `1px solid ${on ? 'transparent' : 'var(--glass-border)'}` }}>{s} ★</span>
+                })}
+              </div>
+              <div style={{ fontSize: 8.5, color: 'var(--faint)', marginBottom: 12 }}>Recomendado deixar só 4 e 5. Notas baixas pedem um olhar humano.</div>
+              <Titulo icon={Clock} cor={SHOPEE}>Ritmo das respostas (anti-flood)</Titulo>
+              <Sl label="Pausa entre respostas" valor={c.auto_pausa_seg ?? 5} sufixo=" s" min={1} max={60} campo="auto_pausa_seg" />
+              <Sl label="Máximo por ciclo" valor={c.auto_max_ciclo ?? 10} sufixo="" min={5} max={100} passo={5} campo="auto_max_ciclo" />
+              <div style={{ fontSize: 8.5, color: 'var(--faint)' }}>O agente roda a cada hora. Com pausa de {c.auto_pausa_seg ?? 5}s e teto {c.auto_max_ciclo ?? 10}, as respostas saem espaçadas — o suficiente pra ir limpando a fila sem parecer robô.</div>
+            </div>
           </div>
-          {/* prévia */}
+
+          {/* ===== PRÉVIA ===== */}
           <div style={{ padding: 16, background: 'rgba(0,0,0,.18)', overflowY: 'auto' }}>
             <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 10, flexWrap: 'wrap' }}>
               <span style={{ fontSize: 9, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)', display: 'inline-flex', alignItems: 'center', gap: 6 }}><Sparkles size={12} style={{ color: PURPLE }} />Prévia ao vivo</span>
               <Badge c="#cfaef5" bg="rgba(160,107,232,.15)">USA A CONFIG ATUAL</Badge>
-              <div style={{ flex: 1 }} />
             </div>
             <div className="row" style={{ display: 'flex', gap: 6, marginBottom: 11, flexWrap: 'wrap' }}>
               <span style={{ fontSize: 9, color: 'var(--faint)' }}>testar com:</span>
-              {[[5, '5★ elogio'], [3, '3★ morna'], [1, '1★ crítica']].map(([n, l]) => <Chip key={n} on={notaTeste === n} onClick={() => setNotaTeste(n)}>{l}</Chip>)}
+              {[[5, '5★ elogio (VIP)'], [3, '3★ morna'], [1, '1★ crítica']].map(([n, l]) => <Chip key={n} on={notaTeste === n} onClick={() => setNotaTeste(n)}>{l}</Chip>)}
             </div>
             <div className="glass" style={{ padding: '10px 13px', borderRadius: 12, marginBottom: 10 }}>
               <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}><Estrelas n={notaTeste} size={10} /><b style={{ fontSize: 10 }}>{EXEMPLOS[notaTeste].produto}</b></div>
-              <div style={{ fontSize: 10.5, color: 'var(--dim)', fontStyle: 'italic' }}>"{EXEMPLOS[notaTeste].comentario}" — {EXEMPLOS[notaTeste].nome}</div>
+              <div style={{ fontSize: 10.5, color: 'var(--dim)', fontStyle: 'italic' }}>"{EXEMPLOS[notaTeste].comentario}" — {EXEMPLOS[notaTeste].nome}{EXEMPLOS[notaTeste].vip ? ' · recompra' : ''}</div>
             </div>
             <button onClick={gerarPrevia} disabled={gerando} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10.5, fontWeight: 800, padding: '8px 14px', borderRadius: 9, cursor: 'pointer', color: '#fff', border: 'none', background: 'linear-gradient(135deg,var(--accent2),var(--accent))', marginBottom: 11 }}>{gerando ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}Gerar prévia com essa config</button>
             {previa ? (
               <div style={{ background: 'rgba(160,107,232,.08)', border: '1px solid rgba(160,107,232,.35)', borderRadius: 12, padding: '12px 14px', marginBottom: 12 }}>
-                <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}><Bot size={12} style={{ color: PURPLE }} /><b style={{ fontSize: 8.5, textTransform: 'uppercase', color: '#cfaef5' }}>Como o agente responderia</b><div style={{ flex: 1 }} /><span className="num" style={{ fontSize: 8, color: 'var(--faint)' }}>{previa.length} / {c.limite_chars || 450}</span></div>
+                <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}><Bot size={12} style={{ color: PURPLE }} /><b style={{ fontSize: 8.5, textTransform: 'uppercase', color: '#cfaef5' }}>Como o agente responderia</b><div style={{ flex: 1 }} /><span className="num" style={{ fontSize: 8, color: previa.length > (c.limite_chars || 450) ? DANGER : 'var(--faint)' }}>{previa.length} / {c.limite_chars || 450}</span></div>
                 <div style={{ fontSize: 11.5, color: 'var(--text)', lineHeight: 1.6 }}>"{previa}"</div>
+                <div className="row" style={{ display: 'flex', gap: 5, marginTop: 9, flexWrap: 'wrap' }}>
+                  {c.saudacao && <Badge c={SHOPEE} bg="rgba(238,77,45,.1)">SAUDAÇÃO ✓</Badge>}
+                  {c.usar_nome && <Badge c="var(--dim)" bg="rgba(255,255,255,.05)">NOME ✓</Badge>}
+                  {c.usar_emoji && (c.emoji_intensidade || 'leve') !== 'nenhum' && <Badge c="var(--dim)" bg="rgba(255,255,255,.05)">EMOJI {(c.emoji_intensidade || 'leve').toUpperCase()} ✓</Badge>}
+                  {cita && <Badge c={GOLD} bg="rgba(242,194,0,.1)">CUPOM ✓</Badge>}
+                  {notaTeste <= 2 && <Badge c={DANGER} bg="rgba(255,122,122,.12)">SEM CUPOM (CRÍTICA) ✓</Badge>}
+                  {c.assinatura && <Badge c={SHOPEE} bg="rgba(238,77,45,.1)">ASSINATURA ✓</Badge>}
+                </div>
               </div>
             ) : <div style={{ fontSize: 10, color: 'var(--faint)', marginBottom: 12 }}>A prévia salva a config atual e pede ao copiloto uma resposta real para a avaliação de teste acima.</div>}
             <div className="glass" style={{ padding: '12px 14px', borderRadius: 12, borderColor: 'rgba(47,217,141,.3)' }}>
               <div style={{ fontSize: 8, textTransform: 'uppercase', fontWeight: 800, color: OK, marginBottom: 7, display: 'flex', alignItems: 'center', gap: 6 }}><Check size={11} />Resumo: como o agente vai se comportar</div>
               {[
-                [OK, <>Responde <b style={{ color: 'var(--text)' }}>{estrelas.length ? estrelas.join('–') + '★' : 'nenhuma nota'} sozinho</b>, em tom <b style={{ color: 'var(--text)' }}>{c.tom || 'caloroso'}</b>{c.usar_nome ? ', com nome' : ''}{c.usar_emoji ? ' e emoji leve' : ''}</>],
-                [DANGER, <>Notas fora da lista viram <b style={{ color: 'var(--text)' }}>rascunho pra sua aprovação</b>{c.oferecer_chat ? ', oferecendo o chat' : ''}</>],
+                [OK, <>Responde <b style={{ color: 'var(--text)' }}>{estrelas.length ? estrelas.join('–') + '★' : 'nenhuma nota'} sozinho</b>, em tom <b style={{ color: 'var(--text)' }}>{c.tom || 'caloroso'}</b>{c.usar_nome ? ', com nome' : ''}{c.usar_emoji ? ` e emoji ${c.emoji_intensidade || 'leve'}` : ', sem emoji'}</>],
+                [PURPLE, <>Muda a estratégia por nota: elogio celebra, morna pergunta o que faltou, <b style={{ color: 'var(--text)' }}>crítica pede sua aprovação</b></>],
+                [DANGER, (c.frases_proibidas || []).length ? <>Jamais diz <b style={{ color: 'var(--text)' }}>{(c.frases_proibidas || []).length} frase(s) bloqueada(s)</b>{(c.frases_casa || []).length ? <> · pode usar {(c.frases_casa || []).length} frase(s) da casa</> : ''}</> : <>Sem bloqueios de frase configurados ainda</>],
+                [GOLD, c.cupom_ativo && c.cupom_quando !== 'nunca' ? <>Cita <b className="num" style={{ color: 'var(--text)' }}>{c.cupom_codigo || 'cupom'}</b> {c.cupom_quando === 'todas5' ? 'em todas as 5★' : 'só pra VIPs e recompras'} — nunca em críticas</> : <>Cupom de recompra desligado</>],
                 [SHOPEE, <>Roda de hora em hora: até <b className="num" style={{ color: 'var(--text)' }}>{c.auto_max_ciclo ?? 10}</b> respostas com <b className="num" style={{ color: 'var(--text)' }}>{c.auto_pausa_seg ?? 5}s</b> de pausa</>],
-                [PURPLE, <>Assina <b style={{ color: 'var(--text)' }}>{c.assinatura || 'sem assinatura'}</b>{c.saudacao ? <> · abre com "<b style={{ color: 'var(--text)' }}>{c.saudacao}</b>"</> : ''}</>],
               ].map(([cor, txt], i) => (
                 <div key={i} className="row" style={{ display: 'flex', alignItems: 'flex-start', gap: 7, padding: '4px 0' }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: cor, flex: 'none', marginTop: 5 }} /><span style={{ fontSize: 10, color: 'var(--dim)', lineHeight: 1.5 }}>{txt}</span></div>
               ))}
