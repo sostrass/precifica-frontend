@@ -3921,7 +3921,7 @@ function Promocoes({ conectado, notify, irParaMotor }) {
       {sub === 'central' && <CentralPromo notify={notify} irCriar={setSub} irParaMotor={irParaMotor} />}
       {sub === 'visao' && <DashboardPromo notify={notify} />}
       {sub === 'cupons' && <Cupons notify={notify} />}
-      {sub === 'descontos' && <Descontos notify={notify} />}
+      {sub === 'descontos' && <Descontos conectado={conectado} notify={notify} />}
       {sub === 'bundle' && <Bundles notify={notify} />}
       {sub === 'addon' && <Addons notify={notify} />}
       {sub === 'flash' && <FlashSale notify={notify} />}
@@ -4860,43 +4860,236 @@ function CupomForm({ onClose, onSaved, notify }) {
   )
 }
 
-function Descontos({ notify }) {
-  const [lista, setLista] = useState(null)
-  const [stat, setStat] = useState('ongoing')
-  const [rep, setRep] = useState(null)
-  const [enc, setEnc] = useState(null)
-  const carregar = () => { setLista(null); api.shopeeDescontos(stat).then(setLista).catch(() => setLista({ erro: true })) }
-  useEffect(carregar, [stat])
-  const ds = lista?.response?.discount_list || []
-  const repetir = async (c) => {
-    setRep(c.id)
-    try { const r = await api.shopeeCampanhaRepetir('desconto', c.id); notify(`Desconto repetido com ${r.itens || 0} produto(s) — começa em ~5 min`, 'ok'); setStat('upcoming') }
-    catch (e) { notify(e.message, 'danger') }
-    setRep(null)
+function Descontos({ conectado, notify }) {
+  const [p, setP] = useState(null)
+  const [carregando, setCarregando] = useState(true)
+  const [sync, setSync] = useState(false)
+  const [prop, setProp] = useState(null)
+  const [selP, setSelP] = useState(() => new Set())
+  const [hist, setHist] = useState([])
+  const [gerando, setGerando] = useState(false)
+  const [aplicando, setAplicando] = useState(false)
+  const [rodando, setRodando] = useState(false)
+  const [motorTipo, setMotorTipo] = useState('desconto')
+  const [seletor, setSeletor] = useState(false)
+  const [modoManual, setModoManual] = useState(true)
+  const [busca, setBusca] = useState('')
+  const [filtro, setFiltro] = useState('todos')
+  const [pag, setPag] = useState(1)
+  const agora = useAgora(30000)
+  const PP = 10
+
+  const carregar = async (forcar) => {
+    if (!forcar) setCarregando(true)
+    try { const r = await api.shopeePromoPainel(forcar); setP(r) } catch (e) { notify(e.message, 'danger') } finally { setCarregando(false) }
+    api.shopeePromoHistorico().then((r) => setHist(r.itens || [])).catch(() => {})
   }
-  const encerrar = async (id) => {
-    setEnc(id)
-    try { await api.shopeeEncerrarDesconto(id); notify('Desconto encerrado', 'ok'); carregar() }
-    catch (e) { notify(e.message, 'danger') }
-    setEnc(null)
+  useEffect(() => { if (conectado) carregar() }, [conectado])
+
+  const sincronizar = async () => { setSync(true); try { await carregar(true) } finally { setSync(false) } }
+  const salvar = async (patch) => {
+    setP((pp) => pp ? { ...pp, config: { ...pp.config, ...patch } } : pp)
+    try { const r = await api.shopeePromoConfigSalvar({ ...(p?.config || {}), ...patch }); setP((pp) => pp ? { ...pp, config: r } : pp) } catch (e) { notify(e.message, 'danger') }
   }
+  const gerar = async () => {
+    setGerando(true); setSelP(new Set())
+    try { const r = await api.shopeePromoPropor(); setProp(r); if (r.acao === 'vazio') notify(r.msg || 'Nenhum candidato nesta rodada.', 'warn') }
+    catch (e) { notify(e.message, 'danger') } finally { setGerando(false) }
+  }
+  const aplicar = async (tipo) => {
+    const esc = (prop?.propostas || []).filter((x) => selP.has(x.item_id))
+    if (!esc.length) { notify('Selecione ao menos uma proposta.', 'warn'); return }
+    setAplicando(true)
+    try { await api.shopeePromoAplicar({ propostas: esc, tipo }); notify(`Campanha criada com ${esc.length} produto(s).`, 'ok'); setProp(null); setSelP(new Set()); carregar(true) }
+    catch (e) { notify(e.message, 'danger') } finally { setAplicando(false) }
+  }
+  const rodar = async () => {
+    setRodando(true)
+    try { const r = await api.shopeePromoRodar(); notify(r.msg || 'Ciclo executado.', 'ok'); carregar(true) }
+    catch (e) { notify(e.message, 'danger') } finally { setRodando(false) }
+  }
+  const execInsight = async (ins) => {
+    if (ins.acao === 'renovar' && ins.ref && ins.ref.id) {
+      try { await api.shopeeCampanhaRepetir(ins.ref.tipo, ins.ref.id); notify('Campanha renovada.', 'ok'); carregar(true) } catch (e) { notify(e.message, 'danger') }
+    } else if (ins.acao === 'flash') { setModoManual(true); setSeletor(true) }
+    else { gerar() }
+  }
+
+  if (!conectado) return <Vazio txt="Conecte a loja Shopee para gerenciar descontos." />
+
+  const cfg = p?.config || {}
+  const motoresOn = cfg.ativo
+  const teto = cfg.desconto_max != null ? cfg.desconto_max : 15
+  const piso = cfg.piso_margem != null ? cfg.piso_margem : 10
+  const termo = p?.termometro
+  const propostas = prop?.propostas || []
+  const diag = prop?.diagnostico
+  const vitrineDesc = (p?.vitrine || []).filter((v) => v.tipo === 'desconto')
+  const campDesc = (p?.campanhas || []).filter((c) => c.tipo === 'desconto')
+  const agendDesc = (p?.agendadas || []).filter((c) => c.tipo === 'desconto')
+  const porTipoDesc = (p?.por_tipo || []).find((t) => t.tipo === 'desconto') || {}
+  const agr = p?.kpis || {}
+  const insDesc = (p?.insights || [])
+  const pctsD = vitrineDesc.map((v) => v.desconto_pct).filter(Boolean)
+  const descMedio = pctsD.length ? Math.round(pctsD.reduce((a, b) => a + b, 0) / pctsD.length) : null
+  const expDesc = campDesc.filter((c) => c.fim && (c.fim - agora / 1000) <= 86400 && (c.fim - agora / 1000) > 0).length
+  const criouMotor = (hist || []).filter((h) => h.tipo === 'desconto').length
+  const todasSel = propostas.length > 0 && propostas.every((x) => selP.has(x.item_id))
+
+  const vf = vitrineDesc.filter((v) => {
+    if (filtro === 'terminando') { const r = v.fim ? v.fim - agora / 1000 : 9e9; if (r > 21600 || r < 0) return false }
+    return !busca || (v.nome || '').toLowerCase().includes(busca.toLowerCase())
+  })
+  const totPag = Math.max(1, Math.ceil(vf.length / PP))
+  const vitrinePag = vf.slice((pag - 1) * PP, pag * PP)
+
+  if (carregando && !p) return <Carregando txt="montando o cockpit de descontos…" />
+
   return (
     <div className="space-y-3">
-      <div className="flex gap-1.5">
-        {[['ongoing', 'Ativos'], ['upcoming', 'Agendados'], ['expired', 'Expirados']].map(([id, t]) => (
-          <button key={id} onClick={() => setStat(id)} className="text-xs px-3 py-1.5 rounded-lg font-medium"
-                  style={stat === id ? { background: LARANJA, color: '#fff' } : { background: 'var(--glass)', color: 'var(--text-dim)', border: '1px solid var(--glass-border)' }}>{t}</button>
-        ))}
+      {/* COMMAND BAR */}
+      <div className="glass" style={{ padding: '15px 18px', border: '1px solid transparent', background: 'linear-gradient(var(--surface),var(--surface)) padding-box,linear-gradient(110deg,rgba(238,77,45,.55),rgba(214,0,127,.4),rgba(160,107,232,.3)) border-box' }}>
+        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 13, flexWrap: 'wrap' }}>
+          <div style={{ width: 44, height: 44, borderRadius: 12, background: `linear-gradient(145deg,${PROMO.SHOPEE},#a52c15)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none', boxShadow: '0 6px 20px rgba(238,77,45,.4)' }}><Tag size={22} color="#fff" /></div>
+          <div>
+            <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <b className="serif" style={{ fontSize: 20 }}>Descontos</b>
+              <PBadge c="#fff" bg={PROMO.SHOPEE}>SHOPEE</PBadge>
+              <PBadge c="#e9dbfb" bg="rgba(160,107,232,.2)">MOTOR + MANUAL</PBadge>
+              <PBadge c={PROMO.OK} bg="rgba(47,217,141,.12)">PISO PROTEGIDO</PBadge>
+              <PBadge c={PROMO.BLUE} bg="rgba(91,141,239,.12)">🔒 TRAVA ANTI-DUPLICAÇÃO</PBadge>
+            </div>
+            <div style={{ fontSize: 10.5, color: 'var(--dim)' }}>Cockpit de descontos — o motor cria sozinho sem parar, você cria manual, tudo vigiado pela margem e pela trava</div>
+          </div>
+          <div style={{ flex: 1 }} />
+          <div style={{ textAlign: 'right' }}><div className="up" style={{ fontSize: 7, color: 'var(--faint)' }}>GMV em descontos · 30d</div><b className="num serif" style={{ fontSize: 18, color: PROMO.OK }}>{porTipoDesc.receita != null ? fmtBRLcurto(porTipoDesc.receita) : '—'}</b><div className="num" style={{ fontSize: 8, color: 'var(--faint)' }}>{porTipoDesc.unidades != null ? `${porTipoDesc.unidades} vendas` : 'sem dados'}</div></div>
+          <div style={{ width: 1, height: 30, background: 'var(--glass-border)' }} />
+          <button onClick={sincronizar} disabled={sync} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 700, padding: '8px 12px', borderRadius: 9, cursor: 'pointer', color: 'var(--dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)' }}>{sync ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}Sincronizar</button>
+          <button onClick={() => { setModoManual(true); setSeletor(true) }} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10.5, fontWeight: 800, padding: '8px 14px', borderRadius: 9, cursor: 'pointer', color: '#fff', border: 'none', background: `linear-gradient(135deg,${PROMO.SHOPEE},#c0341c)` }}><Plus size={13} />Novo desconto</button>
+          <span className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}><span style={{ fontSize: 9.5, fontWeight: 800, color: motoresOn ? PROMO.OK : 'var(--faint)' }}>{motoresOn ? 'MOTOR LIGADO' : 'DESLIGADO'}</span><span onClick={() => salvar({ ativo: !motoresOn })} style={{ width: 36, height: 20, borderRadius: 99, position: 'relative', cursor: 'pointer', flex: 'none', background: motoresOn ? 'linear-gradient(90deg,#2FD98D,#1fae6e)' : 'rgba(255,255,255,.1)' }}><span style={{ position: 'absolute', top: 2, width: 16, height: 16, borderRadius: '50%', background: '#fff', left: motoresOn ? 18 : 2, transition: 'left .2s' }} /></span></span>
+        </div>
+        <div className="row" style={{ display: 'flex', gap: 15, marginTop: 10, fontSize: 9.5, color: 'var(--faint)', flexWrap: 'wrap' }}>
+          <span>motor: <b style={{ color: motoresOn ? PROMO.OK : 'var(--faint)' }}>{motoresOn ? 'cria descontos sozinho' : 'desligado'}</b></span>
+          <span>trava: <b style={{ color: PROMO.BLUE }}>{p?.trava_total ?? 0} itens em oferta não repetem até sair</b></span>
+          <span>estratégia: <b style={{ color: 'var(--text)' }}>{cfg.estrategia === 'margem_alta' ? 'maior margem' : 'estoque parado'}</b></span>
+          <span>guardião reduziu: <b style={{ color: PROMO.WARN }}>{agr.guardiao_reduzidos_30d ?? 0} este mês</b></span>
+        </div>
       </div>
-      {lista === null ? <Carregando txt="carregando descontos…" />
-        : ds.length === 0 ? <Vazio txt="Nenhuma campanha de desconto aqui. Crie pelo Motor (Promoções IA) ou pelo Seller Center com início/fim agendados." />
-        : <div className="space-y-2.5">{ds.map((c) => (
-            <CampaignCard key={c.discount_id} tipo="desconto" id={c.discount_id} nome={c.discount_name}
-              inicio={c.start_time} fim={c.end_time}
-              flags={c.source != null ? [{ icon: c.source === 1 ? Bot : Settings2, texto: c.source === 1 ? 'criado pelo app' : 'Seller Center', cor: c.source === 1 ? '#14B8A6' : '#8B5CF6' }] : []}
-              podeEncerrar={stat === 'ongoing'} onEncerrar={encerrar} encerrando={enc === c.discount_id}
-              onRepetir={repetir} repetindo={rep === c.discount_id} />
-          ))}</div>}
+
+      {/* TERMÔMETRO + INSIGHTS */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.7fr', gap: 14 }}>
+        <Termometro termo={termo} onRelampago={gerar} />
+        <InsightsPromo insights={insDesc} onAcao={execInsight} carregando={!p} />
+      </div>
+
+      {/* KPIs */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 9 }}>
+        <PKpi label="Ativos" value={campDesc.length} sub="campanhas" cor={PROMO.SHOPEE} borda="rgba(238,77,45,.4)" />
+        <PKpi label="Agendados" value={agendDesc.length} sub="programados" />
+        <PKpi label="Itens em desconto" value={vitrineDesc.length} sub={`de ${agr.total_anuncios ?? '—'}`} />
+        <PKpi label="Na trava" value={p?.trava_total ?? 0} sub="não repetem" cor={PROMO.BLUE} borda="rgba(91,141,239,.4)" />
+        <PKpi label="GMV desconto" value={porTipoDesc.receita != null ? fmtBRLcurto(porTipoDesc.receita) : '—'} sub="30 dias" cor={PROMO.OK} />
+        <PKpi label="Desconto médio" value={descMedio != null ? `${descMedio}%` : '—'} sub="ponderado" />
+        <PKpi label="Piso" value="100%" sub="protegido" cor={PROMO.OK} borda="rgba(47,217,141,.35)" />
+        <PKpi label="Guardião" value={agr.guardiao_reduzidos_30d ?? 0} sub="reduzidos" cor={PROMO.WARN} />
+        <PKpi label="Expiram 24h" value={expDesc} sub="renovar?" cor={PROMO.WARN} borda="rgba(224,162,60,.4)" />
+        <PKpi label="Motor criou" value={criouMotor} sub="registros" cor={PROMO.PURPLE} />
+        <PKpi label="Vendas promo" value={porTipoDesc.unidades ?? '—'} sub="30 dias" cor={PROMO.OK} />
+        <PKpi label="Uplift" value={agr.uplift_promo ? `${agr.uplift_promo}×` : '—'} sub="c/ vs s/" cor={PROMO.GOLD} />
+      </div>
+
+      {/* VITRINE ESTILO BOOST */}
+      <div className="glass" style={{ padding: 16, borderColor: 'rgba(238,77,45,.35)' }}>
+        <PSecao icon={Sparkles} cor={PROMO.SHOPEE} titulo="Produtos em desconto · ao vivo" extra={<>
+          <PBadge c="#fff" bg={PROMO.SHOPEE}>{vitrineDesc.length} ITENS</PBadge>
+          <PBadge c={PROMO.BLUE} bg="rgba(91,141,239,.12)">🔒 NA TRAVA — NÃO REPETEM</PBadge>
+          <div style={{ flex: 1 }} />
+          {[['todos', 'Todos'], ['terminando', 'Terminando']].map(([v, l]) => <span key={v} onClick={() => { setFiltro(v); setPag(1) }} style={{ fontSize: 9.5, fontWeight: 700, padding: '5px 10px', borderRadius: 99, cursor: 'pointer', color: filtro === v ? '#fff' : 'var(--dim)', background: filtro === v ? `linear-gradient(135deg,${PROMO.SHOPEE},#c0341c)` : 'rgba(255,255,255,.04)', border: `1px solid ${filtro === v ? 'transparent' : 'var(--glass-border)'}` }}>{l}</span>)}
+          <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'rgba(0,0,0,.25)', border: '1px solid var(--glass-border)', borderRadius: 9, padding: '4px 9px' }}><Search size={11} style={{ color: 'var(--faint)' }} /><input value={busca} onChange={(e) => { setBusca(e.target.value); setPag(1) }} placeholder="buscar" style={{ background: 'transparent', border: 'none', outline: 'none', color: 'var(--text)', fontSize: 10.5, width: 84 }} /></div>
+        </>} />
+        {vitrineDesc.length === 0 ? <div style={{ fontSize: 11, color: 'var(--faint)', padding: 22, textAlign: 'center' }}>Nenhum produto em desconto ativo. Crie um pelo seletor manual abaixo ou deixe o motor montar propostas.</div>
+          : (
+            <>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 11 }}>
+                {vitrinePag.map((v) => <VitrineCard key={v.item_id} v={v} agora={agora} />)}
+              </div>
+              {totPag > 1 && (
+                <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, justifyContent: 'center' }}>
+                  <button onClick={() => setPag((x) => Math.max(1, x - 1))} disabled={pag === 1} className="btn-mini" style={{ fontSize: 10, padding: '5px 11px', borderRadius: 8, cursor: pag === 1 ? 'default' : 'pointer', color: 'var(--dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)', opacity: pag === 1 ? .4 : 1 }}>◂ anterior</button>
+                  <span className="num" style={{ fontSize: 9.5, color: 'var(--faint)' }}>página {pag} de {totPag} · {vf.length} itens</span>
+                  <button onClick={() => setPag((x) => Math.min(totPag, x + 1))} disabled={pag === totPag} className="btn-mini" style={{ fontSize: 10, padding: '5px 11px', borderRadius: 8, cursor: pag === totPag ? 'default' : 'pointer', color: 'var(--dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)', opacity: pag === totPag ? .4 : 1 }}>próxima ▸</button>
+                </div>
+              )}
+            </>
+          )}
+      </div>
+
+      {/* MODO DE INSERÇÃO + SELEÇÃO MANUAL */}
+      <div className="glass" style={{ padding: '14px 16px' }}>
+        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
+          <PSecao icon={Plus} cor={PROMO.SHOPEE} titulo="Como os produtos entram no desconto" extra={<div style={{ flex: 1 }} />} />
+          <span onClick={() => setModoManual(false)} style={{ fontSize: 10.5, fontWeight: 700, padding: '6px 12px', borderRadius: 99, cursor: 'pointer', color: !modoManual ? '#fff' : 'var(--dim)', background: !modoManual ? 'linear-gradient(135deg,#7b2a8c,#d6007f)' : 'rgba(255,255,255,.04)', border: `1px solid ${!modoManual ? 'transparent' : 'var(--glass-border)'}` }}>✦ Automático (motor escolhe)</span>
+          <span onClick={() => setModoManual(true)} style={{ fontSize: 10.5, fontWeight: 700, padding: '6px 12px', borderRadius: 99, cursor: 'pointer', color: modoManual ? '#fff' : 'var(--dim)', background: modoManual ? `linear-gradient(135deg,${PROMO.SHOPEE},#c0341c)` : 'rgba(255,255,255,.04)', border: `1px solid ${modoManual ? 'transparent' : 'var(--glass-border)'}` }}>✋ Manual (você busca no catálogo)</span>
+        </div>
+        {modoManual ? (
+          <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 13, marginTop: 12, background: 'rgba(238,77,45,.05)', border: '1px solid rgba(238,77,45,.25)', borderRadius: 13, padding: '14px 16px', flexWrap: 'wrap' }}>
+            <div style={{ width: 38, height: 38, borderRadius: 10, background: `linear-gradient(145deg,${PROMO.SHOPEE},#a52c15)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}><Search size={19} color="#fff" /></div>
+            <div style={{ flex: 1, minWidth: 220 }}>
+              <b style={{ fontSize: 12.5 }}>Seleção manual · buscar no catálogo inteiro</b>
+              <div style={{ fontSize: 9.5, color: 'var(--dim)' }}>Procure qualquer produto, veja preço e margem, monte o desconto do seu jeito — os 🔒 já em campanha ficam bloqueados, sem erro na plataforma</div>
+            </div>
+            <button onClick={() => setSeletor(true)} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 11.5, fontWeight: 800, padding: '10px 18px', borderRadius: 11, cursor: 'pointer', color: '#fff', border: 'none', background: `linear-gradient(135deg,${PROMO.SHOPEE},#c0341c)` }}><Search size={14} />Abrir busca no catálogo</button>
+          </div>
+        ) : (
+          <div style={{ fontSize: 10.5, color: 'var(--dim)', marginTop: 12, background: 'rgba(160,107,232,.05)', border: '1px solid rgba(160,107,232,.25)', borderRadius: 13, padding: '13px 16px', lineHeight: 1.5 }}>
+            No modo <b style={{ color: '#cfaef5' }}>automático</b>, o motor abaixo seleciona os produtos pelos critérios do estúdio (estoque parado, margem, curva), monta as propostas e — se estiver em modo automático — cria e renova sozinho. Configure o motor logo abaixo.
+          </div>
+        )}
+      </div>
+
+      {/* MOTOR ULTRA-CONFIGURÁVEL */}
+      <div className="glass" style={{ padding: 16, border: '1px solid transparent', background: 'linear-gradient(var(--surface),var(--surface)) padding-box,linear-gradient(110deg,rgba(160,107,232,.5),rgba(214,0,127,.4)) border-box' }}>
+        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 13, flexWrap: 'wrap' }}>
+          <div style={{ width: 36, height: 36, borderRadius: 10, background: 'linear-gradient(145deg,#7b2a8c,#d6007f)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}><Bot size={18} color="#fff" /></div>
+          <div><b className="serif" style={{ fontSize: 15 }}>Motor de Descontos · trabalha sem parar</b><div style={{ fontSize: 9, color: 'var(--dim)' }}>varre o catálogo, acha estoque parado com margem, cria e renova sozinho — respeitando a trava e o piso</div></div>
+          <div style={{ flex: 1 }} />
+          <button onClick={gerar} disabled={gerando} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 800, padding: '8px 13px', borderRadius: 9, cursor: 'pointer', color: '#fff', border: 'none', background: 'linear-gradient(135deg,#7b2a8c,#d6007f)', opacity: gerando ? .7 : 1 }}>{gerando ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}Gerar propostas agora</button>
+          <button onClick={rodar} disabled={rodando} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 700, padding: '8px 12px', borderRadius: 9, cursor: 'pointer', color: 'var(--dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)' }}>{rodando ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}Rodar 1 ciclo</button>
+        </div>
+        <EstudioMotor cfg={cfg} salvar={salvar} motorTipo={motorTipo} setMotorTipo={setMotorTipo} />
+        <div style={{ marginTop: 14, paddingTop: 13, borderTop: '1px solid var(--glass-border)' }}>
+          <PSecao icon={Sparkles} cor={PROMO.PURPLE} titulo="Propostas desta rodada · margem item a item" extra={<>
+            <PBadge c="#cfaef5" bg="rgba(160,107,232,.15)">MAIOR DESCONTO SEM FURAR O PISO</PBadge>
+            <div style={{ flex: 1 }} />
+            {propostas.length > 0 && <><span className="num" style={{ fontSize: 9.5, color: 'var(--dim)' }}>{selP.size} de {propostas.length}</span><button onClick={() => setSelP(todasSel ? new Set() : new Set(propostas.map((x) => x.item_id)))} style={{ fontSize: 9, fontWeight: 700, padding: '4px 10px', borderRadius: 8, cursor: 'pointer', color: 'var(--dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)' }}>{todasSel ? 'Limpar' : 'Todas'}</button></>}
+          </>} />
+          {!prop ? <div style={{ fontSize: 11, color: 'var(--faint)', padding: 18, textAlign: 'center' }}>Clique <b style={{ color: 'var(--text)' }}>Gerar propostas agora</b> — o motor varre o catálogo, pula o que já está em oferta (trava) e monta a lista com a margem final de cada item.</div>
+            : propostas.length === 0 ? <div style={{ fontSize: 11, color: 'var(--faint)', padding: 18, textAlign: 'center' }}>{prop.msg || 'Nenhum candidato passou pelo funil nesta rodada.'}</div>
+              : (
+                <>
+                  {diag && <div style={{ marginBottom: 11 }}><FunilAgente diag={diag} teto={teto} piso={piso} /></div>}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 9 }}>
+                    {propostas.map((x) => <PropostaCard key={x.item_id} p={x} teto={teto} piso={piso} on={selP.has(x.item_id)} toggle={() => setSelP((s) => { const n = new Set(s); n.has(x.item_id) ? n.delete(x.item_id) : n.add(x.item_id); return n })} />)}
+                  </div>
+                  <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 9, color: 'var(--faint)', flex: 1 }}>o guardião reduz o desconto até caber no piso de {piso}% — nunca fura</span>
+                    <button onClick={() => aplicar('flash')} disabled={aplicando || selP.size === 0} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 700, padding: '8px 13px', borderRadius: 9, cursor: selP.size ? 'pointer' : 'default', color: '#d6007f', background: 'transparent', border: '1px solid rgba(214,0,127,.4)', opacity: (aplicando || !selP.size) ? .5 : 1 }}><Zap size={12} />Virar Flash ({selP.size})</button>
+                    <button onClick={() => aplicar('desconto')} disabled={aplicando || selP.size === 0} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 800, padding: '9px 16px', borderRadius: 10, cursor: selP.size ? 'pointer' : 'default', color: '#fff', border: 'none', background: 'linear-gradient(135deg,#7b2a8c,#d6007f)', opacity: (aplicando || !selP.size) ? .5 : 1 }}>{aplicando ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}Aplicar num desconto novo ({selP.size})</button>
+                  </div>
+                </>
+              )}
+        </div>
+      </div>
+
+      {/* CAMPANHAS DE DESCONTO */}
+      {campDesc.length > 0 || agendDesc.length > 0
+        ? <CampanhasAtivas campanhas={campDesc} agora={agora} notify={notify} onMudou={() => carregar(true)} />
+        : <div className="glass" style={{ padding: 20, textAlign: 'center', fontSize: 11, color: 'var(--faint)' }}>Nenhuma campanha de desconto ativa. Crie pelo seletor manual ou aplique uma proposta do motor.</div>}
+
+      {/* DIÁRIO */}
+      <DiarioAgente hist={hist} />
+
+      {seletor && <SeletorProdutos modo="desconto" onFechar={() => setSeletor(false)} notify={notify} onCriado={() => { setSeletor(false); carregar(true) }} />}
     </div>
   )
 }
