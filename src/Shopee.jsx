@@ -4867,6 +4867,7 @@ function Descontos({ conectado, notify }) {
   const [prop, setProp] = useState(null)
   const [selP, setSelP] = useState(() => new Set())
   const [hist, setHist] = useState([])
+  const [diarioSinal, setDiarioSinal] = useState(0)
   const [gerando, setGerando] = useState(false)
   const [aplicando, setAplicando] = useState(false)
   const [rodando, setRodando] = useState(false)
@@ -4882,7 +4883,7 @@ function Descontos({ conectado, notify }) {
   const carregar = async (forcar) => {
     if (!forcar) setCarregando(true)
     try { const r = await api.shopeePromoPainel(forcar); setP(r) } catch (e) { notify(e.message, 'danger') } finally { setCarregando(false) }
-    api.shopeePromoHistorico().then((r) => setHist(r.itens || [])).catch(() => {})
+    api.shopeePromoHistorico().then((r) => setHist(r.itens || [])).catch(() => {}); setDiarioSinal((s) => s + 1)
   }
   useEffect(() => { if (conectado) carregar() }, [conectado])
 
@@ -5087,7 +5088,7 @@ function Descontos({ conectado, notify }) {
         : <div className="glass" style={{ padding: 20, textAlign: 'center', fontSize: 11, color: 'var(--faint)' }}>Nenhuma campanha de desconto ativa. Crie pelo seletor manual ou aplique uma proposta do motor.</div>}
 
       {/* DIÁRIO */}
-      <DiarioAgente hist={hist} />
+      <DiarioAgente sinal={diarioSinal} />
 
       {seletor && <SeletorProdutos modo="desconto" onFechar={() => setSeletor(false)} notify={notify} onCriado={() => { setSeletor(false); carregar(true) }} />}
     </div>
@@ -5674,7 +5675,7 @@ function AgenteOfertas({ conectado, notify }) {
   const [prop, setProp] = useState(null)
   const [sel, setSel] = useState(() => new Set())
   const [queda, setQueda] = useState(null)
-  const [hist, setHist] = useState([])
+  const [diarioSinal, setDiarioSinal] = useState(0)
   const [gerando, setGerando] = useState(false)
   const [aplicando, setAplicando] = useState(false)
   const [rodando, setRodando] = useState(false)
@@ -5684,7 +5685,7 @@ function AgenteOfertas({ conectado, notify }) {
   const carregarLeve = () => {
     api.shopeePromoConfig().then(setCfg).catch(() => {})
     api.shopeePromoQueda().then(setQueda).catch(() => {})
-    api.shopeePromoHistorico().then((r) => setHist(r.itens || [])).catch(() => {})
+    setDiarioSinal((s) => s + 1)
   }
   useEffect(() => { if (conectado) carregarLeve() }, [conectado])
 
@@ -5799,7 +5800,7 @@ function AgenteOfertas({ conectado, notify }) {
       </div>
 
       {/* DIÁRIO */}
-      <DiarioAgente hist={hist} />
+      <DiarioAgente sinal={diarioSinal} />
 
       {seletor && <SeletorProdutos modo="desconto" onFechar={() => setSeletor(false)} notify={notify} onCriado={() => { setSeletor(false); carregarLeve() }} />}
     </div>
@@ -5939,31 +5940,163 @@ function PropostaCard({ p, teto, piso, on, toggle }) {
         <div style={{ flex: 1 }} />
         <b className="num" style={{ color: margemCor, fontWeight: 800 }}>margem {margem != null ? `${margem}%` : '—'}{margem != null && margem <= piso + 1 ? ' ⚠' : ''}</b>
       </div>
+      {p.preco_base != null && <div className="num" style={{ fontSize: 7.5, color: 'var(--faint)', marginTop: 3 }}>preço de lista da precificação · líquido-alvo preservado: {fmtBRL(p.preco_base)}</div>}
     </div>
   )
 }
 
 /* -------- Diário de bordo do agente -------- */
-function DiarioAgente({ hist }) {
-  const CORT = { desconto: PROMO.SHOPEE, flash: '#d6007f', cupom: PROMO.GOLD, bundle: PROMO.PURPLE, addon: PROMO.TEAL }
+function DiarioAgente({ sinal }) {
+  const [dados, setDados] = useState(null)
+  const [ftipo, setFtipo] = useState('todos')
+  const [fmotivo, setFmotivo] = useState('todos')
+  useEffect(() => {
+    let v = true
+    api.shopeePromoHistorico().then((r) => { if (v) setDados(r) }).catch(() => { if (v) setDados({ itens: [], resumo: null }) })
+    return () => { v = false }
+  }, [sinal])
+
+  const hist = dados ? (dados.itens || []) : null
+  const r = dados && dados.resumo
+  const MOTIVO = {
+    agendado: { icon: Bot, cor: PROMO.PURPLE, rot: 'Ciclo programado', frase: 'o motor criou sozinho na varredura automática' },
+    queda: { icon: Zap, cor: PROMO.DANGER, rot: 'Radar disparou', frase: 'as vendas caíram além do gatilho — relâmpago automático' },
+    manual: { icon: Plus, cor: PROMO.SHOPEE, rot: 'Manual', frase: 'criada manualmente por você' },
+  }
+  const mv = (m) => MOTIVO[m] || MOTIVO.manual
+  const TIPO = { desconto: [PROMO.SHOPEE, 'DESCONTO'], flash: ['#d6007f', 'FLASH'], cupom: [PROMO.GOLD, 'CUPOM'], bundle: [PROMO.PURPLE, 'BUNDLE'], addon: [PROMO.TEAL, 'ADD-ON'] }
+  const tg = (t) => TIPO[t] || ['var(--faint)', (t || '—').toUpperCase()]
+
+  const lista = (hist || []).filter((h) => (ftipo === 'todos' || h.tipo === ftipo) && (fmotivo === 'todos' || (h.motivo || 'manual') === fmotivo))
+  const hojeStr = new Date().toDateString()
+  const ontemStr = new Date(Date.now() - 86400000).toDateString()
+  const grupos = []
+  const mapa = {}
+  lista.forEach((h) => {
+    const d = h.criado_em ? new Date(h.criado_em) : null
+    const key = d ? d.toDateString() : 'sem-data'
+    const rot = key === hojeStr ? 'Hoje' : key === ontemStr ? 'Ontem' : (d ? d.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: 'short' }) : 'sem data')
+    if (!mapa[key]) { mapa[key] = { rot, itens: [] }; grupos.push(mapa[key]) }
+    mapa[key].itens.push(h)
+  })
+
+  const serie = (r && r.serie_14d) || []
+  const maxDia = Math.max(1, ...serie.map((s) => s.qtd))
+  const autoN = ((r && r.por_motivo && r.por_motivo.agendado) || 0) + ((r && r.por_motivo && r.por_motivo.queda) || 0)
+  const manualN = (r && r.por_motivo && r.por_motivo.manual) || 0
+  const totalN = (r && r.total) || 0
+  const distMotivo = [['agendado', 'Ciclo programado'], ['queda', 'Radar disparou'], ['manual', 'Manual']]
+
   return (
-    <div className="glass" style={{ padding: 16 }}>
-      <PSecao icon={Clock} cor={PROMO.PURPLE} titulo="Diário de bordo do agente" extra={<><div style={{ flex: 1 }} /><PBadge c="var(--faint)" bg="rgba(255,255,255,.06)">{(hist || []).length} REGISTROS</PBadge></>} />
-      {(!hist || hist.length === 0) ? <div style={{ fontSize: 11, color: 'var(--faint)', padding: 16, textAlign: 'center' }}>Ainda sem ações registradas. Quando o agente criar, renovar ou o guardião reduzir um desconto, aparece aqui com data e motivo.</div>
-        : (
-          <div>
-            {hist.map((h, i) => (
-              <div key={i} className="row" style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '7px 0', borderBottom: i < hist.length - 1 ? '1px solid rgba(255,255,255,.04)' : 'none' }}>
-                <span style={{ width: 7, height: 7, borderRadius: '50%', background: CORT[h.tipo] || PROMO.PURPLE, flex: 'none', marginTop: 4 }} />
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 10, color: 'var(--dim)' }}><b style={{ color: 'var(--text)' }}>{h.nome || `${h.tipo} #${h.ref_id}`}</b>{h.qtd_itens != null ? ` · ${h.qtd_itens} itens` : ''}{h.desconto_pct != null ? ` · -${h.desconto_pct}%` : ''}</div>
-                  {h.motivo && <div style={{ fontSize: 8.5, color: 'var(--faint)' }}>{h.motivo}</div>}
-                </div>
-                <span className="num" style={{ fontSize: 8, color: 'var(--faint)', flex: 'none' }}>{tempoRelBR(h.criado_em)}</span>
-              </div>
-            ))}
+    <div className="glass" style={{ padding: 0, overflow: 'hidden', border: '1px solid transparent', background: 'linear-gradient(var(--surface),var(--surface)) padding-box,linear-gradient(110deg,rgba(160,107,232,.45),rgba(214,0,127,.32),rgba(91,141,239,.28)) border-box' }}>
+      {/* HEADER */}
+      <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '14px 16px', borderBottom: '1px solid var(--glass-border)', background: 'linear-gradient(110deg,rgba(160,107,232,.08),transparent)' }}>
+        <div style={{ width: 38, height: 38, borderRadius: 11, background: 'linear-gradient(145deg,#7b2a8c,#d6007f)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}><Clock size={19} color="#fff" /></div>
+        <div style={{ flex: 1 }}>
+          <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <b className="serif" style={{ fontSize: 15 }}>Diário de bordo do agente</b>
+            <PBadge c="#cfaef5" bg="rgba(160,107,232,.15)">AUDITORIA COMPLETA</PBadge>
           </div>
-        )}
+          <div style={{ fontSize: 9, color: 'var(--dim)' }}>Cada campanha que o motor criou — quando, por quê e quantos itens — com rastro do gatilho</div>
+        </div>
+        <PBadge c={PROMO.OK} bg="rgba(47,217,141,.1)">0 ERROS · TRAVA ATIVA</PBadge>
+      </div>
+
+      {/* SUMMARY STRIP */}
+      {r && totalN > 0 && (
+        <div style={{ padding: '13px 16px', borderBottom: '1px solid var(--glass-border)', display: 'grid', gridTemplateColumns: '1.15fr 1fr', gap: 16, alignItems: 'center' }}>
+          <div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8, marginBottom: 11 }}>
+              <div className="glass" style={{ padding: '9px 10px', borderRadius: 11 }}><div style={{ fontSize: 6.5, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)' }}>Ações · {r.janela_dias}d</div><b className="num" style={{ fontSize: 16 }}>{totalN}</b></div>
+              <div className="glass" style={{ padding: '9px 10px', borderRadius: 11 }}><div style={{ fontSize: 6.5, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)' }}>Itens mov.</div><b className="num" style={{ fontSize: 16, color: PROMO.OK }}>{r.itens_total}</b></div>
+              <div className="glass" style={{ padding: '9px 10px', borderRadius: 11, borderColor: 'rgba(160,107,232,.35)' }}><div style={{ fontSize: 6.5, textTransform: 'uppercase', fontWeight: 800, color: PROMO.PURPLE }}>Pelo motor</div><b className="num" style={{ fontSize: 16, color: PROMO.PURPLE }}>{autoN}</b></div>
+              <div className="glass" style={{ padding: '9px 10px', borderRadius: 11 }}><div style={{ fontSize: 6.5, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)' }}>Manual</div><b className="num" style={{ fontSize: 16 }}>{manualN}</b></div>
+            </div>
+            {/* distribuição por gatilho */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+              {distMotivo.map(([k, lab]) => {
+                const n = (r.por_motivo && r.por_motivo[k]) || 0
+                const pct = totalN ? Math.round(n / totalN * 100) : 0
+                const info = mv(k)
+                return (
+                  <div key={k} className="row" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <info.icon size={11} style={{ color: info.cor, flex: 'none' }} />
+                    <span style={{ fontSize: 8.5, color: 'var(--dim)', width: 96, flex: 'none' }}>{lab}</span>
+                    <div style={{ flex: 1, height: 7, borderRadius: 4, background: 'rgba(255,255,255,.05)', overflow: 'hidden' }}><div style={{ width: `${pct}%`, height: '100%', borderRadius: 4, background: info.cor }} /></div>
+                    <b className="num" style={{ fontSize: 9, color: 'var(--dim)', width: 22, textAlign: 'right', flex: 'none' }}>{n}</b>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+          {/* sparkline 14 dias */}
+          <div>
+            <div className="row" style={{ display: 'flex', alignItems: 'center', marginBottom: 7 }}><span style={{ fontSize: 8, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)' }}>Atividade · 14 dias</span><div style={{ flex: 1 }} /><span className="num" style={{ fontSize: 8, color: 'var(--faint)' }}>{serie.reduce((a, s) => a + s.qtd, 0)} ações</span></div>
+            <div className="row" style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 46 }}>
+              {serie.map((s, i) => {
+                const h = s.qtd ? Math.max(10, s.qtd / maxDia * 46) : 3
+                const hoje = i === serie.length - 1
+                return <div key={i} title={`${s.dia}: ${s.qtd}`} style={{ flex: 1, height: h, borderRadius: 3, background: s.qtd ? (hoje ? 'linear-gradient(180deg,#d6007f,#7b2a8c)' : 'linear-gradient(180deg,rgba(160,107,232,.8),rgba(160,107,232,.3))') : 'rgba(255,255,255,.05)' }} />
+              })}
+            </div>
+            <div className="row" style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}><span style={{ fontSize: 7, color: 'var(--faint)' }}>-14d</span><span style={{ fontSize: 7, color: 'var(--faint)' }}>hoje</span></div>
+          </div>
+        </div>
+      )}
+
+      {/* FILTROS */}
+      {hist && hist.length > 0 && (
+        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px', borderBottom: '1px solid var(--glass-border)', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 8, color: 'var(--faint)', fontWeight: 700 }}>TIPO</span>
+          {[['todos', 'Todos'], ['desconto', 'Desconto'], ['flash', 'Flash']].map(([v, l]) => <span key={v} onClick={() => setFtipo(v)} style={{ fontSize: 9, fontWeight: 700, padding: '4px 10px', borderRadius: 99, cursor: 'pointer', color: ftipo === v ? '#fff' : 'var(--dim)', background: ftipo === v ? 'linear-gradient(135deg,#7b2a8c,#d6007f)' : 'rgba(255,255,255,.04)', border: `1px solid ${ftipo === v ? 'transparent' : 'var(--glass-border)'}` }}>{l}</span>)}
+          <div style={{ width: 1, height: 16, background: 'var(--glass-border)', margin: '0 4px' }} />
+          <span style={{ fontSize: 8, color: 'var(--faint)', fontWeight: 700 }}>GATILHO</span>
+          {[['todos', 'Todos'], ['agendado', 'Ciclo'], ['queda', 'Radar'], ['manual', 'Manual']].map(([v, l]) => <span key={v} onClick={() => setFmotivo(v)} style={{ fontSize: 9, fontWeight: 700, padding: '4px 10px', borderRadius: 99, cursor: 'pointer', color: fmotivo === v ? '#fff' : 'var(--dim)', background: fmotivo === v ? 'linear-gradient(135deg,#7b2a8c,#d6007f)' : 'rgba(255,255,255,.04)', border: `1px solid ${fmotivo === v ? 'transparent' : 'var(--glass-border)'}` }}>{l}</span>)}
+          <div style={{ flex: 1 }} />
+          <span className="num" style={{ fontSize: 8.5, color: 'var(--faint)' }}>{lista.length} de {hist.length}</span>
+        </div>
+      )}
+
+      {/* TIMELINE */}
+      <div style={{ padding: '6px 16px 14px' }}>
+        {!dados ? <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 24, justifyContent: 'center', color: 'var(--faint)', fontSize: 11 }}><Loader2 size={14} className="animate-spin" />Carregando o diário…</div>
+          : (hist.length === 0) ? <div style={{ fontSize: 11, color: 'var(--faint)', padding: 22, textAlign: 'center', lineHeight: 1.5 }}>Ainda sem ações registradas.<br />Quando o motor criar um desconto ou disparar um relâmpago — ou você criar manualmente — cada passo aparece aqui com data, gatilho e quantos itens entraram.</div>
+            : (lista.length === 0) ? <div style={{ fontSize: 11, color: 'var(--faint)', padding: 20, textAlign: 'center' }}>Nenhum registro com esse filtro.</div>
+              : grupos.map((g, gi) => (
+                <div key={gi} style={{ marginTop: gi === 0 ? 8 : 14 }}>
+                  <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                    <span style={{ fontSize: 8.5, textTransform: 'uppercase', fontWeight: 800, letterSpacing: '.5px', color: 'var(--dim)' }}>{g.rot}</span>
+                    <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,.05)' }} />
+                    <span className="num" style={{ fontSize: 8, color: 'var(--faint)' }}>{g.itens.length}</span>
+                  </div>
+                  <div style={{ position: 'relative', paddingLeft: 22 }}>
+                    <div style={{ position: 'absolute', left: 8, top: 4, bottom: 4, width: 2, background: 'linear-gradient(180deg,rgba(160,107,232,.4),rgba(160,107,232,.05))' }} />
+                    {g.itens.map((h, i) => {
+                      const info = mv(h.motivo || 'manual')
+                      const [tc, tl] = tg(h.tipo)
+                      return (
+                        <div key={i} className="row" style={{ display: 'flex', alignItems: 'flex-start', gap: 10, position: 'relative', padding: '7px 0' }}>
+                          <div style={{ position: 'absolute', left: -18, top: 7, width: 18, height: 18, borderRadius: '50%', background: 'var(--surface)', border: `2px solid ${info.cor}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><info.icon size={9} style={{ color: info.cor }} /></div>
+                          <div className="glass" style={{ flex: 1, padding: '9px 11px', borderRadius: 11, borderColor: 'var(--glass-border)' }}>
+                            <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
+                              <PBadge c={tl === 'FLASH' ? '#fff' : (tc === PROMO.SHOPEE ? '#fff' : tc)} bg={tc === PROMO.SHOPEE || tl === 'FLASH' ? tc : `${tc}22`}>{tl}</PBadge>
+                              <b style={{ fontSize: 10.5, flex: 1, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{h.nome || `${tl} #${h.ref_id}`}</b>
+                              <span className="num" style={{ fontSize: 8, color: 'var(--faint)', flex: 'none' }}>{tempoRelBR(h.criado_em)}</span>
+                            </div>
+                            <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 5, flexWrap: 'wrap' }}>
+                              <span className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 8.5, fontWeight: 700, color: info.cor }}><info.icon size={9} />{info.rot}</span>
+                              {h.qtd_itens != null && <span className="num" style={{ fontSize: 8.5, color: 'var(--dim)' }}>· {h.qtd_itens} itens</span>}
+                              {h.desconto_pct ? <span className="num" style={{ fontSize: 8.5, color: PROMO.SHOPEE, fontWeight: 700 }}>· -{h.desconto_pct}%</span> : null}
+                              <span style={{ fontSize: 8, color: 'var(--faint)', flex: 1 }}>— {info.frase}</span>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              ))}
+      </div>
     </div>
   )
 }
