@@ -5227,6 +5227,7 @@ function Descontos({ conectado, notify }) {
 
   return (
     <div className="space-y-3">
+      <DiagShopee conectado={conectado} />
       {/* COMMAND BAR */}
       <div className="glass" style={{ padding: '15px 18px', border: '1px solid transparent', background: 'linear-gradient(var(--surface),var(--surface)) padding-box,linear-gradient(110deg,rgba(238,77,45,.55),rgba(214,0,127,.4),rgba(160,107,232,.3)) border-box' }}>
         <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 13, flexWrap: 'wrap' }}>
@@ -6726,7 +6727,7 @@ function EstudioMotor({ cfg, salvar, motorTipo, setMotorTipo }) {
       <input type="range" min={min} max={max} value={cfg[campo] ?? min} onChange={(e) => salvar({ [campo]: Number(e.target.value) })} style={{ width: '100%' }} />
     </div>
   )
-  const TIPOS_MOTOR = [['desconto', 'Desconto'], ['flash', 'Relâmpago'], ['cupom', 'Cupom'], ['bundle', 'Leve+'], ['addon', 'Add-on'], ['follow', 'Seguidor']]
+  const TIPOS_MOTOR = [['desconto', 'Desconto'], ['flash', 'Relâmpago'], ['ambos', 'Ambos']]
   const CRIT = [['estoque_parado', 'Estoque parado'], ['margem_alta', 'Maior margem']]
   return (
     <div className="glass" style={{ padding: 16, border: '1px solid transparent', background: 'linear-gradient(var(--surface),var(--surface)) padding-box,linear-gradient(110deg,rgba(238,77,45,.4),rgba(160,107,232,.4)) border-box' }}>
@@ -6734,6 +6735,10 @@ function EstudioMotor({ cfg, salvar, motorTipo, setMotorTipo }) {
         <div style={{ flex: 1 }} />
         <div className="row" style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>{TIPOS_MOTOR.map(([v, l]) => <span key={v} onClick={() => { setMotorTipo(v); salvar({ tipo: v }) }} style={{ fontSize: 9.5, fontWeight: 700, padding: '5px 10px', borderRadius: 99, cursor: 'pointer', color: (cfg.tipo || 'desconto') === v ? '#fff' : 'var(--dim)', background: (cfg.tipo || 'desconto') === v ? 'linear-gradient(135deg,#7b2a8c,#d6007f)' : 'rgba(255,255,255,.04)', border: `1px solid ${(cfg.tipo || 'desconto') === v ? 'transparent' : 'var(--glass-border)'}` }}>{l}</span>)}</div>
       </>} />
+      <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '8px 11px', borderRadius: 10, background: 'rgba(160,107,232,.06)', border: '1px solid rgba(160,107,232,.22)', marginBottom: 13 }}>
+        <Bot size={13} style={{ color: PROMO.PURPLE, flex: 'none' }} />
+        <div style={{ fontSize: 8.5, color: 'var(--dim)', lineHeight: 1.5, flex: 1 }}>O motor <b style={{ color: PROMO.PURPLE }}>seleciona produtos e cria sozinho</b> apenas <b>Desconto</b> e <b>Relâmpago</b> (por giro/margem, com piso protegido). <b>Cupom</b>, <b>Leve+</b>, <b>Add-on</b> e <b>Seguidor</b> são <b style={{ color: 'var(--dim)' }}>curados por você</b> — cada um tem seu estúdio próprio nas abas acima (exigem escolhas humanas: código, kit, brinde).</div>
+      </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
         <div>
           <div style={{ fontSize: 8.5, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)', marginBottom: 8 }}>Seleção automática</div>
@@ -6762,6 +6767,76 @@ function EstudioMotor({ cfg, salvar, motorTipo, setMotorTipo }) {
 }
 
 /* -------- Card de proposta (margem item a item) -------- */
+/* -------- Diagnóstico temporário: resposta crua da Shopee ao adicionar item -------- */
+function DiagShopee({ conectado }) {
+  const [cat, setCat] = useState([])
+  const [sel, setSel] = useState('')
+  const [dpct, setDpct] = useState(10)
+  const [rodando, setRodando] = useState(false)
+  const [res, setRes] = useState(null)
+  const [copiado, setCopiado] = useState(false)
+  const [aberto, setAberto] = useState(false)
+  useEffect(() => {
+    if (!conectado) return
+    api.shopeeProdutos(0, 40).then((r) => {
+      const lote = (r && r.response && (r.response.item || r.response.itens)) || []
+      setCat(lote); if (lote[0]) setSel(String(lote[0].item_id))
+    }).catch(() => {})
+  }, [conectado])
+  const rodar = async () => {
+    if (!sel) return
+    setRodando(true); setRes(null); setCopiado(false)
+    try { setRes(await api.shopeePromoDiag({ item_id: Number(sel), desconto_pct: Number(dpct) })) }
+    catch (e) { setRes({ erro: e.message }) }
+    setRodando(false)
+  }
+  const json = res ? JSON.stringify(res, null, 2) : ''
+  const copiar = () => { try { navigator.clipboard.writeText(json); setCopiado(true); setTimeout(() => setCopiado(false), 2000) } catch (_) {} }
+  if (!conectado) return null
+  return (
+    <div className="glass" style={{ padding: 0, overflow: 'hidden', border: '1px solid transparent', background: 'linear-gradient(var(--surface),var(--surface)) padding-box,linear-gradient(110deg,rgba(242,194,0,.5),rgba(224,162,60,.4)) border-box' }}>
+      <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 15px', cursor: 'pointer' }} onClick={() => setAberto(!aberto)}>
+        <div style={{ width: 32, height: 32, borderRadius: 9, background: 'linear-gradient(145deg,#F2C200,#c99b00)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}><Search size={16} color="#1a1008" /></div>
+        <div style={{ flex: 1 }}>
+          <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 7 }}><b className="serif" style={{ fontSize: 14 }}>Diagnóstico Shopee</b><PBadge c="#1a1008" bg={PROMO.GOLD}>TEMPORÁRIO</PBadge></div>
+          <div style={{ fontSize: 9, color: 'var(--dim)' }}>cria um desconto de teste com 1 produto, captura a resposta crua da Shopee e encerra sozinho — copie o resultado e envie para acertarmos o erro</div>
+        </div>
+        <ChevronRight size={16} style={{ color: 'var(--faint)', transform: aberto ? 'rotate(90deg)' : 'none' }} />
+      </div>
+      {aberto && (
+        <div style={{ padding: '0 15px 15px' }}>
+          <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap', marginBottom: 11 }}>
+            <div style={{ flex: 1, minWidth: 200 }}>
+              <div style={{ fontSize: 8, color: 'var(--faint)', marginBottom: 3 }}>Produto real da loja</div>
+              <select value={sel} onChange={(e) => setSel(e.target.value)} style={{ width: '100%', padding: '8px 10px', fontSize: 11, color: 'var(--text)', background: 'rgba(0,0,0,.3)', border: '1px solid var(--glass-border)', borderRadius: 9 }}>
+                {cat.length === 0 && <option value="">carregando catálogo…</option>}
+                {cat.map((it) => <option key={it.item_id} value={it.item_id}>{(it.item_name || `#${it.item_id}`).slice(0, 50)} — {it.item_id}</option>)}
+              </select>
+            </div>
+            <div>
+              <div style={{ fontSize: 8, color: 'var(--faint)', marginBottom: 3 }}>Desconto teste</div>
+              <input type="number" min={1} max={50} value={dpct} onChange={(e) => setDpct(Number(e.target.value))} style={{ width: 70, padding: '8px 10px', fontSize: 11, color: 'var(--text)', background: 'rgba(0,0,0,.3)', border: '1px solid var(--glass-border)', borderRadius: 9 }} />
+            </div>
+            <button onClick={rodar} disabled={rodando || !sel} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, fontWeight: 800, padding: '9px 16px', borderRadius: 10, cursor: sel ? 'pointer' : 'default', color: '#1a1008', border: 'none', background: 'linear-gradient(135deg,#F2C200,#c99b00)', opacity: rodando ? 0.7 : 1, alignSelf: 'flex-end' }}>{rodando ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}Rodar diagnóstico</button>
+          </div>
+          {rodando && <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 14, justifyContent: 'center', color: 'var(--faint)', fontSize: 10.5 }}><Loader2 size={13} className="animate-spin" />criando desconto de teste, adicionando o item e encerrando…</div>}
+          {res && (
+            <div>
+              <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                <b style={{ fontSize: 10, color: PROMO.GOLD }}>Resposta crua da Shopee</b>
+                <div style={{ flex: 1 }} />
+                <button onClick={copiar} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 9.5, fontWeight: 700, padding: '5px 11px', borderRadius: 8, cursor: 'pointer', color: copiado ? PROMO.OK : 'var(--dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)' }}>{copiado ? <Check size={11} /> : <Plus size={11} style={{ transform: 'rotate(45deg)' }} />}{copiado ? 'copiado!' : 'copiar tudo'}</button>
+              </div>
+              <pre style={{ maxHeight: 340, overflow: 'auto', background: 'rgba(0,0,0,.35)', border: '1px solid var(--glass-border)', borderRadius: 10, padding: 12, fontSize: 9.5, lineHeight: 1.5, color: '#cfe', whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'Menlo,Consolas,monospace' }}>{json}</pre>
+              <div style={{ fontSize: 8.5, color: 'var(--faint)', marginTop: 6 }}>Procure o bloco <b style={{ color: PROMO.GOLD }}>resp_add_discount_item_CRUA</b> e o <b style={{ color: PROMO.GOLD }}>get_discount_apos</b> (item_count) — é o que revela se o item entrou e como a Shopee reporta. Copie tudo e me envie.</div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function PropostaCard({ p, teto, piso, on, toggle }) {
   const guardiaoReduziu = p.desconto_pct < teto
   const margem = p.margem_promo

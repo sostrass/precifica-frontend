@@ -258,6 +258,7 @@ export const api = {
   shopeePromoRodar: () => req('/api/shopee/promo/rodar', { method: 'POST' }),
   shopeePromoQueda: () => req('/api/shopee/promo/queda'),
   shopeePromoHistorico: () => req('/api/shopee/promo/historico'),
+  shopeePromoDiag: (b) => req('/api/shopee/promo/diag', { method: 'POST', body: b }),
   shopeePedidos: (dias = 7) => req(`/api/shopee/pedidos?dias=${dias}`),
   shopeePedidosPainel: (status = 'A_ENVIAR', dias = 15, opts = {}) => {
     const q = new URLSearchParams({ status, dias: String(dias) })
