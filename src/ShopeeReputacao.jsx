@@ -184,12 +184,15 @@ export default function ShopeeReputacao({ conectado, notify }) {
         </div>
       )}
 
+      {/* ===== O QUE O CLIENTE AVALIA ===== */}
+      {!p ? <Skel h={140} /> : <OQueAvalia dados={p.o_que_avalia} />}
+
       {/* ===== TEMAS POR IA ===== */}
       <Temas notify={notify} />
 
       {/* ===== INBOX + COPILOTO ===== */}
       <div ref={inboxRef} style={{ display: 'grid', gridTemplateColumns: '1.55fr 1fr', gap: 14, alignItems: 'start' }}>
-        <Inbox notify={notify} cfg={cfg} foco={foco} onRespondida={() => carregar()} />
+        <Inbox notify={notify} cfg={cfg} foco={foco} sla={{ dias: k.sla_dias_restantes, antiga: k.sla_mais_antiga_dias }} onRespondida={() => carregar()} />
         <Copiloto cfg={cfg} salvarCfg={salvarCfg} ativ={ativ} onMutirao={mutirao} onParar={async () => { try { await api.shopeeReviewParar(); notify('Agente pausado.', 'ok') } catch (e) { notify(e.message, 'danger') } }} onEstudio={() => setEstudio(true)} />
       </div>
 
@@ -197,6 +200,9 @@ export default function ShopeeReputacao({ conectado, notify }) {
       <div ref={radarRef}>
         {!p ? <Skel h={180} /> : <RadarCompradores dados={p.compradores} notify={notify} focoComprador={focoComprador} />}
       </div>
+
+      {/* ===== VITRINE DE PROVA SOCIAL ===== */}
+      {!p ? <Skel h={160} /> : <Vitrine itens={p.vitrine} notify={notify} />}
 
       {/* ===== REPUTAÇÃO POR PRODUTO ===== */}
       {!p ? <Skel h={160} /> : <ReputacaoProdutos produtos={p.produtos} notify={notify} />}
@@ -371,7 +377,7 @@ function TendenciaChart({ tendencia }) {
 }
 
 /* ---------- INBOX DE RESPOSTAS ---------- */
-function Inbox({ notify, cfg, foco, onRespondida }) {
+function Inbox({ notify, cfg, foco, sla, onRespondida }) {
   const [status, setStatus] = useState('UNANSWERED')
   const [itens, setItens] = useState(null)
   const [cursor, setCursor] = useState('')
@@ -450,7 +456,8 @@ function Inbox({ notify, cfg, foco, onRespondida }) {
   return (
     <div className="glass" style={{ padding: 16 }}>
       <Secao icon={MessageSquare} cor={SHOPEE} titulo={<>Inbox de respostas {itens && <span className="num" style={{ color: 'var(--faint)' }}>{filtrados.length} nesta lista</span>}</>} extra={<>
-        <Badge c="#cfaef5" bg="rgba(160,107,232,.15)">RASCUNHO IA EM CADA CARD</Badge>
+        <Badge c={BLUE} bg="rgba(91,141,239,.12)">SLA SHOPEE · RESPONDER EM ATÉ 30 DIAS</Badge>
+        {sla && sla.dias != null && <Badge c={sla.dias <= 5 ? DANGER : sla.dias <= 12 ? WARN : OK} bg="rgba(255,255,255,.05)"><Clock size={8} />{sla.dias > 0 ? `${sla.dias} DIAS P/ A MAIS ANTIGA` : 'PRAZO ESTOURADO'}</Badge>}
         <div style={{ flex: 1 }} />
         <button onClick={() => { setModoSel((v) => !v); setSel(new Set()) }} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 9.5, fontWeight: 700, padding: '5px 11px', borderRadius: 8, cursor: 'pointer', color: modoSel ? '#0d0d0d' : 'var(--dim)', background: modoSel ? OK : 'var(--glass-bg)', border: `1px solid ${modoSel ? 'transparent' : 'var(--glass-border)'}` }}><Check size={11} />{modoSel ? 'Sair da seleção' : 'Selecionar em massa'}</button>
       </>} />
@@ -1154,6 +1161,153 @@ function LinhaDoTempo({ eventos }) {
           })}
         </div>
       )}
+    </div>
+  )
+}
+
+/* ---------- O que o cliente avalia (sub-notas derivadas) ---------- */
+function OQueAvalia({ dados }) {
+  const dims = dados?.dimensoes || []
+  const temDados = dims.some((d) => d.media != null)
+  const ICON = { qualidade: Package, atendimento: MessageSquare, entrega: TrendingUp }
+  return (
+    <div className="glass" style={{ padding: 16 }}>
+      <Secao icon={Check} cor={OK} titulo="O que o cliente avalia · por dimensão" extra={<>
+        <Badge c="var(--faint)" bg="rgba(255,255,255,.05)">DERIVADO DO QUE ESCREVERAM</Badge>
+        <div style={{ flex: 1 }} />
+      </>} />
+      {!temDados ? <Empty icon={Check} texto="Conforme os clientes escrevem sobre qualidade, atendimento e entrega, as sub-notas por dimensão aparecem aqui — separando o que é do produto e o que é da logística." /> : (
+        <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 16, alignItems: 'center' }}>
+          <div>
+            {dims.map((d) => {
+              const Ic = ICON[d.chave] || Check
+              const cor = d.media == null ? 'var(--faint)' : d.media >= 4.7 ? OK : d.media >= 4 ? WARN : DANGER
+              const tend = d.tendencia
+              return (
+                <div key={d.chave} style={{ marginBottom: 11 }}>
+                  <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 4 }}>
+                    <Ic size={12} style={{ color: cor }} />
+                    <span style={{ fontSize: 10.5, color: 'var(--dim)' }}>{d.rotulo}</span>
+                    <span className="num" style={{ fontSize: 8, color: 'var(--faint)' }}>· {d.n} menç.</span>
+                    <div style={{ flex: 1 }} />
+                    {tend != null && tend !== 0 && <Badge c={tend > 0 ? OK : DANGER} bg={tend > 0 ? 'rgba(47,217,141,.1)' : 'rgba(255,122,122,.1)'}>{tend > 0 ? '▲' : '▼'} {Math.abs(tend).toFixed(2)}</Badge>}
+                    <b className="num" style={{ fontSize: 13, color: cor, marginLeft: 6 }}>{d.media != null ? d.media.toFixed(2) : '—'}</b>
+                  </div>
+                  <div style={{ height: 8, borderRadius: 4, background: 'rgba(255,255,255,.05)', overflow: 'hidden' }}><div style={{ width: `${d.media != null ? (d.media / 5 * 100) : 0}%`, height: '100%', borderRadius: 4, background: d.media >= 4.7 ? `linear-gradient(90deg,rgba(47,217,141,.5),${OK})` : cor }} /></div>
+                </div>
+              )
+            })}
+          </div>
+          <div className="glass" style={{ padding: '11px 13px', borderRadius: 11, borderColor: dados.atraso_mencoes ? 'rgba(224,162,60,.3)' : 'rgba(47,217,141,.25)' }}>
+            {dados.atraso_mencoes ? (
+              <>
+                <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}><AlertTriangle size={12} style={{ color: WARN }} /><b style={{ fontSize: 9.5, color: WARN }}>Entrega mexe na nota</b></div>
+                <div style={{ fontSize: 10, color: 'var(--dim)', lineHeight: 1.45 }}><b className="num" style={{ color: 'var(--text)' }}>{dados.atraso_mencoes}</b> menção{dados.atraso_mencoes > 1 ? 'ões' : ''} a atraso {dados.atraso_mencoes_30d ? <>({dados.atraso_mencoes_30d} nos últimos 30 dias) </> : ''}em avaliações de nota baixa. Muitas vezes não é o produto — é a rota. Um aviso de prazo no anúncio protege a nota.</div>
+              </>
+            ) : (
+              <>
+                <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}><Check size={12} style={{ color: OK }} /><b style={{ fontSize: 9.5, color: OK }}>Entrega sob controle</b></div>
+                <div style={{ fontSize: 10, color: 'var(--dim)', lineHeight: 1.45 }}>Nenhuma reclamação de atraso puxando a nota para baixo no período. A logística está ajudando a reputação.</div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ---------- Vitrine de prova social ---------- */
+function Vitrine({ itens, notify }) {
+  const [arte, setArte] = useState(null)
+  const lista = itens || []
+  const copiar = (it) => {
+    const txt = `"${it.comentario}"\n— ${it.buyer}, sobre ${it.produto} ${'★'.repeat(it.nota)}\n\n@sostrass · acessórios e pedrarias`
+    try {
+      if (navigator.clipboard) navigator.clipboard.writeText(txt)
+      else { const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta) }
+      notify('Depoimento copiado — cole no seu post.', 'ok')
+    } catch (e) { notify('Não consegui copiar automaticamente.', 'warn') }
+  }
+  return (
+    <div className="glass" style={{ padding: 16, borderColor: 'rgba(242,194,0,.3)' }}>
+      <Secao icon={Star} cor={GOLD} titulo="Vitrine de prova social · melhores avaliações curadas" extra={<>
+        <Badge c={GOLD} bg="rgba(242,194,0,.12)">TRANSFORME 5★ EM CONTEÚDO</Badge>
+        <div style={{ flex: 1 }} />
+      </>} />
+      <div style={{ fontSize: 9, color: 'var(--faint)', marginBottom: 12 }}>O agente separa as 5★ mais fortes (com foto ou vídeo primeiro) — prontas para virar arte de post ou depoimento pro anúncio.</div>
+      {lista.length === 0 ? <Empty icon={Star} texto="Assim que chegarem avaliações 5★ com comentário, as melhores aparecem aqui — com botão pra gerar arte pra redes e copiar o depoimento." /> : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 10 }}>
+          {lista.map((it) => (
+            <div key={it.comment_id} className="glass" style={{ padding: 12, borderRadius: 12, display: 'flex', flexDirection: 'column' }}>
+              <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7 }}>
+                <div style={{ width: 34, height: 34, borderRadius: 8, overflow: 'hidden', flex: 'none', background: 'linear-gradient(135deg,rgba(242,194,0,.3),rgba(160,107,232,.2))', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{it.imagem || it.produto_imagem ? <img src={it.imagem || it.produto_imagem} alt="" loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Package size={15} style={{ color: 'rgba(255,255,255,.8)' }} />}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Estrelas n={it.nota} size={9} /><b style={{ fontSize: 10, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.produto}</b></div>
+                  <div className="num" style={{ fontSize: 8, color: 'var(--faint)' }}>{it.buyer}{it.quando ? ` · ${tempoRel(it.quando)}` : ''}</div>
+                </div>
+                {it.tem_video ? <Badge c={PURPLE} bg="rgba(160,107,232,.12)">VÍDEO</Badge> : it.imagem ? <Badge c={PURPLE} bg="rgba(160,107,232,.12)"><ImageIcon size={8} />FOTO</Badge> : null}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--dim)', fontStyle: 'italic', lineHeight: 1.5, flex: 1, marginBottom: 9 }}>"{it.comentario.length > 150 ? it.comentario.slice(0, 150) + '…' : it.comentario}"</div>
+              <div className="row" style={{ display: 'flex', gap: 6 }}>
+                <button onClick={() => setArte(it)} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 9.5, fontWeight: 800, padding: '6px 11px', borderRadius: 8, cursor: 'pointer', color: '#0d0d0d', border: 'none', background: GOLD }}><ImageIcon size={11} />Gerar arte p/ redes</button>
+                <button onClick={() => copiar(it)} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 9.5, fontWeight: 700, padding: '6px 11px', borderRadius: 8, cursor: 'pointer', color: 'var(--dim)', background: 'var(--glass-bg)', border: '1px solid var(--glass-border)' }}>Copiar texto</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {arte && <ArteModal it={arte} onFechar={() => setArte(null)} notify={notify} />}
+    </div>
+  )
+}
+
+/* modal com a arte (card SVG pronto pra print/story) */
+function ArteModal({ it, onFechar, notify }) {
+  const quote = it.comentario.length > 180 ? it.comentario.slice(0, 180) + '…' : it.comentario
+  const linhas = []
+  { // quebra o depoimento em linhas para caber no SVG
+    const palavras = quote.split(' '); let atual = ''
+    palavras.forEach((w) => { if ((atual + ' ' + w).length > 30) { linhas.push(atual); atual = w } else { atual = atual ? atual + ' ' + w : w } })
+    if (atual) linhas.push(atual)
+  }
+  const copiar = () => {
+    const txt = `"${it.comentario}"\n— ${it.buyer}, sobre ${it.produto} ${'★'.repeat(it.nota)}\n\n@sostrass · acessórios e pedrarias`
+    try { if (navigator.clipboard) navigator.clipboard.writeText(txt); notify('Depoimento copiado.', 'ok') } catch (e) { notify('Não consegui copiar.', 'warn') }
+  }
+  return (
+    <div onClick={onFechar} style={{ position: 'fixed', inset: 0, background: 'rgba(5,3,8,.82)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)', zIndex: 65, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 18 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: 'min(460px,96vw)', background: 'var(--surface)', borderRadius: 18, border: '1px solid var(--glass-border)', overflow: 'hidden', boxShadow: '0 40px 120px rgba(0,0,0,.6)' }}>
+        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '13px 16px', borderBottom: '1px solid var(--glass-border)' }}>
+          <ImageIcon size={16} style={{ color: GOLD }} />
+          <b className="serif" style={{ fontSize: 15, flex: 1 }}>Arte pra redes</b>
+          <X size={16} style={{ color: 'var(--dim)', cursor: 'pointer' }} onClick={onFechar} />
+        </div>
+        <div style={{ padding: 16 }}>
+          {/* card quadrado estilo story/post */}
+          <svg viewBox="0 0 400 400" width="100%" style={{ display: 'block', borderRadius: 14, background: '#0f0a14' }}>
+            <defs>
+              <linearGradient id="artbg" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor="#1d1426" /><stop offset="100%" stopColor="#0f0a14" /></linearGradient>
+              <linearGradient id="artac" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stopColor="#7b2a8c" /><stop offset="100%" stopColor="#d6007f" /></linearGradient>
+            </defs>
+            <rect width="400" height="400" fill="url(#artbg)" />
+            <rect x="0" y="0" width="400" height="6" fill="url(#artac)" />
+            <text x="34" y="70" fill={GOLD} fontSize="30" fontFamily="Georgia,serif" fontStyle="italic">★★★★★</text>
+            {linhas.slice(0, 7).map((l, i) => (
+              <text key={i} x="34" y={120 + i * 30} fill="#F6EEF6" fontSize="19" fontFamily="Georgia,serif">{l}</text>
+            ))}
+            <text x="34" y={140 + Math.min(linhas.length, 7) * 30} fill="#d6007f" fontSize="15" fontWeight="bold" fontFamily="sans-serif">— {it.buyer}</text>
+            <text x="34" y={162 + Math.min(linhas.length, 7) * 30} fill="#9b8fa6" fontSize="12" fontFamily="sans-serif">sobre {it.produto.length > 34 ? it.produto.slice(0, 34) + '…' : it.produto}</text>
+            <text x="34" y="376" fill="#F2C200" fontSize="15" fontWeight="bold" fontFamily="sans-serif">@sostrass</text>
+            <text x="128" y="376" fill="#6a5f73" fontSize="12" fontFamily="sans-serif">acessórios e pedrarias</text>
+          </svg>
+          <div style={{ fontSize: 9.5, color: 'var(--faint)', textAlign: 'center', margin: '10px 0' }}>Tire um print deste card para postar no story/feed — ou copie o texto para a legenda.</div>
+          <div className="row" style={{ display: 'flex', gap: 8 }}>
+            <button onClick={copiar} className="row" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 11, fontWeight: 800, padding: '9px 14px', borderRadius: 10, cursor: 'pointer', color: '#0d0d0d', border: 'none', background: GOLD, flex: 1 }}>Copiar texto pra legenda</button>
+            <button onClick={onFechar} style={{ fontSize: 11, fontWeight: 700, padding: '9px 14px', borderRadius: 10, cursor: 'pointer', color: 'var(--dim)', background: 'var(--glass-bg)', border: '1px solid var(--glass-border)' }}>Fechar</button>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

@@ -1,5 +1,7 @@
 import { Component, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  Lock,
+  BarChart3,
   Rocket, Star, Activity, ShoppingBag, Tag, Megaphone, Package,
   Plus, X, Pin, PinOff, Play, Square, Loader2, Zap, Clock, CheckCircle2,
   AlertTriangle, Plug, RefreshCw, Wand2, ChevronRight, ChevronLeft, Filter, Flame,
@@ -161,8 +163,8 @@ export default function Shopee() {
       {aba === 'avaliacoes' && <ShopeeReputacao conectado={status?.ok} notify={notify} />}
       {aba === 'qa' && <Perguntas conectado={status?.ok} notify={notify} />}
       {aba === 'catalogo' && <Divergencia conectado={status?.ok} notify={notify} />}
-      {aba === 'promocoes' && <Promocoes conectado={status?.ok} notify={notify} />}
-      {aba === 'motor' && <MotorPromocoes conectado={status?.ok} notify={notify} />}
+      {aba === 'promocoes' && <Promocoes conectado={status?.ok} notify={notify} irParaMotor={() => setAba('motor')} />}
+      {aba === 'motor' && <AgenteOfertas conectado={status?.ok} notify={notify} />}
       {aba === 'ads' && <Ads conectado={status?.ok} />}
       {aba === 'pedidos' && <Pedidos conectado={status?.ok} />}
       {aba === 'devolucoes' && <Devolucoes conectado={status?.ok} />}
@@ -3905,23 +3907,684 @@ function Quebra({ label, v, neg, forte, cor }) {
 /* ----------------------------- PROMOÇÕES --------------------------------- */
 const toEpoch = (s) => (s ? Math.floor(new Date(s).getTime() / 1000) : 0)
 
-function Promocoes({ conectado, notify }) {
-  const [sub, setSub] = useState('visao')
+function Promocoes({ conectado, notify, irParaMotor }) {
+  const [sub, setSub] = useState('central')
   if (!conectado) return <Vazio txt="Conecte a loja Shopee para gerenciar promoções." />
   return (
     <div className="space-y-3">
       <div className="flex gap-1.5 flex-wrap">
-        {[['visao', 'Visão geral'], ['cupons', 'Cupons'], ['descontos', 'Descontos'], ['bundle', 'Bundle'], ['addon', 'Add-on'], ['flash', 'Flash Sale']].map(([id, t]) => (
+        {[['central', 'Central'], ['descontos', 'Descontos'], ['cupons', 'Cupons'], ['bundle', 'Bundle'], ['addon', 'Add-on'], ['flash', 'Flash Sale'], ['visao', 'Relatório']].map(([id, t]) => (
           <button key={id} onClick={() => setSub(id)} className="text-xs px-3 py-1.5 rounded-lg font-medium"
                   style={sub === id ? { background: LARANJA, color: '#fff' } : { background: 'var(--glass)', color: 'var(--text-dim)', border: '1px solid var(--glass-border)' }}>{t}</button>
         ))}
       </div>
+      {sub === 'central' && <CentralPromo notify={notify} irCriar={setSub} irParaMotor={irParaMotor} />}
       {sub === 'visao' && <DashboardPromo notify={notify} />}
       {sub === 'cupons' && <Cupons notify={notify} />}
       {sub === 'descontos' && <Descontos notify={notify} />}
       {sub === 'bundle' && <Bundles notify={notify} />}
       {sub === 'addon' && <Addons notify={notify} />}
       {sub === 'flash' && <FlashSale notify={notify} />}
+    </div>
+  )
+}
+
+/* ============================ CENTRAL DE PROMOÇÕES (MAX · N1) ============================ */
+const PROMO = { OK: '#2FD98D', WARN: '#E0A23C', DANGER: '#FF7A7A', SHOPEE: '#EE4D2D', PURPLE: '#a06be8', BLUE: '#5B8DEF', GOLD: '#F2C200', TEAL: '#2FC9D9' }
+const TAG_PROMO = {
+  desconto: ['DESCONTO', '#fff', PROMO.SHOPEE], flash: ['FLASH', '#fff', PROMO.PURPLE_A || '#d6007f'],
+  cupom: ['CUPOM', '#0d0d0d', PROMO.GOLD], bundle: ['LEVE+', '#fff', PROMO.PURPLE],
+  addon: ['ADD-ON', '#0d0d0d', PROMO.TEAL], seguidor: ['SEGUIDOR', '#fff', PROMO.BLUE], outras: ['OFERTA', '#fff', 'rgba(255,255,255,.3)'],
+}
+function PBadge({ children, c, bg }) {
+  return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 8.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.5px', padding: '3px 8px', borderRadius: 99, whiteSpace: 'nowrap', color: c, background: bg }}>{children}</span>
+}
+function PSecao({ icon: Ic, cor, titulo, extra }) {
+  return (
+    <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+      <span style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '.6px', fontWeight: 800, color: 'var(--faint)', display: 'inline-flex', alignItems: 'center', gap: 7 }}>{Ic && <Ic size={13} style={{ color: cor }} />}{titulo}</span>
+      {extra}
+    </div>
+  )
+}
+function PRing({ size = 46, val = 0, cor, w = 4.5, children }) {
+  const r = (size - w) / 2, c = 2 * Math.PI * r
+  return (
+    <div style={{ position: 'relative', width: size, height: size }}>
+      <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
+        <circle cx={size / 2} cy={size / 2} r={r} fill="var(--surface-2, #1d1426)" stroke="rgba(255,255,255,.08)" strokeWidth={w} />
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={cor} strokeWidth={w} strokeLinecap="round" strokeDasharray={c} strokeDashoffset={c * (1 - Math.min(1, Math.max(0, val)))} style={{ transition: 'stroke-dashoffset .9s linear' }} />
+      </svg>
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>{children}</div>
+    </div>
+  )
+}
+function PKpi({ label, value, sub, cor, borda }) {
+  return (
+    <div className="glass" style={{ padding: '10px 11px', borderRadius: 13, ...(borda ? { borderColor: borda } : {}) }}>
+      <div style={{ fontSize: 6.5, textTransform: 'uppercase', fontWeight: 800, letterSpacing: '.5px', color: 'var(--faint)' }}>{label}</div>
+      <div className="num" style={{ fontSize: 16, fontWeight: 800, color: cor || 'var(--text)', lineHeight: 1.15, marginTop: 2 }}>{value}</div>
+      <div style={{ fontSize: 7, color: 'var(--faint)' }}>{sub}</div>
+    </div>
+  )
+}
+
+function CentralPromo({ notify, irCriar, irParaMotor }) {
+  const [p, setP] = useState(null)
+  const [erro, setErro] = useState(null)
+  const [sync, setSync] = useState(false)
+  const [busca, setBusca] = useState('')
+  const [filtro, setFiltro] = useState('todos')
+  const [pagina, setPagina] = useState(1)
+  const [seletor, setSeletor] = useState(null)
+  const agora = useAgora(30000)
+
+  const carregar = (forcar) => { setErro(null); return api.shopeePromoPainel(forcar).then(setP).catch((e) => setErro(e.message)) }
+  useEffect(() => { carregar() }, [])
+  const sincronizar = async () => { setSync(true); try { await carregar(true) } finally { setSync(false) } }
+
+  const k = p?.kpis || {}
+  const motoresOn = (p?.config?.ativo)
+  const termo = p?.termometro || {}
+
+  const execInsight = async (ins) => {
+    if (ins.acao === 'renovar' && ins.ref?.tipo && ins.ref?.id) {
+      try { await api.shopeeCampanhaRepetir(ins.ref.tipo, ins.ref.id); notify('Campanha renovada — nova janela criada.', 'ok'); carregar(true) }
+      catch (e) { notify(e.message, 'danger') }
+    } else if (ins.acao === 'agendar_flash') { irCriar('flash') }
+    else if (ins.acao === 'relampago') { irParaMotor && irParaMotor() }
+  }
+
+  // vitrine filtrada + paginada
+  const PP = 10
+  const vitrineFiltrada = (p?.vitrine || []).filter((v) => {
+    if (filtro === 'terminando') { const ms = v.fim ? v.fim * 1000 - agora : Infinity; return ms <= 24 * 3600000 }
+    if (filtro !== 'todos') return v.tipo === filtro
+    return true
+  }).filter((v) => !busca || (v.nome || '').toLowerCase().includes(busca.toLowerCase()))
+  const totalPag = Math.max(1, Math.ceil(vitrineFiltrada.length / PP))
+  const vitrinePag = vitrineFiltrada.slice((pagina - 1) * PP, pagina * PP)
+
+  return (
+    <div className="space-y-3">
+      {/* COMMAND BAR */}
+      <div className="glass" style={{ padding: '15px 18px', border: '1px solid transparent', background: 'linear-gradient(var(--surface),var(--surface)) padding-box,linear-gradient(110deg,rgba(238,77,45,.5),rgba(214,0,127,.35),rgba(160,107,232,.28)) border-box' }}>
+        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ width: 44, height: 44, borderRadius: 13, background: `linear-gradient(145deg,${PROMO.SHOPEE},#a52c15)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none', boxShadow: '0 6px 22px rgba(238,77,45,.4)' }}><Tag size={22} color="#fff" /></div>
+          <div>
+            <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <b className="serif" style={{ fontSize: 19 }}>Central de Promoções</b>
+              <PBadge c="#fff" bg={PROMO.SHOPEE}>SHOPEE</PBadge>
+              <PBadge c="#e9dbfb" bg="rgba(160,107,232,.2)">6 MOTORES</PBadge>
+              <PBadge c={PROMO.OK} bg="rgba(47,217,141,.12)">PISO PROTEGIDO</PBadge>
+              <PBadge c={PROMO.BLUE} bg="rgba(91,141,239,.12)">🔒 TRAVA ANTI-DUPLICAÇÃO</PBadge>
+            </div>
+            <div style={{ fontSize: 10, color: 'var(--dim)' }}>Descontos · relâmpago · cupons · leve+ por menos · add-on · prêmio de seguidor — criados, vigiados e renovados sem parar</div>
+          </div>
+          <div style={{ flex: 1 }} />
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: 7, textTransform: 'uppercase', fontWeight: 800, letterSpacing: '.5px', color: 'var(--faint)' }}>GMV em oferta · 30d</div>
+            <b className="num serif" style={{ fontSize: 18, color: PROMO.OK }}>{p ? fmtBRL(k.gmv_promo_30d || 0) : '—'}</b>
+            <div className="num" style={{ fontSize: 8, color: 'var(--faint)' }}>{p ? `${k.vendas_promo_30d || 0} vendas` : 'carregando'}</div>
+          </div>
+          <div style={{ width: 1, height: 30, background: 'var(--glass-border)' }} />
+          <button onClick={sincronizar} disabled={sync} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10.5, fontWeight: 700, padding: '8px 13px', borderRadius: 9, cursor: 'pointer', color: 'var(--dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)' }}>{sync ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}Sincronizar</button>
+          <button onClick={() => irCriar('descontos')} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10.5, fontWeight: 800, padding: '8px 14px', borderRadius: 9, cursor: 'pointer', color: '#fff', border: 'none', background: `linear-gradient(135deg,${PROMO.SHOPEE},#c0341c)` }}><Plus size={13} />Nova campanha</button>
+          <button onClick={() => irParaMotor && irParaMotor()} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10.5, fontWeight: 800, padding: '8px 14px', borderRadius: 9, cursor: 'pointer', color: '#fff', border: 'none', background: 'linear-gradient(135deg,#7b2a8c,#d6007f)' }}><Sparkles size={13} />Agente de Ofertas</button>
+          <span className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}><span style={{ fontSize: 9.5, fontWeight: 800, color: motoresOn ? PROMO.OK : 'var(--faint)' }}>{motoresOn ? 'MOTOR LIGADO' : 'DESLIGADO'}</span><span onClick={async () => { const novo = !motoresOn; setP((pp) => pp ? { ...pp, config: { ...pp.config, ativo: novo } } : pp); try { await api.shopeePromoConfigSalvar({ ...(p?.config || {}), ativo: novo }); notify(novo ? 'Motor de ofertas ligado.' : 'Motor de ofertas desligado.', 'ok') } catch (e) { notify(e.message, 'danger'); carregar(true) } }} style={{ width: 36, height: 20, borderRadius: 99, position: 'relative', cursor: 'pointer', flex: 'none', background: motoresOn ? 'linear-gradient(90deg,#2FD98D,#1fae6e)' : 'rgba(255,255,255,.1)' }}><span style={{ position: 'absolute', top: 2, width: 16, height: 16, borderRadius: '50%', background: '#fff', left: motoresOn ? 18 : 2, transition: 'left .2s' }} /></span></span>
+        </div>
+        {p && (
+          <div className="row" style={{ display: 'flex', gap: 15, marginTop: 10, fontSize: 9.5, color: 'var(--faint)', flexWrap: 'wrap' }}>
+            <span>trava: <b style={{ color: PROMO.BLUE }}>{k.itens_em_oferta || 0} itens em oferta ficam fora de novas rodadas até saírem</b></span>
+            <span>motor: <b style={{ color: motoresOn ? PROMO.OK : 'var(--faint)' }}>{motoresOn ? 'ligado' : 'desligado'}</b></span>
+            <span>expiram 24h: <b className="num" style={{ color: PROMO.WARN }}>{k.expiram_24h || 0}</b></span>
+            {k.cobertura_pct != null && <span>cobertura: <b className="num" style={{ color: 'var(--text)' }}>{k.cobertura_pct}%</b> do catálogo</span>}
+          </div>
+        )}
+      </div>
+
+      {erro && <div className="glass" style={{ padding: 14, borderColor: 'rgba(255,122,122,.3)', fontSize: 12, color: PROMO.DANGER }}>Não consegui carregar o painel: {erro}</div>}
+
+      {/* TERMÔMETRO + INSIGHTS */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.7fr', gap: 12 }}>
+        <Termometro termo={termo} onRelampago={() => irParaMotor && irParaMotor()} />
+        <InsightsPromo insights={p?.insights} onAcao={execInsight} carregando={!p} />
+      </div>
+
+      {/* 12 KPIs */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12,1fr)', gap: 8 }}>
+        <PKpi label="Ativas" value={k.ativas ?? '—'} sub="campanhas" cor={PROMO.SHOPEE} borda="rgba(238,77,45,.4)" />
+        <PKpi label="Agendadas" value={k.agendadas ?? '—'} sub="programadas" />
+        <PKpi label="Em oferta" value={k.itens_em_oferta ?? '—'} sub="itens" />
+        <PKpi label="Cobertura" value={k.cobertura_pct != null ? `${k.cobertura_pct}%` : '—'} sub="do catálogo" borda="rgba(91,141,239,.4)" cor={PROMO.BLUE} />
+        <PKpi label="Vendas promo" value={k.vendas_promo_30d ?? '—'} sub="30 dias" cor={PROMO.OK} />
+        <PKpi label="GMV promo" value={p ? fmtBRLcurto(k.gmv_promo_30d || 0) : '—'} sub="30 dias" cor={PROMO.OK} />
+        <PKpi label="Ticket promo" value={k.ticket_medio_promo != null ? fmtBRLcurto(k.ticket_medio_promo) : '—'} sub="médio" />
+        <PKpi label="Desc. médio" value={k.desconto_medio != null ? `${k.desconto_medio}%` : '—'} sub="ponderado" />
+        <PKpi label="Piso" value={k.piso_margem != null ? `${Math.round(k.piso_margem)}%` : '—'} sub="protegido" cor={PROMO.OK} borda="rgba(47,217,141,.35)" />
+        <PKpi label="Motor criou" value={k.guardiao_reduzidos_30d ?? '—'} sub="campanhas 30d" cor={PROMO.PURPLE} />
+        <PKpi label="Expiram 24h" value={k.expiram_24h ?? '—'} sub="campanhas" cor={PROMO.WARN} borda="rgba(224,162,60,.4)" />
+        <PKpi label="Slots Flash" value={k.slots_flash != null ? k.slots_flash : '—'} sub="livres 7d" cor={PROMO.PURPLE_A || '#d6007f'} />
+      </div>
+
+      {/* AGENDA */}
+      {p && <AgendaPromo campanhas={p.agenda?.campanhas || []} agora={agora} />}
+
+      {/* VITRINE DE PRODUTOS EM CAMPANHA */}
+      <div className="glass" style={{ padding: 16, borderColor: 'rgba(238,77,45,.35)' }}>
+        <PSecao icon={Package} cor={PROMO.SHOPEE} titulo="Produtos em campanha · ao vivo" extra={<>
+          <PBadge c="#fff" bg={PROMO.SHOPEE}>{k.itens_em_oferta || 0} ITENS</PBadge>
+          <PBadge c={PROMO.BLUE} bg="rgba(91,141,239,.12)">🔒 NÃO REPETEM ATÉ SAIR</PBadge>
+          <div style={{ flex: 1 }} />
+          {['todos', 'desconto', 'flash', 'terminando'].map((f) => <span key={f} onClick={() => { setFiltro(f); setPagina(1) }} style={{ fontSize: 10, fontWeight: 700, padding: '5px 11px', borderRadius: 99, cursor: 'pointer', color: filtro === f ? '#fff' : 'var(--dim)', background: filtro === f ? 'linear-gradient(135deg,#7b2a8c,#d6007f)' : 'rgba(255,255,255,.04)', border: `1px solid ${filtro === f ? 'transparent' : 'var(--glass-border)'}` }}>{f === 'todos' ? 'Todos' : f === 'terminando' ? 'Terminando' : TAG_PROMO[f][0]}</span>)}
+          <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'rgba(0,0,0,.25)', border: '1px solid var(--glass-border)', borderRadius: 9, padding: '4px 9px' }}><Search size={11} style={{ color: 'var(--faint)' }} /><input value={busca} onChange={(e) => { setBusca(e.target.value); setPagina(1) }} placeholder="buscar" style={{ background: 'transparent', border: 'none', outline: 'none', color: 'var(--text)', fontSize: 10.5, width: 90 }} /></div>
+          <button onClick={() => setSeletor({ modo: 'desconto' })} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 800, padding: '6px 12px', borderRadius: 9, cursor: 'pointer', color: '#fff', border: 'none', background: `linear-gradient(135deg,${PROMO.SHOPEE},#c0341c)` }}><Plus size={12} />Inserir produtos</button>
+        </>} />
+        {!p ? <div style={{ fontSize: 11, color: 'var(--faint)', padding: 20, textAlign: 'center' }}>Carregando produtos em campanha…</div>
+          : vitrineFiltrada.length === 0 ? <div style={{ fontSize: 11, color: 'var(--faint)', padding: 20, textAlign: 'center' }}>Nenhum produto em desconto ou flash ativo agora. Crie uma campanha ou deixe o Agente de Ofertas trabalhar — os itens aparecem aqui com foto e temporizador.</div>
+            : (
+              <>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 11 }}>
+                  {vitrinePag.map((v) => <VitrineCard key={v.item_id} v={v} agora={agora} />)}
+                </div>
+                {totalPag > 1 && (
+                  <div className="row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, marginTop: 13 }}>
+                    <button onClick={() => setPagina((n) => Math.max(1, n - 1))} disabled={pagina <= 1} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, padding: '5px 11px', borderRadius: 8, cursor: pagina <= 1 ? 'default' : 'pointer', color: 'var(--dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)', opacity: pagina <= 1 ? .4 : 1 }}><ChevronLeft size={12} />Anterior</button>
+                    <span className="num" style={{ fontSize: 10, color: 'var(--faint)' }}>{pagina} / {totalPag}</span>
+                    <button onClick={() => setPagina((n) => Math.min(totalPag, n + 1))} disabled={pagina >= totalPag} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, padding: '5px 11px', borderRadius: 8, cursor: pagina >= totalPag ? 'default' : 'pointer', color: 'var(--dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)', opacity: pagina >= totalPag ? .4 : 1 }}>Próximo<ChevronRight size={12} /></button>
+                  </div>
+                )}
+              </>
+            )}
+      </div>
+
+      {/* PLANNER DE FLASH */}
+      {p && <PlannerFlash agenda={p.agenda?.campanhas || []} agora={agora} onAgendar={() => irCriar('flash')} notify={notify} />}
+
+      {/* 6 MOTORES */}
+      {p && <MotoresPromo motores={p.motores || []} irCriar={irCriar} irParaMotor={irParaMotor} />}
+
+      {/* CAMPANHAS ATIVAS COM AÇÕES */}
+      {p && <CampanhasAtivas campanhas={p.campanhas || []} agora={agora} notify={notify} onMudou={() => carregar(true)} />}
+
+      {seletor && <SeletorProdutos modo={seletor.modo} onFechar={() => setSeletor(null)} notify={notify} onCriado={() => { setSeletor(null); carregar(true) }} />}
+    </div>
+  )
+}
+
+/* -------- Termômetro de vendas -------- */
+function Termometro({ termo, onRelampago }) {
+  const temDados = termo && (termo.atual != null && termo.base != null)
+  const pct = temDados && termo.base ? Math.round((termo.base - termo.atual) / termo.base * 100) : null
+  const emQueda = !!termo?.queda
+  const zonaCor = pct == null ? 'var(--faint)' : pct >= (termo.limiar || 30) ? PROMO.DANGER : pct >= 12 ? PROMO.WARN : PROMO.OK
+  const zonaTxt = pct == null ? 'sem base' : pct >= (termo.limiar || 30) ? 'EM QUEDA' : pct >= 12 ? 'ATENÇÃO' : 'SAUDÁVEL'
+  // ângulo do ponteiro: -60% (esq) .. 0 (centro) .. saudável (dir)
+  const ang = pct == null ? 0 : Math.max(-90, Math.min(90, (pct / (termo.limiar || 30)) * -90 + 0))
+  return (
+    <div className="glass" style={{ padding: 16, borderColor: 'rgba(91,141,239,.4)', background: 'linear-gradient(150deg,rgba(91,141,239,.06),var(--glass))' }}>
+      <PSecao icon={Activity} cor={PROMO.BLUE} titulo="Termômetro de vendas · ao vivo" extra={<><div style={{ flex: 1 }} /><PBadge c={zonaCor} bg="rgba(255,255,255,.05)">{zonaTxt}</PBadge></>} />
+      {!temDados ? (
+        <div style={{ fontSize: 10.5, color: 'var(--dim)', padding: '14px 4px', lineHeight: 1.5 }}>{termo?.msg || 'Assim que houver histórico de pedidos suficiente, o termômetro compara o ritmo atual com o normal e sinaliza quedas.'}</div>
+      ) : (
+        <>
+          <div className="row" style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+            <div style={{ position: 'relative', width: 128, height: 80, flex: 'none' }}>
+              <svg width="128" height="80" viewBox="0 0 128 80">
+                <path d="M10,74 A54,54 0 0 1 40,26" fill="none" stroke="rgba(255,122,122,.7)" strokeWidth="10" strokeLinecap="round" />
+                <path d="M46,22 A54,54 0 0 1 82,22" fill="none" stroke="rgba(224,162,60,.7)" strokeWidth="10" strokeLinecap="round" />
+                <path d="M88,26 A54,54 0 0 1 118,74" fill="none" stroke="rgba(47,217,141,.7)" strokeWidth="10" strokeLinecap="round" />
+                <g transform={`rotate(${ang} 64 74)`}><line x1="64" y1="74" x2="64" y2="30" stroke="#fff" strokeWidth="3" strokeLinecap="round" /></g>
+                <circle cx="64" cy="74" r="5" fill="#fff" />
+              </svg>
+            </div>
+            <div style={{ flex: 1 }}>
+              <div className="row" style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4 }}><b className="num serif" style={{ fontSize: 23, color: zonaCor }}>{pct > 0 ? '-' : '+'}{Math.abs(pct)}%</b><span style={{ fontSize: 9, color: 'var(--dim)' }}>vs ritmo normal</span></div>
+              <div style={{ fontSize: 9, color: 'var(--dim)', lineHeight: 1.45 }}>Ritmo agora: <b className="num" style={{ color: 'var(--text)' }}>{termo.atual}</b> · base: <b className="num" style={{ color: 'var(--text)' }}>{termo.base}</b> ({termo.rotulo || 'dia'}). Gatilho do socorro: <b className="num" style={{ color: PROMO.WARN }}>-{termo.limiar || 30}%</b>.</div>
+            </div>
+          </div>
+          <button onClick={onRelampago} className="row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, width: '100%', marginTop: 11, fontSize: 10.5, fontWeight: 800, padding: '9px', borderRadius: 9, cursor: 'pointer', color: emQueda ? '#fff' : '#d6007f', border: emQueda ? 'none' : '1px solid rgba(214,0,127,.45)', background: emQueda ? 'linear-gradient(135deg,#7b2a8c,#d6007f)' : 'transparent' }}><Zap size={13} />{emQueda ? 'Vendas caindo — disparar ação relâmpago' : 'Disparar ação relâmpago'}</button>
+        </>
+      )}
+    </div>
+  )
+}
+
+/* -------- Insights proativos -------- */
+function InsightsPromo({ insights, onAcao, carregando }) {
+  const CORES = { warn: PROMO.WARN, accent: '#d6007f', gold: PROMO.GOLD, purple: PROMO.PURPLE, danger: PROMO.DANGER, blue: PROMO.BLUE }
+  const lista = insights || []
+  return (
+    <div className="glass" style={{ padding: 16, border: '1px solid transparent', background: 'linear-gradient(var(--surface),var(--surface)) padding-box,linear-gradient(110deg,rgba(160,107,232,.4),rgba(242,194,0,.3),rgba(238,77,45,.3)) border-box' }}>
+      <PSecao icon={Sparkles} cor={PROMO.PURPLE} titulo="Insights do agente · ação em 1 clique" extra={<><div style={{ flex: 1 }} /><span className="num" style={{ fontSize: 9, color: 'var(--faint)' }}>{lista.length} achados</span></>} />
+      {carregando ? <div style={{ fontSize: 11, color: 'var(--faint)', padding: 16, textAlign: 'center' }}>Analisando campanhas e vendas…</div>
+        : lista.length === 0 ? <div style={{ fontSize: 11, color: 'var(--faint)', padding: 16, textAlign: 'center' }}>Nada urgente agora — nenhuma campanha expirando, sem queda de vendas e sem slots ociosos. O agente avisa aqui quando houver uma boa jogada.</div>
+          : (
+            <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(4, lista.length)},1fr)`, gap: 9 }}>
+              {lista.map((ins, i) => {
+                const cor = CORES[ins.cor] || PROMO.PURPLE
+                return (
+                  <div key={i} style={{ background: `${cor}12`, border: `1px solid ${cor}55`, borderRadius: 12, padding: 11, display: 'flex', flexDirection: 'column' }}>
+                    <b style={{ fontSize: 10, color: cor, marginBottom: 5 }}>{ins.titulo}</b>
+                    <span style={{ fontSize: 9, color: 'var(--dim)', flex: 1, lineHeight: 1.4 }}>{ins.texto}</span>
+                    <button onClick={() => onAcao(ins)} className="row" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4, marginTop: 8, fontSize: 9.5, fontWeight: 800, padding: '6px 10px', borderRadius: 8, cursor: 'pointer', color: '#0d0d0d', border: 'none', background: cor }}>{ins.cta}</button>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+    </div>
+  )
+}
+
+/* -------- Card da vitrine (modelo aprovado: foto + anel timer + badges) -------- */
+function VitrineCard({ v, agora }) {
+  const t = TAG_PROMO[v.tipo] || TAG_PROMO.outras
+  const rem = v.fim ? v.fim * 1000 - agora : null
+  const frac = rem == null ? 0 : Math.min(1, Math.max(0, rem / (4 * 3600000)))
+  const ringCor = v.ao_vivo ? '#d6007f' : rem != null && rem < 3600000 ? PROMO.WARN : PROMO.SHOPEE
+  return (
+    <div className="glass lift" style={{ padding: 0, borderRadius: 14, overflow: 'visible', borderTop: `2.5px solid ${t[2]}`, position: 'relative' }}>
+      <div style={{ position: 'relative', height: 96, borderRadius: '12px 12px 0 0', overflow: 'hidden', background: 'radial-gradient(circle at 50% 38%, rgba(255,255,255,.07), rgba(0,0,0,.4))', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        {v.imagem ? <img src={v.imagem} alt="" loading="lazy" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} /> : <Package size={24} style={{ color: 'rgba(255,255,255,.55)' }} />}
+        <span style={{ position: 'absolute', top: 7, left: 7 }}><PBadge c={t[1]} bg={t[2]}>{v.desconto_pct ? `${v.ao_vivo ? '⚡ ' : ''}-${v.desconto_pct}%` : t[0]}</PBadge></span>
+        <span style={{ position: 'absolute', top: 7, right: 7 }}>{v.ao_vivo ? <PBadge c="#fff" bg="#d6007f">AO VIVO</PBadge> : <PBadge c="#fff" bg="rgba(0,0,0,.55)">🔒 TRAVA</PBadge>}</span>
+      </div>
+      <div style={{ position: 'absolute', top: 96 - 23, right: 8, zIndex: 2, borderRadius: '50%', boxShadow: '0 3px 10px rgba(0,0,0,.5)' }} title="tempo restante da campanha">
+        <PRing size={44} val={frac} cor={ringCor} w={4.5}>
+          <b className="num" style={{ fontSize: 9, color: ringCor, lineHeight: 1 }}>{rem == null ? '—' : fmtDur(rem)}</b>
+          <span style={{ fontSize: 4.5, textTransform: 'uppercase', letterSpacing: '.4px', fontWeight: 800, color: 'var(--faint)' }}>restante</span>
+        </PRing>
+      </div>
+      <div style={{ padding: '10px 12px 12px' }}>
+        <div title={v.nome} style={{ fontSize: 10, fontWeight: 600, lineHeight: 1.3, height: 26, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', paddingRight: 38 }}>{v.nome}</div>
+        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '5px 0 4px' }}>
+          {v.preco_original && v.preco_promo && v.preco_original !== v.preco_promo && <span className="num" style={{ fontSize: 9, color: 'var(--faint)', textDecoration: 'line-through' }}>{fmtBRL(v.preco_original)}</span>}
+          {v.preco_promo ? <b className="num" style={{ fontSize: 12, color: PROMO.OK }}>{fmtBRL(v.preco_promo)}</b> : <b className="num" style={{ fontSize: 11, color: PROMO.OK }}>em campanha</b>}
+        </div>
+        <div className="row num" style={{ display: 'flex', justifyContent: 'space-between', fontSize: 8, color: 'var(--faint)' }}>
+          <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '70%' }}>{v.campanha}</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* -------- Agenda (linha do tempo aprovada) -------- */
+function AgendaPromo({ campanhas, agora }) {
+  const start = agora - 2 * 3600000
+  const span = 24 * 3600000
+  const H = 3600000
+  const agoraPct = (agora - start) / span * 100
+  const CORES = { desconto: [PROMO.SHOPEE, '#c0341c'], flash: ['#d6007f', '#a3005f'], cupom: [PROMO.GOLD, '#c99b00'], bundle: [PROMO.PURPLE, '#7748b8'], addon: [PROMO.TEAL, '#1f9aa8'], seguidor: [PROMO.BLUE, '#3a6fd8'], outras: ['rgba(255,255,255,.2)', 'rgba(255,255,255,.15)'] }
+  const janela = campanhas.map((c) => {
+    const ini = (c.inicio || 0) * 1000, fim = (c.fim || 0) * 1000
+    if (fim < start || ini > start + span) return null
+    return { ...c, a: Math.max(start, ini), b: Math.min(start + span, fim), aReal: ini, bReal: fim }
+  }).filter(Boolean).slice(0, 8)
+  const picos = []
+  const base = new Date(agora); base.setMinutes(0, 0, 0)
+  for (let d = 0; d < 2; d++) [[11, 14], [19, 22]].forEach(([h1, h2]) => { const a = new Date(base); a.setDate(a.getDate() + d); a.setHours(h1); const b = new Date(base); b.setDate(b.getDate() + d); b.setHours(h2); picos.push([a.getTime(), b.getTime()]) })
+  const marcas = []; for (let i = 0; i <= 6; i++) marcas.push(new Date(start + i * 4 * H))
+  return (
+    <div className="glass" style={{ padding: 16 }}>
+      <PSecao icon={Calendar} cor={PROMO.PURPLE} titulo="Agenda de campanhas · linha do tempo" extra={<>
+        <PBadge c="#cfaef5" bg="rgba(160,107,232,.15)">2H DE PASSADO + 22H À FRENTE</PBadge>
+        <div style={{ flex: 1 }} />
+        {['desconto', 'cupom', 'flash', 'bundle', 'addon', 'seguidor'].map((tp) => <PBadge key={tp} c={TAG_PROMO[tp][1]} bg={TAG_PROMO[tp][2]}>{TAG_PROMO[tp][0]}</PBadge>)}
+      </>} />
+      {janela.length === 0 ? <div style={{ fontSize: 11, color: 'var(--faint)', padding: 16, textAlign: 'center' }}>Nenhuma campanha na janela das próximas horas. Crie uma ou deixe o agente preencher.</div> : (
+        <div style={{ position: 'relative', paddingTop: 10 }}>
+          <div style={{ position: 'absolute', left: `calc(126px + (100% - 126px) * ${agoraPct / 100})`, top: 10, bottom: 16, width: 2, background: 'linear-gradient(#F2C200,transparent)', zIndex: 3 }} />
+          <div className="num" style={{ position: 'absolute', left: `calc(126px + (100% - 126px) * ${agoraPct / 100})`, top: -4, transform: 'translateX(-50%)', fontSize: 7.5, color: PROMO.GOLD, fontWeight: 800, zIndex: 3 }}>AGORA</div>
+          <div style={{ display: 'grid', gap: 6 }}>
+            {janela.map((c, i) => {
+              const l = (c.a - start) / span * 100, r0 = (c.b - start) / span * 100, w = Math.max(1, r0 - l)
+              const g = CORES[c.tipo] || CORES.outras
+              return (
+                <div key={i} className="row" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span title={c.nome} style={{ width: 118, fontSize: 9, color: 'var(--dim)', flex: 'none', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.nome || TAG_PROMO[c.tipo][0]}</span>
+                  <div style={{ flex: 1, height: 16, position: 'relative', background: 'rgba(255,255,255,.03)', borderRadius: 8 }}>
+                    {picos.map(([a, b], j) => { const pl = Math.max(0, (a - start) / span * 100), pw = Math.min(100 - pl, (b - a) / span * 100); if (pl >= 100 || pw <= 0) return null; return <div key={j} style={{ position: 'absolute', left: `${pl}%`, width: `${pw}%`, top: 0, bottom: 0, background: 'rgba(160,107,232,.08)' }} /> })}
+                    <div title={c.nome} style={{ position: 'absolute', left: `${l}%`, width: `calc(${w}% - 2px)`, top: 0, bottom: 0, borderRadius: 8, background: `linear-gradient(90deg,${g[0]},${g[1]})`, opacity: .92, overflow: 'hidden', display: 'flex', alignItems: 'center', paddingLeft: 6 }}>{w >= 12 && <span style={{ fontSize: 7.5, fontWeight: 700, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.nome}</span>}</div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          <div className="row" style={{ display: 'flex', justifyContent: 'space-between', fontSize: 7.5, color: 'var(--faint)', marginTop: 6, paddingLeft: 126 }}>{marcas.map((m, i) => <span key={i} className="num">{String(m.getHours()).padStart(2, '0')}h</span>)}</div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* -------- 6 motores -------- */
+function MotoresPromo({ motores, irCriar, irParaMotor }) {
+  const CORES = { shopee: PROMO.SHOPEE, accent: '#d6007f', gold: PROMO.GOLD, purple: PROMO.PURPLE, teal: PROMO.TEAL, blue: PROMO.BLUE }
+  const CRIAR = { desconto: 'descontos', cupom: 'cupons', bundle: 'bundle', addon: 'addon', flash: 'flash', seguidor: null }
+  return (
+    <div className="glass" style={{ padding: 16 }}>
+      <PSecao icon={Settings2} cor={PROMO.SHOPEE} titulo="Os 6 motores de oferta · cada um configurável" extra={<>
+        <PBadge c="#cfaef5" bg="rgba(160,107,232,.15)">⚙ ESTÚDIO NO AGENTE</PBadge><div style={{ flex: 1 }} />
+        <span style={{ fontSize: 9, color: 'var(--faint)' }}>a configuração fina de cada motor fica no Agente de Ofertas</span>
+      </>} />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 10 }}>
+        {motores.map((m) => {
+          const cor = CORES[m.cor] || PROMO.SHOPEE
+          const destino = m.chave === 'flash' ? 'flash' : CRIAR[m.chave]
+          return (
+            <div key={m.chave} className="glass" style={{ padding: 12, borderRadius: 12, borderTop: `3px solid ${cor}` }}>
+              <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 6 }}><b style={{ fontSize: 11 }}>{m.rotulo}</b><div style={{ flex: 1 }} /><Settings size={11} style={{ color: 'var(--faint)', cursor: 'pointer' }} onClick={() => irParaMotor && irParaMotor()} /></div>
+              <div className="num" style={{ fontSize: 8.5, color: m.ativas ? 'var(--dim)' : 'var(--faint)' }}>{m.ativas ? `${m.ativas} ativa${m.ativas > 1 ? 's' : ''}` : 'nenhuma ativa'}</div>
+              <div style={{ fontSize: 7.5, color: m.agente ? PROMO.OK : 'var(--faint)', margin: '4px 0 8px' }}>{m.agente ? '✦ agente cria sozinho' : 'criação manual'}</div>
+              {destino ? <button onClick={() => irCriar(destino)} className="row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, width: '100%', fontSize: 9.5, fontWeight: 800, padding: '6px', borderRadius: 8, cursor: 'pointer', color: '#fff', border: 'none', background: cor }}><Plus size={11} />Criar</button>
+                : <button onClick={() => irParaMotor && irParaMotor()} className="row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, width: '100%', fontSize: 9, fontWeight: 700, padding: '6px', borderRadius: 8, cursor: 'pointer', color: 'var(--dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)' }}>No agente</button>}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+/* -------- Campanhas ativas com ações -------- */
+function CampanhasAtivas({ campanhas, agora, notify, onMudou }) {
+  const [busy, setBusy] = useState(null)
+  const [desemp, setDesemp] = useState(null)
+  const encerrar = async (c) => {
+    if (!window.confirm(`Encerrar "${c.nome}" agora?`)) return
+    setBusy(`enc-${c.id}`)
+    try {
+      if (c.tipo === 'desconto') await api.req(`/api/shopee/descontos/${c.id}`, { method: 'DELETE' })
+      else if (c.tipo === 'cupom') await api.req(`/api/shopee/cupons/${c.id}`, { method: 'DELETE' })
+      else if (c.tipo === 'bundle') await api.req(`/api/shopee/bundles/${c.id}`, { method: 'DELETE' })
+      else if (c.tipo === 'flash') await api.req(`/api/shopee/flash/${c.id}`, { method: 'DELETE' })
+      else { notify('Esse tipo se encerra pelo painel específico.', 'warn'); setBusy(null); return }
+      notify('Campanha encerrada.', 'ok'); onMudou()
+    } catch (e) { notify(e.message, 'danger') } finally { setBusy(null) }
+  }
+  const repetir = async (c) => {
+    setBusy(`rep-${c.id}`)
+    try { await api.shopeeCampanhaRepetir(c.tipo, c.id); notify('Campanha repetida — nova janela criada.', 'ok'); onMudou() }
+    catch (e) { notify(e.message, 'danger') } finally { setBusy(null) }
+  }
+  return (
+    <div className="glass" style={{ padding: 16 }}>
+      <PSecao icon={Flame} cor={PROMO.SHOPEE} titulo={<>Campanhas ativas · {campanhas.length}</>} extra={<div style={{ flex: 1 }} />} />
+      {campanhas.length === 0 ? <div style={{ fontSize: 11, color: 'var(--faint)', padding: 16, textAlign: 'center' }}>Nenhuma campanha ativa agora. Crie uma acima ou deixe o Agente de Ofertas montar.</div> : (
+        <div className="space-y-2">
+          {campanhas.map((c) => {
+            const t = TAG_PROMO[c.tipo] || TAG_PROMO.outras
+            const rem = c.fim ? c.fim * 1000 - agora : null
+            const dur = c.inicio && c.fim ? (c.fim - c.inicio) * 1000 : null
+            const prog = dur && rem != null ? Math.min(100, Math.max(0, (1 - rem / dur) * 100)) : 0
+            const urgente = rem != null && rem <= 24 * 3600000
+            return (
+              <div key={`${c.tipo}-${c.id}`} className="glass" style={{ padding: '11px 13px', borderRadius: 13, borderLeft: `3px solid ${t[2]}` }}>
+                <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
+                  <PBadge c={t[1]} bg={t[2]}>{t[0]}</PBadge>
+                  <b style={{ fontSize: 11.5 }}>{c.nome || `${t[0]} #${c.id}`}</b>
+                  {urgente && <PBadge c={PROMO.WARN} bg="rgba(224,162,60,.12)">⏳ EXPIRA {rem != null ? fmtDur(rem) : ''}</PBadge>}
+                  <div style={{ flex: 1 }} />
+                  {c.itens != null && <span className="num" style={{ fontSize: 9, color: 'var(--dim)' }}>{c.itens} itens</span>}
+                  {c.vendas != null && <span className="num" style={{ fontSize: 9, color: PROMO.OK }}>{c.vendas} vendas{c.receita != null ? ` · ${fmtBRL(c.receita)}` : ''}</span>}
+                </div>
+                <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 7 }}>
+                  <div style={{ flex: 1, height: 6, borderRadius: 3, background: 'rgba(255,255,255,.07)', overflow: 'hidden' }}><div style={{ width: `${prog}%`, height: '100%', borderRadius: 3, background: `linear-gradient(90deg,${t[2]},${t[2]}bb)` }} /></div>
+                  <span className="num" style={{ fontSize: 8.5, color: urgente ? PROMO.WARN : 'var(--faint)' }}>{rem != null ? `${fmtDur(rem)} restante` : ''}</span>
+                  {(c.tipo === 'desconto' || c.tipo === 'flash' || c.tipo === 'bundle' || c.tipo === 'addon') && <button onClick={() => setDesemp(c)} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9, padding: '4px 9px', borderRadius: 8, cursor: 'pointer', color: PROMO.OK, background: 'rgba(47,217,141,.08)', border: '1px solid rgba(47,217,141,.3)' }}><BarChart3 size={10} />Desempenho</button>}
+                  {(c.tipo === 'desconto' || c.tipo === 'flash') && <button onClick={() => repetir(c)} disabled={busy} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9, padding: '4px 9px', borderRadius: 8, cursor: 'pointer', color: 'var(--dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)' }}>{busy === `rep-${c.id}` ? <Loader2 size={10} className="animate-spin" /> : <RotateCcw size={10} />}Repetir</button>}
+                  <button onClick={() => encerrar(c)} disabled={busy} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9, padding: '4px 9px', borderRadius: 8, cursor: 'pointer', color: PROMO.DANGER, background: 'transparent', border: '1px solid rgba(255,122,122,.3)' }}>{busy === `enc-${c.id}` ? <Loader2 size={10} className="animate-spin" /> : <X size={10} />}Encerrar</button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+      {desemp && <DesempenhoPromoModal c={desemp} onFechar={() => setDesemp(null)} onRepetir={repetir} notify={notify} />}
+    </div>
+  )
+}
+
+/* -------- Modal: Análise de desempenho da campanha (dados reais) -------- */
+function DesempenhoPromoModal({ c, onFechar, onRepetir, notify }) {
+  const [d, setD] = useState(null)
+  const [erro, setErro] = useState(null)
+  useEffect(() => {
+    let vivo = true
+    api.shopeeCampanhaDesempenho(c.tipo, c.id).then((r) => { if (vivo) setD(r) }).catch((e) => { if (vivo) setErro(e.message) })
+    return () => { vivo = false }
+  }, [c])
+  const t = TAG_PROMO[c.tipo] || TAG_PROMO.outras
+  const janela = d && d.janela_inicio ? `${new Date(d.janela_inicio * 1000).toLocaleDateString('pt-BR')} → ${new Date((d.janela_fim || Date.now() / 1000) * 1000).toLocaleDateString('pt-BR')}` : null
+  const pctAtrib = d && d.unidades ? Math.round((d.atribuido_promo || 0) / d.unidades * 100) : null
+  const indisp = d && d.indisponivel
+  return (
+    <div onClick={onFechar} style={{ position: 'fixed', inset: 0, background: 'rgba(5,3,8,.82)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)', zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 18 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: 'min(560px,96vw)', maxHeight: '90vh', overflowY: 'auto', background: 'var(--surface)', borderRadius: 18, border: '1px solid var(--glass-border)', boxShadow: '0 40px 120px rgba(0,0,0,.6)' }}>
+        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 17px', borderBottom: '1px solid var(--glass-border)', background: 'linear-gradient(110deg,rgba(47,217,141,.08),transparent)' }}>
+          <div style={{ width: 34, height: 34, borderRadius: 10, background: 'linear-gradient(145deg,#2FD98D,#1fae6e)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}><BarChart3 size={17} color="#0d0d0d" /></div>
+          <div style={{ flex: 1 }}>
+            <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}><PBadge c={t[1]} bg={t[2]}>{t[0]}</PBadge><b className="serif" style={{ fontSize: 15 }}>{c.nome || `${t[0]} #${c.id}`}</b></div>
+            <div style={{ fontSize: 9, color: 'var(--dim)' }}>Análise de desempenho · vendas dos produtos no período da campanha</div>
+          </div>
+          <X size={16} style={{ color: 'var(--dim)', cursor: 'pointer' }} onClick={onFechar} />
+        </div>
+        <div style={{ padding: 17 }}>
+          {erro ? <div style={{ fontSize: 11, color: PROMO.DANGER, padding: 12 }}>{erro}</div>
+            : !d ? <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 24, justifyContent: 'center', color: 'var(--faint)', fontSize: 11 }}><Loader2 size={15} className="animate-spin" />Varrendo os pedidos do período…</div>
+              : indisp ? <div style={{ fontSize: 11, color: 'var(--dim)', padding: 16, textAlign: 'center' }}>{d.motivo || 'Sem dados de desempenho para esta campanha ainda.'}</div>
+                : (
+                  <>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8, marginBottom: 14 }}>
+                      <div className="glass" style={{ padding: '10px 11px', borderRadius: 11, borderColor: 'rgba(47,217,141,.3)' }}><div style={{ fontSize: 7, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)' }}>Unidades</div><b className="num" style={{ fontSize: 18, color: PROMO.OK }}>{d.unidades ?? 0}</b><div style={{ fontSize: 7, color: 'var(--faint)' }}>vendidas</div></div>
+                      <div className="glass" style={{ padding: '10px 11px', borderRadius: 11 }}><div style={{ fontSize: 7, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)' }}>GMV</div><b className="num" style={{ fontSize: 18, color: PROMO.OK }}>{fmtBRLcurto(d.receita || 0)}</b><div style={{ fontSize: 7, color: 'var(--faint)' }}>na campanha</div></div>
+                      <div className="glass" style={{ padding: '10px 11px', borderRadius: 11 }}><div style={{ fontSize: 7, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)' }}>Ticket</div><b className="num" style={{ fontSize: 18 }}>{fmtBRLcurto(d.ticket_medio || 0)}</b><div style={{ fontSize: 7, color: 'var(--faint)' }}>médio/pedido</div></div>
+                      <div className="glass" style={{ padding: '10px 11px', borderRadius: 11 }}><div style={{ fontSize: 7, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)' }}>Pedidos</div><b className="num" style={{ fontSize: 18 }}>{d.pedidos_com_produto ?? 0}</b><div style={{ fontSize: 7, color: 'var(--faint)' }}>com o produto</div></div>
+                    </div>
+                    {pctAtrib != null && (
+                      <div className="glass" style={{ padding: '11px 13px', borderRadius: 12, marginBottom: 13 }}>
+                        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 6 }}><Sparkles size={11} style={{ color: PROMO.PURPLE }} /><b style={{ fontSize: 9.5, color: '#cfaef5' }}>Atribuição à promoção</b><div style={{ flex: 1 }} /><b className="num" style={{ fontSize: 11, color: PROMO.PURPLE }}>{pctAtrib}%</b></div>
+                        <div style={{ height: 8, borderRadius: 4, background: 'rgba(255,255,255,.06)', overflow: 'hidden', marginBottom: 5 }}><div style={{ width: `${pctAtrib}%`, height: '100%', borderRadius: 4, background: 'linear-gradient(90deg,#7b2a8c,#d6007f)' }} /></div>
+                        <div style={{ fontSize: 9, color: 'var(--dim)', lineHeight: 1.4 }}><b className="num" style={{ color: 'var(--text)' }}>{d.atribuido_promo ?? 0}</b> das {d.unidades ?? 0} unidades carregaram o desconto da campanha — o resto veio de compradores que levaram os mesmos produtos sem a oferta.</div>
+                      </div>
+                    )}
+                    {janela && <div style={{ fontSize: 9, color: 'var(--faint)', marginBottom: 13 }}>Janela analisada: <b className="num" style={{ color: 'var(--dim)' }}>{janela}</b>{d.parcial ? ' · amostra parcial (muitos pedidos no período)' : ''}</div>}
+                    <div className="row" style={{ display: 'flex', gap: 8 }}>
+                      {(c.tipo === 'desconto' || c.tipo === 'flash') && <button onClick={() => { onRepetir(c); onFechar() }} className="row" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 11, fontWeight: 800, padding: '9px 14px', borderRadius: 10, cursor: 'pointer', color: '#fff', border: 'none', background: 'linear-gradient(135deg,#7b2a8c,#d6007f)', flex: 1 }}><RotateCcw size={12} />Repetir esta campanha</button>}
+                      <button onClick={onFechar} style={{ fontSize: 11, fontWeight: 700, padding: '9px 14px', borderRadius: 10, cursor: 'pointer', color: 'var(--dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)' }}>Fechar</button>
+                    </div>
+                  </>
+                )}
+        </div>
+      </div>
+    </div>
+  )
+}
+function fmtBRL(v) { return `R$ ${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` }
+function fmtBRLcurto(v) { const n = Number(v || 0); return n >= 1000 ? `R$ ${(n / 1000).toFixed(1)}k` : `R$ ${n.toFixed(0)}` }
+function tempoRelBR(iso) { if (!iso) return ''; const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000); if (s < 60) return 'agora'; const m = Math.floor(s / 60); if (m < 60) return `${m}min`; const h = Math.floor(m / 60); if (h < 24) return `${h}h`; return `${Math.floor(h / 24)}d` }
+
+/* -------- Planner de Flash Sale (slots oficiais da Shopee) -------- */
+function PlannerFlash({ agenda, agora, onAgendar, notify }) {
+  const [slots, setSlots] = useState(null)
+  const [erro, setErro] = useState(null)
+  useEffect(() => {
+    let vivo = true
+    api.shopeeFlashSlots(7).then((r) => {
+      if (!vivo) return
+      const resp = r?.response || r || {}
+      const lst = resp.timeslot_list || resp.time_slot_list || (Array.isArray(resp) ? resp : [])
+      setSlots(lst)
+    }).catch((e) => { if (vivo) setErro(e.message) })
+    return () => { vivo = false }
+  }, [])
+  const flashesAtivos = (agenda || []).filter((c) => c.tipo === 'flash' && (c.inicio || 0) <= agora / 1000 && (c.fim || 0) >= agora / 1000)
+  const diaSemana = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb']
+  const fmtSlot = (s) => {
+    const ini = new Date((s.start_time || 0) * 1000)
+    const fim = new Date((s.end_time || 0) * 1000)
+    const hoje = new Date(agora)
+    const rot = ini.toDateString() === hoje.toDateString() ? 'HOJE' : diaSemana[ini.getDay()].toUpperCase()
+    return `${rot} ${String(ini.getHours()).padStart(2, '0')}h–${String(fim.getHours()).padStart(2, '0')}h`
+  }
+  return (
+    <div className="glass" style={{ padding: 16, borderColor: 'rgba(214,0,127,.3)' }}>
+      <PSecao icon={Zap} cor="#d6007f" titulo="Planner de Flash Sale · slots oficiais da Shopee" extra={<>
+        {slots && <PBadge c="#fff" bg="#d6007f">{slots.length} SLOTS LIVRES</PBadge>}
+        {flashesAtivos.length > 0 && <PBadge c="#fff" bg={PROMO.PURPLE}>{flashesAtivos.length} AO VIVO</PBadge>}
+        <div style={{ flex: 1 }} />
+        <span style={{ fontSize: 9, color: 'var(--faint)' }}>agende ofertas relâmpago nos horários que a Shopee libera</span>
+      </>} />
+      {erro ? <div style={{ fontSize: 11, color: PROMO.WARN, padding: 12 }}>Não consegui buscar os slots agora: {erro}</div>
+        : !slots ? <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 18, justifyContent: 'center', color: 'var(--faint)', fontSize: 11 }}><Loader2 size={14} className="animate-spin" />Buscando os horários oficiais…</div>
+          : slots.length === 0 ? <div style={{ fontSize: 11, color: 'var(--faint)', padding: 16, textAlign: 'center' }}>A Shopee não liberou horários de Flash Sale para a loja nos próximos 7 dias. Assim que abrir, os slots aparecem aqui para agendar.</div>
+            : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 9 }}>
+                {flashesAtivos.map((f, i) => (
+                  <div key={`live-${i}`} className="glass" style={{ padding: 11, borderRadius: 12, borderColor: 'rgba(214,0,127,.45)', background: 'rgba(214,0,127,.06)' }}>
+                    <div style={{ fontSize: 8, textTransform: 'uppercase', fontWeight: 800, color: '#d6007f' }}>AO VIVO AGORA</div>
+                    <b className="num" style={{ fontSize: 12 }}>{f.nome || `Flash #${f.id}`}</b>
+                    <div style={{ fontSize: 8, color: 'var(--dim)' }}>termina {f.fim ? fmtDur(f.fim * 1000 - agora) : ''}</div>
+                  </div>
+                ))}
+                {slots.slice(0, 11).map((s) => (
+                  <div key={s.timeslot_id} className="glass" style={{ padding: 11, borderRadius: 12 }}>
+                    <div style={{ fontSize: 8, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)' }}>{fmtSlot(s)}</div>
+                    <b className="num" style={{ fontSize: 12, color: PROMO.OK }}>LIVRE</b>
+                    <button onClick={onAgendar} className="row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, width: '100%', padding: '4px', fontSize: 8.5, fontWeight: 700, marginTop: 5, borderRadius: 7, cursor: 'pointer', color: '#d6007f', background: 'transparent', border: '1px solid rgba(214,0,127,.4)' }}><Plus size={9} />Agendar</button>
+                  </div>
+                ))}
+              </div>
+            )}
+    </div>
+  )
+}
+
+/* -------- Seletor de produtos (inserção manual em campanha) -------- */
+function SeletorProdutos({ modo, onFechar, notify, onCriado }) {
+  const [itens, setItens] = useState([])
+  const [trava, setTrava] = useState(new Set())
+  const [carregando, setCarregando] = useState(true)
+  const [erro, setErro] = useState(null)
+  const [offset, setOffset] = useState(0)
+  const [temMais, setTemMais] = useState(false)
+  const [busca, setBusca] = useState('')
+  const [sel, setSel] = useState({})
+  const [pct, setPct] = useState(10)
+  const [nome, setNome] = useState('')
+  const [dias, setDias] = useState(7)
+  const [criando, setCriando] = useState(false)
+  const PAG = 50
+
+  const carregarPagina = async (off) => {
+    setCarregando(true); setErro(null)
+    try {
+      const r = await api.shopeeProdutos(off, PAG)
+      const resp = r?.response || r || {}
+      const lote = resp.item || resp.itens || []
+      setItens((prev) => off === 0 ? lote : [...prev, ...lote])
+      setTemMais(lote.length >= PAG)
+      setOffset(off + lote.length)
+    } catch (e) { setErro(e.message) } finally { setCarregando(false) }
+  }
+  useEffect(() => {
+    carregarPagina(0)
+    api.shopeePromoTrava().then((r) => setTrava(new Set((r.ids || []).map(Number)))).catch(() => {})
+  }, [])
+
+  const filtrados = itens.filter((it) => {
+    const nm = (it.item_name || it.nome || '').toLowerCase()
+    return !busca || nm.includes(busca.toLowerCase())
+  })
+  const selArr = Object.values(sel)
+  const toggle = (it) => {
+    const id = it.item_id
+    if (trava.has(Number(id))) return
+    setSel((s) => { const n = { ...s }; if (n[id]) delete n[id]; else n[id] = it; return n })
+  }
+  const precoDe = (it) => Number(it.price || it.preco || 0)
+  const precoPor = (it) => +(precoDe(it) * (1 - pct / 100)).toFixed(2)
+
+  const criar = async () => {
+    if (selArr.length === 0) { notify('Selecione ao menos um produto.', 'warn'); return }
+    setCriando(true)
+    try {
+      const inicio = Math.floor(Date.now() / 1000) + 600
+      const fim = inicio + dias * 86400
+      const payloadItens = selArr.filter((it) => precoDe(it) > 0).map((it) => ({ item_id: it.item_id, promotion_price: precoPor(it) }))
+      const r = await api.shopeeCriarDesconto({ nome: nome.trim() || `Desconto manual -${pct}%`, inicio, fim, itens: payloadItens })
+      const add = r?.itens_adicionados ?? payloadItens.length
+      notify(`Desconto criado com ${add} produto(s).`, 'ok')
+      onCriado()
+    } catch (e) { notify(e.message, 'danger') } finally { setCriando(false) }
+  }
+
+  return (
+    <div onClick={onFechar} style={{ position: 'fixed', inset: 0, background: 'rgba(5,3,8,.82)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)', zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 18 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: 'min(760px,97vw)', maxHeight: '92vh', display: 'flex', flexDirection: 'column', background: 'var(--surface)', borderRadius: 18, border: '1px solid var(--glass-border)', boxShadow: '0 40px 120px rgba(0,0,0,.6)', overflow: 'hidden' }}>
+        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 17px', borderBottom: '1px solid var(--glass-border)', background: 'linear-gradient(110deg,rgba(238,77,45,.1),transparent)' }}>
+          <div style={{ width: 34, height: 34, borderRadius: 10, background: `linear-gradient(145deg,${PROMO.SHOPEE},#a52c15)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}><Plus size={18} color="#fff" /></div>
+          <div style={{ flex: 1 }}>
+            <b className="serif" style={{ fontSize: 16 }}>Inserir produtos em desconto</b>
+            <div style={{ fontSize: 9, color: 'var(--dim)' }}>Escolha os produtos, defina o desconto e crie a campanha · itens 🔒 já em campanha ficam bloqueados</div>
+          </div>
+          <X size={16} style={{ color: 'var(--dim)', cursor: 'pointer' }} onClick={onFechar} />
+        </div>
+        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '11px 17px', borderBottom: '1px solid var(--glass-border)' }}>
+          <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(0,0,0,.25)', border: '1px solid var(--glass-border)', borderRadius: 9, padding: '6px 11px', flex: 1 }}><Search size={12} style={{ color: 'var(--faint)' }} /><input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="buscar no catálogo…" style={{ background: 'transparent', border: 'none', outline: 'none', color: 'var(--text)', fontSize: 11.5, flex: 1 }} /></div>
+          <span className="num" style={{ fontSize: 9.5, color: 'var(--faint)' }}>{selArr.length} selecionado(s) · trava: {trava.size}</span>
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '10px 17px', minHeight: 200 }}>
+          {erro ? <div style={{ fontSize: 11, color: PROMO.DANGER, padding: 12 }}>{erro}</div> : null}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 8 }}>
+            {filtrados.map((it) => {
+              const id = it.item_id
+              const travado = trava.has(Number(id))
+              const on = !!sel[id]
+              const preco = precoDe(it)
+              return (
+                <div key={id} onClick={() => toggle(it)} className="row" style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '8px 10px', borderRadius: 11, cursor: travado ? 'not-allowed' : 'pointer', background: on ? 'rgba(47,217,141,.08)' : 'rgba(0,0,0,.2)', border: `1px solid ${on ? 'rgba(47,217,141,.4)' : 'var(--glass-border)'}`, opacity: travado ? .5 : 1 }}>
+                  <span style={{ width: 16, height: 16, borderRadius: 4, flex: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: on ? PROMO.OK : 'transparent', border: on ? 'none' : `2px solid ${travado ? 'var(--faint)' : 'var(--glass-border)'}` }}>{on && <Check size={11} color="#0d0d0d" />}</span>
+                  <div style={{ width: 30, height: 30, borderRadius: 7, overflow: 'hidden', flex: 'none', background: 'linear-gradient(135deg,rgba(238,77,45,.25),rgba(160,107,232,.2))', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{it.image ? <img src={it.image} alt="" loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Package size={14} style={{ color: 'rgba(255,255,255,.6)' }} />}</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.item_name || it.nome || `#${id}`}</div>
+                    <div className="num" style={{ fontSize: 8, color: travado ? PROMO.BLUE : 'var(--faint)' }}>{travado ? '🔒 já em campanha' : preco > 0 ? <>{fmtBRL(preco)} → <b style={{ color: PROMO.OK }}>{fmtBRL(precoPor(it))}</b></> : 'sem preço'}</div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          {temMais && !busca && (
+            <div style={{ textAlign: 'center', marginTop: 10 }}>
+              <button onClick={() => carregarPagina(offset)} disabled={carregando} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10, padding: '6px 13px', borderRadius: 8, cursor: 'pointer', color: 'var(--dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)' }}>{carregando ? <Loader2 size={11} className="animate-spin" /> : <ChevronRight size={11} />}Carregar mais</button>
+            </div>
+          )}
+          {carregando && itens.length === 0 && <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 20, justifyContent: 'center', color: 'var(--faint)', fontSize: 11 }}><Loader2 size={14} className="animate-spin" />Carregando catálogo…</div>}
+        </div>
+        <div style={{ padding: '13px 17px', borderTop: '1px solid var(--glass-border)', background: 'rgba(0,0,0,.2)' }}>
+          <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 11 }}>
+            <div style={{ flex: 1, minWidth: 160 }}>
+              <div style={{ fontSize: 8.5, color: 'var(--dim)', marginBottom: 3 }}>Nome da campanha</div>
+              <input value={nome} onChange={(e) => setNome(e.target.value)} placeholder={`Desconto manual -${pct}%`} style={{ width: '100%', padding: '7px 10px', fontSize: 11, color: 'var(--text)', background: 'rgba(0,0,0,.25)', border: '1px solid var(--glass-border)', borderRadius: 9 }} />
+            </div>
+            <div style={{ width: 150 }}>
+              <div className="row" style={{ display: 'flex', marginBottom: 3 }}><span style={{ fontSize: 8.5, color: 'var(--dim)' }}>Desconto</span><div style={{ flex: 1 }} /><b className="num" style={{ fontSize: 9.5, color: PROMO.SHOPEE }}>{pct}%</b></div>
+              <input type="range" min={1} max={50} value={pct} onChange={(e) => setPct(Number(e.target.value))} style={{ width: '100%' }} />
+            </div>
+            <div style={{ width: 130 }}>
+              <div className="row" style={{ display: 'flex', marginBottom: 3 }}><span style={{ fontSize: 8.5, color: 'var(--dim)' }}>Duração</span><div style={{ flex: 1 }} /><b className="num" style={{ fontSize: 9.5, color: PROMO.SHOPEE }}>{dias}d</b></div>
+              <input type="range" min={1} max={30} value={dias} onChange={(e) => setDias(Number(e.target.value))} style={{ width: '100%' }} />
+            </div>
+          </div>
+          <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 9, color: 'var(--faint)', flex: 1 }}>A campanha começa em ~10 min (exigência da Shopee). O preço promocional é calculado por produto pelo desconto acima.</span>
+            <button onClick={onFechar} style={{ fontSize: 11, fontWeight: 700, padding: '9px 15px', borderRadius: 10, cursor: 'pointer', color: 'var(--dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)' }}>Cancelar</button>
+            <button onClick={criar} disabled={criando || selArr.length === 0} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, fontWeight: 800, padding: '9px 17px', borderRadius: 10, cursor: selArr.length === 0 ? 'default' : 'pointer', color: '#fff', border: 'none', background: `linear-gradient(135deg,${PROMO.SHOPEE},#c0341c)`, opacity: (criando || selArr.length === 0) ? .6 : 1 }}>{criando ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}Criar desconto ({selArr.length})</button>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
@@ -4808,6 +5471,306 @@ function Diagnostico({ status }) {
           As falhas de "permissão" quase sempre são módulos não habilitados no seu app na Shopee Open Platform — abra <b>Authorization → API list</b> e marque os escopos (produtos, pedidos, logística, avaliações, promoções). Se o erro for de token, reconecte a loja na aba de conexão.
         </div>
       )}
+    </div>
+  )
+}
+
+/* ============================ AGENTE DE OFERTAS (MAX · N3) ============================ */
+function AgenteOfertas({ conectado, notify }) {
+  const [cfg, setCfg] = useState(null)
+  const [prop, setProp] = useState(null)
+  const [sel, setSel] = useState(() => new Set())
+  const [queda, setQueda] = useState(null)
+  const [hist, setHist] = useState([])
+  const [gerando, setGerando] = useState(false)
+  const [aplicando, setAplicando] = useState(false)
+  const [rodando, setRodando] = useState(false)
+  const [motorTipo, setMotorTipo] = useState('desconto')
+  const [seletor, setSeletor] = useState(false)
+
+  const carregarLeve = () => {
+    api.shopeePromoConfig().then(setCfg).catch(() => {})
+    api.shopeePromoQueda().then(setQueda).catch(() => {})
+    api.shopeePromoHistorico().then((r) => setHist(r.itens || [])).catch(() => {})
+  }
+  useEffect(() => { if (conectado) carregarLeve() }, [conectado])
+
+  const salvar = async (patch) => {
+    setCfg((c) => ({ ...c, ...patch }))
+    try { const r = await api.shopeePromoConfigSalvar({ ...cfg, ...patch }); setCfg(r) } catch (e) { notify(e.message, 'danger') }
+  }
+  const gerar = async () => {
+    setGerando(true); setSel(new Set())
+    try { const r = await api.shopeePromoPropor(); setProp(r); if (r.acao === 'vazio') notify(r.msg || 'Nenhum candidato nesta rodada.', 'warn') }
+    catch (e) { notify(e.message, 'danger') } finally { setGerando(false) }
+  }
+  const aplicar = async (tipo) => {
+    const escolhidas = (prop?.propostas || []).filter((p) => sel.has(p.item_id))
+    if (escolhidas.length === 0) { notify('Selecione ao menos uma proposta.', 'warn'); return }
+    setAplicando(true)
+    try {
+      const r = await api.shopeePromoAplicar({ propostas: escolhidas, tipo })
+      const n = (r.criadas || []).reduce((a, c) => a + (c.itens_adicionados || 0), 0) || escolhidas.length
+      notify(`Campanha criada com ${n} produto(s).`, 'ok'); setProp(null); setSel(new Set()); carregarLeve()
+    } catch (e) { notify(e.message, 'danger') } finally { setAplicando(false) }
+  }
+  const rodarCiclo = async () => {
+    setRodando(true)
+    try { const r = await api.shopeePromoRodar(); notify(r.msg || 'Ciclo executado.', 'ok'); carregarLeve() }
+    catch (e) { notify(e.message, 'danger') } finally { setRodando(false) }
+  }
+
+  if (!conectado) return <Vazio txt="Conecte a loja Shopee para usar o Agente de Ofertas." />
+
+  const ativo = cfg?.ativo
+  const propostas = prop?.propostas || []
+  const diag = prop?.diagnostico || null
+  const teto = cfg?.desconto_max ?? 15
+  const piso = cfg?.piso_margem ?? 10
+  const todasSel = propostas.length > 0 && propostas.every((p) => sel.has(p.item_id))
+  const toggleTodas = () => setSel(todasSel ? new Set() : new Set(propostas.map((p) => p.item_id)))
+
+  return (
+    <div className="space-y-3">
+      {/* COMMAND BAR */}
+      <div className="glass" style={{ padding: '15px 18px', border: '1px solid transparent', background: 'linear-gradient(var(--surface),var(--surface)) padding-box,linear-gradient(110deg,rgba(160,107,232,.55),rgba(214,0,127,.4),rgba(238,77,45,.3)) border-box' }}>
+        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ width: 44, height: 44, borderRadius: 12, background: 'linear-gradient(145deg,#7b2a8c,#d6007f)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none', boxShadow: '0 6px 20px rgba(214,0,127,.35)' }}><Bot size={22} color="#fff" /></div>
+          <div>
+            <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <b className="serif" style={{ fontSize: 19 }}>Agente de Ofertas</b>
+              <PBadge c="#e9dbfb" bg="rgba(160,107,232,.2)">DIAGNÓSTICO → PROPOSTA → AÇÃO</PBadge>
+              <PBadge c={PROMO.BLUE} bg="rgba(91,141,239,.12)">🔒 NUNCA REPETE ITEM EM OFERTA</PBadge>
+              <PBadge c={PROMO.OK} bg="rgba(47,217,141,.12)">PISO SAGRADO</PBadge>
+            </div>
+            <div style={{ fontSize: 10.5, color: 'var(--dim)' }}>Encontra estoque parado, calcula a margem e cria a promoção certa — sempre acima do piso</div>
+          </div>
+          <div style={{ flex: 1 }} />
+          <button onClick={gerar} disabled={gerando} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 800, padding: '9px 15px', borderRadius: 10, cursor: 'pointer', color: '#fff', border: 'none', background: 'linear-gradient(135deg,#7b2a8c,#d6007f)', opacity: gerando ? .7 : 1 }}>{gerando ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}Gerar propostas agora</button>
+          <button onClick={rodarCiclo} disabled={rodando} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, padding: '9px 13px', borderRadius: 10, cursor: 'pointer', color: 'var(--dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)' }}>{rodando ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}Rodar 1 ciclo</button>
+          <span className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}><span style={{ fontSize: 10, fontWeight: 800, color: ativo ? PROMO.OK : 'var(--faint)' }}>{ativo ? 'AGENTE LIGADO' : 'DESLIGADO'}</span><span onClick={() => salvar({ ativo: !ativo })} style={{ width: 36, height: 20, borderRadius: 99, position: 'relative', cursor: 'pointer', flex: 'none', background: ativo ? 'linear-gradient(90deg,#2FD98D,#1fae6e)' : 'rgba(255,255,255,.1)' }}><span style={{ position: 'absolute', top: 2, width: 16, height: 16, borderRadius: '50%', background: '#fff', left: ativo ? 18 : 2, transition: 'left .2s' }} /></span></span>
+        </div>
+        <div className="row" style={{ display: 'flex', gap: 15, marginTop: 10, fontSize: 9.5, color: 'var(--faint)', flexWrap: 'wrap' }}>
+          <span>modo: <b style={{ color: 'var(--text)' }}>{cfg?.modo === 'auto' ? 'automático (cria sozinho)' : 'sugerir (só com sua aprovação)'}</b></span>
+          <span>estratégia: <b style={{ color: 'var(--text)' }}>{cfg?.estrategia === 'margem_alta' ? 'maior margem' : 'estoque parado'}</b></span>
+          <span>última rodada: <b className="num" style={{ color: 'var(--text)' }}>{cfg?.ultimo_ciclo ? new Date(cfg.ultimo_ciclo).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : 'ainda não rodou'}</b></span>
+          <span>radar de queda: <b style={{ color: queda?.queda ? PROMO.DANGER : PROMO.OK }}>{queda?.queda ? 'QUEDA DETECTADA' : 'vigiando'}</b></span>
+        </div>
+      </div>
+
+      {/* FUNIL + RADAR */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 14 }}>
+        <FunilAgente diag={diag} teto={teto} piso={piso} />
+        <RadarQueda queda={queda} limiar={cfg?.queda_limiar ?? 30} />
+      </div>
+
+      {/* MODO DE INSERÇÃO */}
+      <div className="glass" style={{ padding: 15 }}>
+        <PSecao icon={Plus} cor={PROMO.PURPLE} titulo="Como os produtos entram nas campanhas" extra={<div style={{ flex: 1 }} />} />
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 11 }}>
+          <div className="glass" style={{ padding: '11px 13px', borderRadius: 12, borderColor: 'rgba(160,107,232,.4)', background: 'rgba(160,107,232,.05)' }}>
+            <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}><Sparkles size={12} style={{ color: PROMO.PURPLE }} /><b style={{ fontSize: 10.5, color: '#cfaef5' }}>Automático (o agente escolhe)</b><div style={{ flex: 1 }} /><span onClick={() => salvar({ modo: cfg?.modo === 'auto' ? 'sugerir' : 'auto' })} style={{ width: 32, height: 18, borderRadius: 99, position: 'relative', cursor: 'pointer', flex: 'none', background: cfg?.modo === 'auto' ? 'linear-gradient(90deg,#2FD98D,#1fae6e)' : 'rgba(255,255,255,.1)' }}><span style={{ position: 'absolute', top: 2, width: 14, height: 14, borderRadius: '50%', background: '#fff', left: cfg?.modo === 'auto' ? 16 : 2 }} /></span></div>
+            <div style={{ fontSize: 9, color: 'var(--dim)', lineHeight: 1.45 }}>Seleciona pelos critérios do Estúdio (estoque parado, curva, maior margem) e cria sozinho no modo automático.</div>
+          </div>
+          <div className="glass" style={{ padding: '11px 13px', borderRadius: 12 }}>
+            <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}><Package size={12} style={{ color: PROMO.SHOPEE }} /><b style={{ fontSize: 10.5 }}>Manual (você escolhe)</b><div style={{ flex: 1 }} /><button onClick={() => setSeletor(true)} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9, fontWeight: 700, padding: '4px 10px', borderRadius: 8, cursor: 'pointer', color: 'var(--dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)' }}><Plus size={10} />Abrir seletor</button></div>
+            <div style={{ fontSize: 9, color: 'var(--dim)', lineHeight: 1.45 }}>Seletor com busca, foto, preço, prévia do desconto e a trava — itens já em campanha ficam bloqueados.</div>
+          </div>
+        </div>
+      </div>
+
+      {/* ESTÚDIO DO MOTOR */}
+      <EstudioMotor cfg={cfg} salvar={salvar} motorTipo={motorTipo} setMotorTipo={setMotorTipo} />
+
+      {/* PROPOSTAS */}
+      <div className="glass" style={{ padding: 16, border: '1px solid transparent', background: 'linear-gradient(var(--surface),var(--surface)) padding-box,linear-gradient(110deg,rgba(160,107,232,.4),rgba(242,194,0,.3),rgba(238,77,45,.3)) border-box' }}>
+        <PSecao icon={Sparkles} cor={PROMO.PURPLE} titulo="Propostas da rodada · margem item a item" extra={<>
+          <PBadge c="#cfaef5" bg="rgba(160,107,232,.15)">MAIOR DESCONTO SEM FURAR O PISO</PBadge>
+          <div style={{ flex: 1 }} />
+          {propostas.length > 0 && <><span className="num" style={{ fontSize: 9.5, color: 'var(--dim)' }}>{sel.size} de {propostas.length}</span><button onClick={toggleTodas} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9, fontWeight: 700, padding: '4px 10px', borderRadius: 8, cursor: 'pointer', color: 'var(--dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)' }}>{todasSel ? 'Limpar' : 'Todas'}</button></>}
+        </>} />
+        {!prop ? <div style={{ fontSize: 11, color: 'var(--faint)', padding: 22, textAlign: 'center' }}>Clique em <b style={{ color: 'var(--text)' }}>Gerar propostas agora</b> — o agente varre o catálogo, pula o que já está em oferta (trava) e monta a lista com a margem final de cada item.</div>
+          : propostas.length === 0 ? <div style={{ fontSize: 11, color: 'var(--faint)', padding: 20, textAlign: 'center' }}>{prop.msg || 'Nenhum candidato passou pelo funil nesta rodada.'}</div>
+            : (
+              <>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 9 }}>
+                  {propostas.map((p) => <PropostaCard key={p.item_id} p={p} teto={teto} piso={piso} on={sel.has(p.item_id)} toggle={() => setSel((s) => { const n = new Set(s); n.has(p.item_id) ? n.delete(p.item_id) : n.add(p.item_id); return n })} />)}
+                </div>
+                <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 13, paddingTop: 12, borderTop: '1px solid var(--glass-border)', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 9, color: 'var(--faint)', flex: 1 }}>cada desconto é o maior possível sem furar o piso de {piso}% — o guardião reduz, nunca fura</span>
+                  <button onClick={() => aplicar('flash')} disabled={aplicando || sel.size === 0} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 700, padding: '8px 13px', borderRadius: 9, cursor: sel.size ? 'pointer' : 'default', color: '#d6007f', background: 'transparent', border: '1px solid rgba(214,0,127,.4)', opacity: (aplicando || !sel.size) ? .5 : 1 }}><Zap size={12} />Virar Flash ({sel.size})</button>
+                  <button onClick={() => aplicar('desconto')} disabled={aplicando || sel.size === 0} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 800, padding: '9px 16px', borderRadius: 10, cursor: sel.size ? 'pointer' : 'default', color: '#fff', border: 'none', background: 'linear-gradient(135deg,#7b2a8c,#d6007f)', opacity: (aplicando || !sel.size) ? .5 : 1 }}>{aplicando ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}Aplicar num desconto novo ({sel.size})</button>
+                </div>
+              </>
+            )}
+      </div>
+
+      {/* DIÁRIO */}
+      <DiarioAgente hist={hist} />
+
+      {seletor && <SeletorProdutos modo="desconto" onFechar={() => setSeletor(false)} notify={notify} onCriado={() => { setSeletor(false); carregarLeve() }} />}
+    </div>
+  )
+}
+
+/* -------- Funil do agente -------- */
+function FunilAgente({ diag, teto, piso }) {
+  const linhas = diag ? [
+    ['Catálogo (Bling)', diag.catalogo_skus, 'rgba(255,255,255,.14)'],
+    ['Anúncios na Shopee', diag.shopee_itens, 'rgba(91,141,239,.5)'],
+    ['🔒 Já em oferta — pulados', diag.em_campanha, 'linear-gradient(90deg,#5B8DEF,#3a6fd8)', true],
+    ['Casados com o Bling', diag.sku_casado, 'rgba(91,141,239,.55)'],
+    ['Com estoque', diag.passaram_estoque, 'rgba(91,141,239,.6)'],
+    ['Margem calculável', diag.margem_calculavel, 'rgba(47,217,141,.45)'],
+    ['Acima do piso de margem', diag.passaram_piso, 'rgba(47,217,141,.55)'],
+    ['→ Candidatos da rodada', diag.elegiveis, 'linear-gradient(90deg,#7b2a8c,#d6007f)', false, true],
+  ] : []
+  const base = diag ? Math.max(diag.catalogo_skus || 1, 1) : 1
+  const bloqueadosPiso = diag ? Math.max(0, (diag.margem_calculavel || 0) - (diag.passaram_piso || 0)) : 0
+  return (
+    <div className="glass" style={{ padding: 16 }}>
+      <PSecao icon={Filter} cor={PROMO.PURPLE} titulo="Funil do diagnóstico · por que cada item entra ou sai" extra={<><div style={{ flex: 1 }} /><PBadge c="#cfaef5" bg="rgba(160,107,232,.15)">TRANSPARÊNCIA TOTAL</PBadge></>} />
+      {!diag ? <div style={{ fontSize: 11, color: 'var(--faint)', padding: 20, textAlign: 'center' }}>Gere as propostas para ver o funil completo — do catálogo até os candidatos, com o que a trava pulou.</div>
+        : (
+          <>
+            <div style={{ display: 'grid', gap: 6 }}>
+              {linhas.map(([rot, val, cor, trava, alvo], i) => (
+                <div key={i} className="row" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ width: 178, fontSize: 9.5, color: trava ? PROMO.BLUE : alvo ? 'var(--text)' : 'var(--dim)', fontWeight: (trava || alvo) ? 700 : 400, flex: 'none' }}>{rot}</span>
+                  <div style={{ flex: 1, height: 14, borderRadius: 7, background: 'rgba(255,255,255,.05)', overflow: 'hidden' }}><div style={{ width: `${Math.min(100, (val || 0) / base * 100)}%`, height: '100%', borderRadius: 7, background: cor }} /></div>
+                  <b className="num" style={{ width: 48, textAlign: 'right', fontSize: 11, color: trava ? PROMO.BLUE : alvo ? PROMO.PURPLE : 'var(--text)' }}>{trava ? `−${val || 0}` : (val ?? '—')}</b>
+                </div>
+              ))}
+            </div>
+            <div className="row" style={{ display: 'flex', gap: 7, marginTop: 11, background: 'rgba(91,141,239,.05)', border: '1px solid rgba(91,141,239,.25)', borderRadius: 10, padding: '8px 11px' }}>
+              <Lock size={12} style={{ color: PROMO.BLUE, flex: 'none', marginTop: 1 }} />
+              <span style={{ fontSize: 9, color: 'var(--dim)', lineHeight: 1.45 }}><b style={{ color: PROMO.BLUE }}>Trava anti-duplicação:</b> {diag.em_campanha || 0} item(ns) já em oferta foram pulados — evita o erro "item already in promotion" e garante rodízio. {bloqueadosPiso > 0 ? <><b style={{ color: 'var(--text)' }}>{bloqueadosPiso}</b> ficaram de fora por não ter margem acima do piso de {piso}% (o agente nunca queima preço).</> : null}</span>
+            </div>
+          </>
+        )}
+    </div>
+  )
+}
+
+/* -------- Radar de queda -------- */
+function RadarQueda({ queda, limiar }) {
+  const temDados = queda && queda.atual != null && queda.base != null
+  const pct = queda?.queda_pct != null ? queda.queda_pct : (temDados && queda.base ? Math.round((queda.base - queda.atual) / queda.base * 100) : null)
+  const emQueda = !!queda?.queda
+  const cor = pct == null ? 'var(--faint)' : pct >= limiar ? PROMO.DANGER : pct >= 12 ? PROMO.WARN : PROMO.OK
+  return (
+    <div className="glass" style={{ padding: 16, borderColor: 'rgba(91,141,239,.35)' }}>
+      <PSecao icon={TrendingDown} cor={PROMO.BLUE} titulo="Radar de queda de vendas" extra={<><div style={{ flex: 1 }} /><PBadge c={emQueda ? PROMO.DANGER : PROMO.OK} bg="rgba(255,255,255,.05)">{emQueda ? 'ALERTA' : 'ESTÁVEL'}</PBadge></>} />
+      {!temDados ? <div style={{ fontSize: 10.5, color: 'var(--dim)', padding: '14px 4px', lineHeight: 1.5 }}>{queda?.msg || 'Coletando histórico de vendas para comparar. Assim que houver base, o radar mostra o ritmo atual x normal e dispara promoção relâmpago se cair além do gatilho.'}</div>
+        : (
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 11 }}>
+              <PKpi label="Ritmo agora" value={queda.atual} sub={`por ${queda.rotulo || 'período'}`} />
+              <PKpi label="Base normal" value={queda.base} sub="média recente" />
+              <PKpi label="Variação" value={pct != null ? `${pct > 0 ? '-' : '+'}${Math.abs(pct)}%` : '—'} sub="vs base" cor={cor} />
+              <PKpi label="Gatilho" value={`-${limiar}%`} sub="dispara relâmpago" cor={PROMO.WARN} />
+            </div>
+            <div style={{ fontSize: 9, color: 'var(--dim)', background: 'rgba(0,0,0,.18)', borderRadius: 10, padding: '9px 11px', lineHeight: 1.5 }}>{emQueda ? <>Vendas <b style={{ color: PROMO.DANGER }}>{Math.abs(pct)}%</b> abaixo do normal — acima do gatilho. No modo automático, o agente cria uma oferta relâmpago nos campeões de giro.</> : <>Ritmo dentro do esperado. Se cair <b style={{ color: PROMO.WARN }}>{limiar}%</b> abaixo do normal, o agente age sozinho.</>}</div>
+          </>
+        )}
+    </div>
+  )
+}
+
+/* -------- Estúdio do motor (config) -------- */
+function EstudioMotor({ cfg, salvar, motorTipo, setMotorTipo }) {
+  if (!cfg) return null
+  const Slm = ({ label, campo, min, max, sufixo, cor }) => (
+    <div style={{ marginBottom: 11 }}>
+      <div className="row" style={{ display: 'flex', marginBottom: 3 }}><span style={{ fontSize: 9, color: 'var(--dim)' }}>{label}</span><div style={{ flex: 1 }} /><b className="num" style={{ fontSize: 9.5, color: cor || PROMO.SHOPEE }}>{cfg[campo] ?? min}{sufixo || ''}</b></div>
+      <input type="range" min={min} max={max} value={cfg[campo] ?? min} onChange={(e) => salvar({ [campo]: Number(e.target.value) })} style={{ width: '100%' }} />
+    </div>
+  )
+  const TIPOS_MOTOR = [['desconto', 'Desconto'], ['flash', 'Relâmpago'], ['cupom', 'Cupom'], ['bundle', 'Leve+'], ['addon', 'Add-on'], ['follow', 'Seguidor']]
+  const CRIT = [['estoque_parado', 'Estoque parado'], ['margem_alta', 'Maior margem']]
+  return (
+    <div className="glass" style={{ padding: 16, border: '1px solid transparent', background: 'linear-gradient(var(--surface),var(--surface)) padding-box,linear-gradient(110deg,rgba(238,77,45,.4),rgba(160,107,232,.4)) border-box' }}>
+      <PSecao icon={Settings2} cor={PROMO.SHOPEE} titulo="Estúdio do motor · configuração completa" extra={<>
+        <div style={{ flex: 1 }} />
+        <div className="row" style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>{TIPOS_MOTOR.map(([v, l]) => <span key={v} onClick={() => { setMotorTipo(v); salvar({ tipo: v }) }} style={{ fontSize: 9.5, fontWeight: 700, padding: '5px 10px', borderRadius: 99, cursor: 'pointer', color: (cfg.tipo || 'desconto') === v ? '#fff' : 'var(--dim)', background: (cfg.tipo || 'desconto') === v ? 'linear-gradient(135deg,#7b2a8c,#d6007f)' : 'rgba(255,255,255,.04)', border: `1px solid ${(cfg.tipo || 'desconto') === v ? 'transparent' : 'var(--glass-border)'}` }}>{l}</span>)}</div>
+      </>} />
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
+        <div>
+          <div style={{ fontSize: 8.5, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)', marginBottom: 8 }}>Seleção automática</div>
+          <div className="row" style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: 10 }}>{CRIT.map(([v, l]) => <span key={v} onClick={() => salvar({ estrategia: v })} style={{ fontSize: 9, fontWeight: 700, padding: '5px 10px', borderRadius: 99, cursor: 'pointer', color: cfg.estrategia === v ? '#fff' : 'var(--dim)', background: cfg.estrategia === v ? 'linear-gradient(135deg,#7b2a8c,#d6007f)' : 'rgba(255,255,255,.04)', border: `1px solid ${cfg.estrategia === v ? 'transparent' : 'var(--glass-border)'}` }}>{l}</span>)}</div>
+          <Slm label="Itens por rodada (teto)" campo="max_produtos" min={1} max={100} />
+          <Slm label="Estoque mínimo p/ entrar" campo="estoque_minimo" min={0} max={20} sufixo=" un" />
+          <Slm label="Janela de análise" campo="dias_analise" min={7} max={90} sufixo=" dias" />
+        </div>
+        <div>
+          <div style={{ fontSize: 8.5, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)', marginBottom: 8 }}>Desconto &amp; proteção</div>
+          <Slm label="Teto de desconto" campo="desconto_max" min={5} max={50} sufixo="%" />
+          <Slm label="Piso de margem (sagrado)" campo="piso_margem" min={5} max={60} sufixo="%" cor={PROMO.OK} />
+          <Slm label="Duração da campanha" campo="duracao_dias" min={1} max={30} sufixo=" dias" />
+          <Slm label="Gatilho de queda (radar)" campo="queda_limiar" min={10} max={60} sufixo="%" cor={PROMO.WARN} />
+        </div>
+        <div>
+          <div style={{ fontSize: 8.5, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)', marginBottom: 8 }}>Comportamento</div>
+          <div className="glass row" style={{ display: 'flex', alignItems: 'center', padding: '9px 11px', borderRadius: 10, gap: 8, marginBottom: 6 }}><span style={{ fontSize: 9.5, color: 'var(--dim)', flex: 1 }}>Modo automático (cria sozinho)</span><span onClick={() => salvar({ modo: cfg.modo === 'auto' ? 'sugerir' : 'auto' })} style={{ width: 32, height: 18, borderRadius: 99, position: 'relative', cursor: 'pointer', flex: 'none', background: cfg.modo === 'auto' ? 'linear-gradient(90deg,#2FD98D,#1fae6e)' : 'rgba(255,255,255,.1)' }}><span style={{ position: 'absolute', top: 2, width: 14, height: 14, borderRadius: '50%', background: '#fff', left: cfg.modo === 'auto' ? 16 : 2 }} /></span></div>
+          <div className="glass row" style={{ display: 'flex', alignItems: 'center', padding: '9px 11px', borderRadius: 10, gap: 8, marginBottom: 6 }}><span style={{ fontSize: 9.5, color: 'var(--dim)', flex: 1 }}>🔒 Trava anti-duplicação</span><span style={{ width: 32, height: 18, borderRadius: 99, position: 'relative', flex: 'none', background: 'linear-gradient(90deg,#2FD98D,#1fae6e)', opacity: .6 }} title="sempre ativa"><span style={{ position: 'absolute', top: 2, width: 14, height: 14, borderRadius: '50%', background: '#fff', left: 16 }} /></span></div>
+          <div className="glass row" style={{ display: 'flex', alignItems: 'center', padding: '9px 11px', borderRadius: 10, gap: 8, marginBottom: 6 }}><span style={{ fontSize: 9.5, color: 'var(--dim)', flex: 1 }}>⚡ Radar pode disparar relâmpago</span><span onClick={() => salvar({ gatilho: cfg.gatilho === 'queda' ? 'agendado' : 'queda' })} style={{ width: 32, height: 18, borderRadius: 99, position: 'relative', cursor: 'pointer', flex: 'none', background: cfg.gatilho === 'queda' ? 'linear-gradient(90deg,#2FD98D,#1fae6e)' : 'rgba(255,255,255,.1)' }}><span style={{ position: 'absolute', top: 2, width: 14, height: 14, borderRadius: '50%', background: '#fff', left: cfg.gatilho === 'queda' ? 16 : 2 }} /></span></div>
+          <div style={{ fontSize: 8, color: 'var(--faint)', marginTop: 8, lineHeight: 1.5 }}>Cada tipo de motor usa estes limites. A trava é sempre ativa; o piso nunca é furado — o guardião reduz o desconto até caber.</div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* -------- Card de proposta (margem item a item) -------- */
+function PropostaCard({ p, teto, piso, on, toggle }) {
+  const guardiaoReduziu = p.desconto_pct < teto
+  const margem = p.margem_promo
+  const margemCor = margem == null ? 'var(--faint)' : margem <= piso + 1 ? PROMO.WARN : PROMO.OK
+  const parado = (p.vendidos || 0) === 0
+  return (
+    <div onClick={toggle} className="glass" style={{ padding: 11, borderRadius: 12, cursor: 'pointer', borderColor: on ? 'rgba(47,217,141,.4)' : 'var(--glass-border)', background: on ? 'rgba(47,217,141,.06)' : 'var(--glass)' }}>
+      <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        <span style={{ width: 15, height: 15, borderRadius: 4, flex: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: on ? PROMO.OK : 'transparent', border: on ? 'none' : '2px solid var(--glass-border)' }}>{on && <Check size={10} color="#0d0d0d" />}</span>
+        <div style={{ width: 28, height: 28, borderRadius: 7, flex: 'none', overflow: 'hidden', background: 'linear-gradient(135deg,rgba(238,77,45,.3),rgba(160,107,232,.25))', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{p.imagem ? <img src={p.imagem} alt="" loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Package size={14} style={{ color: 'rgba(255,255,255,.7)' }} />}</div>
+        <b style={{ fontSize: 9.5, flex: 1, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{p.nome}</b>
+      </div>
+      <div className="row" style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: 6 }}>
+        {parado ? <PBadge c={PROMO.WARN} bg="rgba(224,162,60,.12)">SEM VENDA</PBadge> : <PBadge c="var(--faint)" bg="rgba(255,255,255,.05)">{p.vendidos} VEND.</PBadge>}
+        <PBadge c="var(--faint)" bg="rgba(255,255,255,.05)">EST. {p.estoque}</PBadge>
+        <PBadge c={PROMO.OK} bg="rgba(47,217,141,.1)">POOL ✓ LIVRE</PBadge>
+        {guardiaoReduziu && <PBadge c={PROMO.DANGER} bg="rgba(255,122,122,.12)">GUARDIÃO −{teto}%→−{p.desconto_pct}%</PBadge>}
+      </div>
+      <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 9 }}>
+        <span style={{ color: 'var(--dim)' }}>{fmtBRL(p.preco_atual)} → <b className="num" style={{ color: PROMO.OK }}>{fmtBRL(p.preco_promo)}</b></span>
+        <PBadge c="#fff" bg={PROMO.SHOPEE}>-{p.desconto_pct}%</PBadge>
+        <div style={{ flex: 1 }} />
+        <b className="num" style={{ color: margemCor, fontWeight: 800 }}>margem {margem != null ? `${margem}%` : '—'}{margem != null && margem <= piso + 1 ? ' ⚠' : ''}</b>
+      </div>
+    </div>
+  )
+}
+
+/* -------- Diário de bordo do agente -------- */
+function DiarioAgente({ hist }) {
+  const CORT = { desconto: PROMO.SHOPEE, flash: '#d6007f', cupom: PROMO.GOLD, bundle: PROMO.PURPLE, addon: PROMO.TEAL }
+  return (
+    <div className="glass" style={{ padding: 16 }}>
+      <PSecao icon={Clock} cor={PROMO.PURPLE} titulo="Diário de bordo do agente" extra={<><div style={{ flex: 1 }} /><PBadge c="var(--faint)" bg="rgba(255,255,255,.06)">{(hist || []).length} REGISTROS</PBadge></>} />
+      {(!hist || hist.length === 0) ? <div style={{ fontSize: 11, color: 'var(--faint)', padding: 16, textAlign: 'center' }}>Ainda sem ações registradas. Quando o agente criar, renovar ou o guardião reduzir um desconto, aparece aqui com data e motivo.</div>
+        : (
+          <div>
+            {hist.map((h, i) => (
+              <div key={i} className="row" style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '7px 0', borderBottom: i < hist.length - 1 ? '1px solid rgba(255,255,255,.04)' : 'none' }}>
+                <span style={{ width: 7, height: 7, borderRadius: '50%', background: CORT[h.tipo] || PROMO.PURPLE, flex: 'none', marginTop: 4 }} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 10, color: 'var(--dim)' }}><b style={{ color: 'var(--text)' }}>{h.nome || `${h.tipo} #${h.ref_id}`}</b>{h.qtd_itens != null ? ` · ${h.qtd_itens} itens` : ''}{h.desconto_pct != null ? ` · -${h.desconto_pct}%` : ''}</div>
+                  {h.motivo && <div style={{ fontSize: 8.5, color: 'var(--faint)' }}>{h.motivo}</div>}
+                </div>
+                <span className="num" style={{ fontSize: 8, color: 'var(--faint)', flex: 'none' }}>{tempoRelBR(h.criado_em)}</span>
+              </div>
+            ))}
+          </div>
+        )}
     </div>
   )
 }

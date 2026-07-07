@@ -14,7 +14,6 @@ const TIPOS = {
   manual: ['MANUAL', WARN, 'rgba(224,162,60,.16)'],
   radar: ['RADAR', BLUE, 'rgba(91,141,239,.16)'],
 }
-const CORES_HEX = { prata: '#C0C0C0', dourada: '#D4AF37', dourado: '#D4AF37', preta: '#2a2a2a', preto: '#2a2a2a', branca: '#f0f0f0', vermelha: '#c0392b', azul: '#2980b9', verde: '#27ae60', rosa: '#e84393', amarela: '#f1c40f', roxa: '#8e44ad', lilas: '#b39ddb', cinza: '#7f8c8d', marrom: '#795548', laranja: '#e67e22', cristal: 'rgba(255,255,255,.2)', transparente: 'rgba(255,255,255,.2)' }
 
 const fmtDur = (ms) => {
   if (ms == null) return '—'
@@ -24,11 +23,6 @@ const fmtDur = (ms) => {
 const fmtClock = (ms) => {
   const s = Math.max(0, Math.floor(ms / 1000)); const m = Math.floor(s / 60)
   return m + ':' + String(s % 60).padStart(2, '0')
-}
-const corProduto = (nome) => {
-  const k = (nome || '').toLowerCase()
-  for (const c of Object.keys(CORES_HEX)) if (k.includes(c)) return CORES_HEX[c]
-  return null
 }
 function hEmJanelas(h, janelas) { return (janelas || []).some(([a, b]) => (a <= b ? (h >= a && h < b) : (h >= a || h < b))) }
 function janelasPico(pico, maxJanelas = 2) {
@@ -242,38 +236,43 @@ export default function ShopeeBoost({ conectado, notify }) {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 13 }}>
           {(p?.vagas || []).map((v, i) => {
             if (!v.ocupada) return (
-              <div key={i} className="glass" style={{ padding: 12, borderRadius: 14, border: '1.5px dashed var(--glass-border)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 210, opacity: .8 }}>
-                <div style={{ width: 46, height: 46, borderRadius: 12, border: '1.5px dashed var(--faint)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 10 }}><Plus size={18} style={{ color: 'var(--faint)' }} /></div>
-                <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--faint)' }}>Vaga livre</div>
-                <div style={{ fontSize: 8.5, color: 'var(--faint)', marginTop: 3, textAlign: 'center' }}>o motor puxa o próximo da fila</div>
+              <div key={i} className="glass" style={{ padding: 0, borderRadius: 14, border: '1.5px dashed var(--glass-border)', overflow: 'hidden', opacity: .8 }}>
+                <div style={{ height: 108, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,.18)' }}>
+                  <div style={{ width: 42, height: 42, borderRadius: 12, border: '1.5px dashed var(--faint)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Plus size={17} style={{ color: 'var(--faint)' }} /></div>
+                </div>
+                <div style={{ padding: '12px 12px 14px', textAlign: 'center' }}>
+                  <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--faint)' }}>Vaga {i + 1} · livre</div>
+                  <div style={{ fontSize: 8.5, color: 'var(--faint)', marginTop: 3 }}>o motor puxa o próximo da fila</div>
+                </div>
               </div>
             )
             const t = TIPOS[v.tipo] || TIPOS.manual
             const rem = restante(v)
             const frac = rem == null ? 0 : Math.min(1, Math.max(0, rem / (4 * 3600000)))
             const ringCor = rem != null && rem < 3600000 ? WARN : t[1]
-            const cprod = corProduto(v.nome)
             return (
-              <div key={i} className="glass lift" style={{ padding: 12, borderRadius: 14, borderTop: `2.5px solid ${t[1]}` }}>
-                <div className="row" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 9 }}>
-                  <Badge c={t[1]} bg={t[2]}>{t[0]}</Badge>
-                  {v.em_oferta ? <Badge c={SHOPEE} bg="rgba(238,77,45,.14)">oferta</Badge> : <Badge c="var(--faint)" bg="rgba(255,255,255,.05)">vaga {i + 1}</Badge>}
+              <div key={i} className="glass lift" style={{ padding: 0, borderRadius: 14, borderTop: `2.5px solid ${t[1]}`, position: 'relative' }}>
+                {/* foto grande edge-to-edge com badges sobrepostas */}
+                <div style={{ position: 'relative', height: 108, borderRadius: '12px 12px 0 0', overflow: 'hidden', background: 'radial-gradient(circle at 50% 38%, rgba(255,255,255,.07), rgba(0,0,0,.4))', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {v.imagem ? <img src={v.imagem} alt="" loading="lazy" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} /> : <Package size={26} style={{ color: 'rgba(255,255,255,.55)' }} />}
+                  <span style={{ position: 'absolute', top: 7, left: 7 }}><Badge c={v.tipo === 'manual' ? '#0d0d0d' : '#fff'} bg={t[1]}>{t[0]}</Badge></span>
+                  <span style={{ position: 'absolute', top: 7, right: 7 }}>{v.em_oferta ? <Badge c="#fff" bg="rgba(238,77,45,.92)">OFERTA</Badge> : <Badge c="#fff" bg="rgba(0,0,0,.55)">VAGA {i + 1}</Badge>}</span>
+                  <span style={{ position: 'absolute', bottom: 6, left: 7, width: 7, height: 7, borderRadius: '50%', background: '#fff', boxShadow: '0 0 0 2px rgba(0,0,0,.4)', animation: 'pulse 2s infinite' }} title="em destaque agora" />
                 </div>
-                <div style={{ margin: '0 auto 9px', width: 70 }}>
-                  <Ring size={70} val={frac} cor={ringCor} w={5}>
-                    <b className="num" style={{ fontSize: 12.5, color: ringCor }}>{rem == null ? '—' : fmtDur(rem)}</b>
-                    <span style={{ fontSize: 6.5, textTransform: 'uppercase', letterSpacing: '.5px', fontWeight: 800, color: 'var(--faint)' }}>restante</span>
+                {/* anel-temporizador sobreposto (metade na foto, metade fora) */}
+                <div title="tempo restante do boost (4h)" style={{ position: 'absolute', top: 108 - 23, right: 8, zIndex: 2, background: 'var(--surface-2, #1d1426)', borderRadius: '50%', boxShadow: '0 3px 10px rgba(0,0,0,.5)' }}>
+                  <Ring size={46} val={frac} cor={ringCor} w={4.5}>
+                    <b className="num" style={{ fontSize: 9.5, color: ringCor, lineHeight: 1 }}>{rem == null ? '—' : fmtDur(rem)}</b>
+                    <span style={{ fontSize: 4.5, textTransform: 'uppercase', letterSpacing: '.4px', fontWeight: 800, color: 'var(--faint)' }}>restante</span>
                   </Ring>
                 </div>
-                <div style={{ width: '100%', height: 104, borderRadius: 10, marginBottom: 8, position: 'relative', overflow: 'hidden', background: 'radial-gradient(circle at 50% 38%, rgba(255,255,255,.07), rgba(0,0,0,.4))', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  {v.imagem ? <img src={v.imagem} alt="" loading="lazy" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} /> : <Package size={26} style={{ color: 'rgba(255,255,255,.55)' }} />}
-                  <span style={{ position: 'absolute', top: 6, right: 7, width: 7, height: 7, borderRadius: '50%', background: '#fff', boxShadow: '0 0 0 2px rgba(0,0,0,.4)', animation: 'pulse 2s infinite' }} />
-                  {v.em_oferta && <span style={{ position: 'absolute', bottom: 5, left: 6 }}><Badge c="#fff" bg="rgba(238,77,45,.92)">oferta</Badge></span>}
-                </div>
-                <div title={v.nome} style={{ fontSize: 10.5, fontWeight: 600, lineHeight: 1.3, height: 28, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{v.nome}</div>
-                <div className="row num" style={{ display: 'flex', justifyContent: 'space-between', marginTop: 7, paddingTop: 7, borderTop: '1px solid var(--glass-border)', fontSize: 8.5 }}>
-                  <span style={{ color: 'var(--faint)' }}>{v.impulsos}º imp.</span>
-                  <span style={{ color: OK }}>{v.vendas} vendas</span>
+                {/* corpo */}
+                <div style={{ padding: '10px 12px 12px' }}>
+                  <div title={v.nome} style={{ fontSize: 10.5, fontWeight: 600, lineHeight: 1.3, height: 28, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', paddingRight: 40 }}>{v.nome}</div>
+                  <div className="row num" style={{ display: 'flex', justifyContent: 'space-between', marginTop: 7, paddingTop: 7, borderTop: '1px solid var(--glass-border)', fontSize: 8.5 }}>
+                    <span style={{ color: 'var(--faint)' }}>{v.impulsos}º imp.</span>
+                    <span style={{ color: OK }}>{v.vendas} vendas</span>
+                  </div>
                 </div>
               </div>
             )
@@ -535,26 +534,35 @@ function MiniCard({ label, value, tag, cor = 'var(--text)' }) {
 
 /* ---------- Timeline 24h (forecast do rodízio) ---------- */
 function Timeline({ vagas, fila, decorrido }) {
-  const start = Date.now(); const span = 24 * 3600000; const H = 3600000
-  const laneH = 30, eixo = 20, altura = laneH * 5
+  /* Agenda em linha do tempo (modelo aprovado na Central de Promoções):
+     uma trilha por vaga, nome à esquerda, barra colorida pelo tipo, marcador
+     AGORA dourado. Janela: 2h de passado + 22h de futuro (previsto pela fila). */
+  const agora = Date.now()
+  const start = agora - 2 * 3600000
+  const span = 24 * 3600000
+  const H = 3600000
+  const agoraPct = (agora - start) / span * 100
   const filaNomes = fila.map((f) => f.nome).filter(Boolean)
-  const blocks = []
-  vagas.forEach((v, lane) => {
-    let t = start
+  const CORES = { auto: ['var(--accent2)', 'var(--accent)'], manual: [GOLD, '#c99b00'], radar: [BLUE, '#3a6fd8'] }
+  const trilhas = vagas.map((v, lane) => {
+    const barras = []
+    let t = agora
     if (v.ocupada) {
-      const rem = v.termina_ms == null ? 2 * H : v.termina_ms - decorrido
-      const fim = start + Math.max(5 * 60000, rem)
-      blocks.push({ lane, a: start, b: fim, tipo: v.tipo, nome: v.nome, agora: true })
+      const rem = v.termina_ms == null ? 2 * H : Math.max(5 * 60000, v.termina_ms - decorrido)
+      const fim = agora + rem
+      barras.push({ a: fim - 4 * H, b: fim, tipo: v.tipo, nome: v.nome, ativa: true })
       t = fim
     }
     let k = 0
     while (t < start + span && k < 6) {
       const nome = filaNomes.length ? filaNomes[(lane + k) % filaNomes.length] : 'próximo da fila'
-      blocks.push({ lane, a: t, b: Math.min(t + 4 * H, start + span), tipo: 'previsto', nome })
+      barras.push({ a: t, b: Math.min(t + 4 * H, start + span), tipo: 'previsto', nome })
       t += 4 * H; k++
     }
+    return { rotulo: v.ocupada ? v.nome : `Vaga ${lane + 1} · livre`, ocupada: v.ocupada, barras }
   })
-  const picos = []; const base = new Date(); base.setMinutes(0, 0, 0)
+  const picos = []
+  const base = new Date(); base.setMinutes(0, 0, 0)
   for (let d = 0; d < 2; d++) {
     ;[[11, 14], [19, 22]].forEach(([h1, h2]) => {
       const a = new Date(base); a.setDate(a.getDate() + d); a.setHours(h1)
@@ -562,33 +570,49 @@ function Timeline({ vagas, fila, decorrido }) {
       picos.push([a.getTime(), b.getTime()])
     })
   }
-  const ag = new Date(start)
+  const marcas = []
+  for (let i = 0; i <= 6; i++) marcas.push(new Date(start + i * 4 * H))
   return (
     <div style={{ marginTop: 15 }}>
-      <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 8.5, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)', display: 'inline-flex', alignItems: 'center', gap: 6 }}><Calendar size={11} />Agenda do rodízio · próximas 24h</span>
-        <span style={{ fontSize: 8.5, color: PURPLE, fontWeight: 700 }}>(estimada pela fila e janela de pico)</span>
+      <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 8.5, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)', display: 'inline-flex', alignItems: 'center', gap: 6 }}><Calendar size={11} />Agenda do rodízio · linha do tempo</span>
+        <Badge c="#cfaef5" bg="rgba(160,107,232,.15)">2H DE PASSADO + 22H PREVISTAS</Badge>
         <div style={{ flex: 1 }} />
         <span className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 8.5, color: 'var(--faint)' }}><span style={{ width: 9, height: 3, borderRadius: 2, background: 'rgba(160,107,232,.5)' }} />pico da loja</span>
-        <span className="num" style={{ fontSize: 9, fontWeight: 800, color: SHOPEE }}>agora {String(ag.getHours()).padStart(2, '0')}:{String(ag.getMinutes()).padStart(2, '0')}</span>
+        <span className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 8.5, color: 'var(--faint)' }}><span style={{ width: 9, height: 3, borderRadius: 2, background: 'rgba(255,255,255,.16)' }} />previsto pela fila</span>
       </div>
-      <div className="row" style={{ display: 'flex', alignItems: 'stretch' }}>
-        <div style={{ width: 28, flex: 'none', display: 'flex', flexDirection: 'column' }}>
-          {[0, 1, 2, 3, 4].map((l) => <div key={l} style={{ height: laneH, display: 'flex', alignItems: 'center' }}><span className="num" style={{ fontSize: 7.5, fontWeight: 800, color: 'var(--faint)' }}>V{l + 1}</span></div>)}
+      <div style={{ position: 'relative', paddingTop: 10 }}>
+        {/* marcador AGORA */}
+        <div style={{ position: 'absolute', left: `calc(126px + (100% - 126px) * ${agoraPct / 100})`, top: 10, bottom: 16, width: 2, background: 'linear-gradient(var(--gold, #F2C200), transparent)', zIndex: 3 }} />
+        <div className="num" style={{ position: 'absolute', left: `calc(126px + (100% - 126px) * ${agoraPct / 100})`, top: -4, transform: 'translateX(-50%)', fontSize: 7.5, color: GOLD, fontWeight: 800, zIndex: 3 }}>AGORA</div>
+        <div style={{ display: 'grid', gap: 6 }}>
+          {trilhas.map((tr, lane) => (
+            <div key={lane} className="row" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span title={tr.rotulo} style={{ width: 118, fontSize: 9, color: tr.ocupada ? 'var(--dim)' : 'var(--faint)', flex: 'none', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{tr.rotulo}</span>
+              <div style={{ flex: 1, height: 16, position: 'relative', background: 'rgba(255,255,255,.03)', borderRadius: 8, border: tr.ocupada ? 'none' : '1px dashed rgba(255,255,255,.08)' }}>
+                {picos.map(([a, b], i) => {
+                  const l = Math.max(0, (a - start) / span * 100), w = Math.min(100 - l, (b - a) / span * 100)
+                  if (l >= 100 || w <= 0) return null
+                  return <div key={'p' + i} style={{ position: 'absolute', left: `${l}%`, width: `${w}%`, top: 0, bottom: 0, background: 'rgba(160,107,232,.08)' }} />
+                })}
+                {tr.barras.map((b, i) => {
+                  const l = Math.max(0, (b.a - start) / span * 100)
+                  const r0 = Math.min(100, (b.b - start) / span * 100)
+                  const w = Math.max(.8, r0 - l)
+                  if (r0 <= 0 || l >= 100) return null
+                  const grad = b.ativa ? (CORES[b.tipo] || CORES.auto) : null
+                  return (
+                    <div key={i} title={b.nome} style={{ position: 'absolute', left: `${l}%`, width: `calc(${w}% - 2px)`, top: 0, bottom: 0, borderRadius: 8, background: b.ativa ? `linear-gradient(90deg,${grad[0]},${grad[1]})` : 'rgba(255,255,255,.09)', overflow: 'hidden', display: 'flex', alignItems: 'center', paddingLeft: 6, opacity: b.ativa ? .95 : 1 }}>
+                      {w >= 10 && <span style={{ fontSize: 7.5, fontWeight: 700, color: b.ativa ? '#fff' : 'var(--faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.nome}</span>}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
         </div>
-        <div style={{ flex: 1, position: 'relative', height: altura + eixo, background: 'rgba(0,0,0,.22)', borderRadius: 10, border: '1px solid var(--glass-border)', overflow: 'hidden' }}>
-          {picos.map(([a, b], i) => { const l = Math.max(0, (a - start) / span * 100), w = Math.min(100, (b - a) / span * 100); if (l > 100 || l + w < 0) return null; return <div key={'p' + i} style={{ position: 'absolute', top: 0, bottom: eixo, left: `${l}%`, width: `${w}%`, background: 'rgba(160,107,232,.07)', borderLeft: '1px dashed rgba(160,107,232,.3)', borderRight: '1px dashed rgba(160,107,232,.3)' }} /> })}
-          {[0, 1, 2, 3, 4].map((l) => <div key={'l' + l} style={{ position: 'absolute', left: 0, right: 0, top: l * laneH, height: laneH, background: l % 2 ? 'rgba(255,255,255,.018)' : 'transparent', borderBottom: '1px solid rgba(255,255,255,.04)' }} />)}
-          {blocks.map((b, i) => {
-            const l = Math.max(0, (b.a - start) / span * 100), r0 = Math.min(100, (b.b - start) / span * 100), w = Math.max(.6, r0 - l)
-            const cor = b.agora ? (TIPOS[b.tipo] ? TIPOS[b.tipo][1] : PURPLE) : 'rgba(255,255,255,.14)'
-            const bg = b.agora ? (b.tipo === 'auto' ? 'rgba(160,107,232,.42)' : b.tipo === 'radar' ? 'rgba(91,141,239,.42)' : 'rgba(224,162,60,.42)') : 'rgba(255,255,255,.05)'
-            return <div key={i} title={b.nome} style={{ position: 'absolute', left: `${l}%`, width: `calc(${w}% - 2px)`, top: b.lane * laneH + 3, height: laneH - 6, borderRadius: 5, background: bg, border: `1px solid ${cor}`, overflow: 'hidden', display: 'flex', alignItems: 'center', paddingLeft: 5 }}>{w >= 8 && <span style={{ fontSize: 7.5, fontWeight: 700, color: b.agora ? 'var(--text)' : 'var(--faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.nome}</span>}</div>
-          })}
-          <div style={{ position: 'absolute', top: 0, bottom: eixo, left: 0, width: 2, background: SHOPEE, boxShadow: '0 0 8px rgba(238,77,45,.8)', zIndex: 3 }} />
-          <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: eixo, borderTop: '1px solid rgba(255,255,255,.06)', background: 'rgba(0,0,0,.2)' }}>
-            {[0, 1, 2, 3, 4, 5, 6].map((i) => { const t = new Date(start + i * 4 * H); return <span key={i} className="num" style={{ position: 'absolute', top: 5, left: `${i / 6 * 100}%`, transform: i === 0 ? 'none' : i === 6 ? 'translateX(-100%)' : 'translateX(-50%)', fontSize: 7.5, color: 'var(--faint)', paddingLeft: i === 0 ? 4 : 0 }}>{String(t.getHours()).padStart(2, '0')}h</span> })}
-          </div>
+        <div className="row" style={{ display: 'flex', justifyContent: 'space-between', fontSize: 7.5, color: 'var(--faint)', marginTop: 6, paddingLeft: 126 }}>
+          {marcas.map((m, i) => <span key={i} className="num">{String(m.getHours()).padStart(2, '0')}h</span>)}
         </div>
       </div>
     </div>
