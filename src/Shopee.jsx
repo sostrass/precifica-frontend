@@ -3920,11 +3920,11 @@ function Promocoes({ conectado, notify, irParaMotor }) {
       </div>
       {sub === 'central' && <CentralPromo notify={notify} irCriar={setSub} irParaMotor={irParaMotor} />}
       {sub === 'visao' && <DashboardPromo notify={notify} />}
-      {sub === 'cupons' && <Cupons notify={notify} />}
+      {sub === 'cupons' && <Cupons conectado={conectado} notify={notify} />}
       {sub === 'descontos' && <Descontos conectado={conectado} notify={notify} />}
-      {sub === 'bundle' && <Bundles notify={notify} />}
-      {sub === 'addon' && <Addons notify={notify} />}
-      {sub === 'flash' && <FlashSale notify={notify} />}
+      {sub === 'bundle' && <Bundles conectado={conectado} notify={notify} />}
+      {sub === 'addon' && <Addons conectado={conectado} notify={notify} />}
+      {sub === 'flash' && <FlashSale conectado={conectado} notify={notify} />}
     </div>
   )
 }
@@ -4631,7 +4631,7 @@ function DashboardPromo({ notify }) {
   const [dias, setDias] = useState(30)
   const [receita, setReceita] = useState(null)
   const [carregR, setCarregR] = useState(false)
-  useEffect(() => { api.shopeeCampanhasAgenda().then(setAgenda).catch(() => setAgenda({ erro: true })) }, [])
+  const [cfg, setCfg] = useState(null)
 
   const calcReceita = async (dd) => {
     setCarregR(true); setReceita(null)
@@ -4639,118 +4639,195 @@ function DashboardPromo({ notify }) {
     catch (e) { setReceita({ erro: e.message || true }); notify(e.message || 'Falha ao calcular', 'danger') }
     setCarregR(false)
   }
+  useEffect(() => {
+    api.shopeeCampanhasAgenda().then(setAgenda).catch(() => setAgenda({ erro: true }))
+    api.shopeePromoConfig().then(setCfg).catch(() => {})
+    calcReceita(30)
+  }, [])
+  const trocarPeriodo = (dd) => { setDias(dd); calcReceita(dd) }
 
-  const camps = (agenda?.campanhas || []).map((c) => ({ ...c, ciclo: cicloInfo(c.inicio, c.fim, agora) }))
-  const ativas = camps.filter((c) => c.ciclo.fase === 'ativa').sort((a, b) => a.ciclo.restante - b.ciclo.restante)
-  const agendadas = camps.filter((c) => c.ciclo.fase === 'agendada').sort((a, b) => a.ciclo.paraInicio - b.ciclo.paraInicio)
+  const cinfo = (ini, fim) => {
+    const a = agora / 1000
+    if (a < ini) return { fase: 'agendada', paraInicio: ini - a }
+    if (a > fim) return { fase: 'encerrada', restante: 0 }
+    return { fase: 'ativa', restante: fim - a, prog: Math.min(100, Math.max(0, (a - ini) / Math.max(1, fim - ini) * 100)) }
+  }
+  const camps = (agenda && agenda.campanhas ? agenda.campanhas : []).map((c) => ({ ...c, ci: cinfo(c.inicio, c.fim) }))
+  const ativas = camps.filter((c) => c.ci.fase === 'ativa').sort((a, b) => a.ci.restante - b.ci.restante)
+  const agendadas = camps.filter((c) => c.ci.fase === 'agendada').sort((a, b) => a.ci.paraInicio - b.ci.paraInicio)
+
   const r = receita && !receita.erro ? receita : null
   const maxTipo = r ? Math.max(...r.por_tipo.map((t) => t.receita), 1) : 1
+  const maxCamp = r ? Math.max(...r.top_campanhas.map((c) => c.receita), 1) : 1
+  const pctPed = r && r.pedidos_no_periodo ? Math.round(r.total.pedidos / r.pedidos_no_periodo * 100) : 0
+  const ticket = r && r.total.pedidos ? r.total.receita / r.total.pedidos : 0
+  const piso = cfg && cfg.piso_margem != null ? cfg.piso_margem : null
+  const tag = (t) => TAG_PROMO[t] || TAG_PROMO.outras
 
   return (
     <div className="space-y-3">
-      {agenda === null ? <Carregando txt="carregando campanhas…" />
-        : agenda?.erro ? <Vazio txt="Não consegui carregar as campanhas." />
-        : <>
-            <div className="grid grid-cols-3 gap-2">
-              <OverviewCard n={ativas.length} label="ativas agora" cor="#2DD4BF" icon={Activity} pulse={ativas.length > 0} />
-              <OverviewCard n={agendadas.length} label="agendadas" cor="#60A5FA" icon={Clock} />
-              <OverviewCard n={camps.length} label="no total" cor={LARANJA} icon={Layers} />
+      {/* COMMAND BAR */}
+      <div className="glass" style={{ padding: '15px 18px', border: '1px solid transparent', background: 'linear-gradient(var(--surface),var(--surface)) padding-box,linear-gradient(110deg,rgba(47,217,141,.5),rgba(214,0,127,.34),rgba(91,141,239,.3)) border-box' }}>
+        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 13, flexWrap: 'wrap' }}>
+          <div style={{ width: 44, height: 44, borderRadius: 12, background: 'linear-gradient(145deg,#2FD98D,#1a9a63)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none', boxShadow: '0 6px 20px rgba(47,217,141,.3)' }}><BarChart3 size={22} color="#0d0d0d" /></div>
+          <div>
+            <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <b className="serif" style={{ fontSize: 20 }}>Visão geral</b>
+              <PBadge c="#fff" bg={PROMO.SHOPEE}>SHOPEE</PBadge>
+              <PBadge c="#0d0d0d" bg={PROMO.OK}>RELATÓRIO CONSOLIDADO</PBadge>
             </div>
+            <div style={{ fontSize: 10.5, color: 'var(--dim)' }}>Quanto suas promoções venderam, por tipo e por campanha — atribuído pedido a pedido pela promoção que cada item carrega</div>
+          </div>
+          <div style={{ flex: 1 }} />
+          <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {[7, 30, 90].map((dd) => <span key={dd} onClick={() => trocarPeriodo(dd)} style={{ fontSize: 10, fontWeight: 700, padding: '6px 12px', borderRadius: 99, cursor: 'pointer', color: dias === dd ? '#0d0d0d' : 'var(--dim)', background: dias === dd ? PROMO.OK : 'rgba(255,255,255,.04)', border: `1px solid ${dias === dd ? 'transparent' : 'var(--glass-border)'}` }}>{dd}d</span>)}
+          </div>
+          <div style={{ width: 1, height: 30, background: 'var(--glass-border)' }} />
+          <button onClick={() => trocarPeriodo(dias)} disabled={carregR} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 700, padding: '8px 12px', borderRadius: 9, cursor: 'pointer', color: 'var(--dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)' }}>{carregR ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}Atualizar</button>
+        </div>
+      </div>
 
-            {(ativas.length > 0 || agendadas.length > 0) ? (
-              <div className="glass rounded-2xl p-4">
-                <div className="text-sm font-semibold mb-2 flex items-center gap-1.5"><Calendar size={15} style={{ color: LARANJA }} /> Linha do tempo</div>
-                {ativas.length > 0 && <>
-                  <div className="text-[10px] text-faint uppercase tracking-wide mb-1.5 flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full" style={{ background: '#2DD4BF' }} /> rodando agora</div>
-                  <div className="space-y-1.5 mb-3">{ativas.map((c) => <AgendaRow key={c.tipo + c.id} c={c} />)}</div>
-                </>}
-                {agendadas.length > 0 && <>
-                  <div className="text-[10px] text-faint uppercase tracking-wide mb-1.5">próximas</div>
-                  <div className="space-y-1.5">{agendadas.map((c) => <AgendaRow key={c.tipo + c.id} c={c} />)}</div>
-                </>}
-              </div>
-            ) : <Vazio txt="Nenhuma campanha ativa ou agendada. Crie nas abas ao lado ou pelo Motor de promoções." />}
+      {/* HERO KPIs */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 9 }}>
+        <div className="glass" style={{ padding: '13px 15px', borderRadius: 14, borderLeft: `3px solid ${PROMO.OK}`, gridColumn: 'span 1' }}>
+          <div className="up" style={{ fontSize: 7, color: 'var(--faint)', letterSpacing: '.5px' }}>GMV de promoções · {dias}d</div>
+          {carregR ? <div style={{ height: 26, display: 'flex', alignItems: 'center' }}><Loader2 size={15} className="animate-spin" style={{ color: PROMO.OK }} /></div>
+            : <b className="num serif" style={{ fontSize: 23, color: PROMO.OK }}>{r ? fmtBRL(r.total.receita) : '—'}</b>}
+          <div className="num" style={{ fontSize: 8, color: 'var(--faint)' }}>receita atribuída a ofertas</div>
+        </div>
+        <PKpi label="Unidades" value={r ? r.total.unidades : '—'} sub="vendidas em promo" />
+        <PKpi label="Pedidos c/ promo" value={r ? r.total.pedidos : '—'} sub={r ? `de ${r.pedidos_no_periodo} no período` : ''} cor={PROMO.BLUE} />
+        <PKpi label="% dos pedidos" value={r ? `${pctPed}%` : '—'} sub="usaram promoção" cor={PROMO.PURPLE} borda="rgba(160,107,232,.35)" />
+        <PKpi label="Ticket médio" value={r ? fmtBRL(ticket) : '—'} sub="por pedido promo" cor={PROMO.GOLD} />
+      </div>
 
-            {/* receita gerada */}
-            <div className="glass rounded-2xl p-4" style={{ borderTop: `2px solid ${LARANJA}` }}>
-              <div className="flex items-start justify-between gap-3 flex-wrap">
-                <div className="min-w-0">
-                  <div className="text-sm font-semibold flex items-center gap-1.5"><TrendingUp size={15} style={{ color: LARANJA }} /> Receita gerada por promoções</div>
-                  <div className="text-xs text-dim mt-0.5 max-w-md">Quanto suas promoções venderam no período — atribuído pedido a pedido pela promoção que cada item carrega.</div>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  {[7, 30, 90].map((dd) => (
-                    <button key={dd} onClick={() => { setDias(dd); if (r || carregR) calcReceita(dd) }} className="text-xs px-2.5 py-1 rounded-lg font-medium"
-                            style={dias === dd ? { background: LARANJA, color: '#fff' } : { background: 'var(--glass)', color: 'var(--text-dim)', border: '1px solid var(--glass-border)' }}>{dd}d</button>
-                  ))}
-                </div>
-              </div>
+      {carregR && !r && <div className="glass row" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 26, justifyContent: 'center', color: 'var(--faint)', fontSize: 11.5 }}><Loader2 size={16} className="animate-spin" />varrendo os pedidos do período e atribuindo às promoções…</div>}
+      {receita && receita.erro && <div className="glass" style={{ padding: 18, textAlign: 'center', fontSize: 11.5, color: PROMO.DANGER }}>{typeof receita.erro === 'string' ? receita.erro : 'Não consegui calcular a receita das promoções.'}</div>}
 
-              {!receita && !carregR && (
-                <button onClick={() => calcReceita(dias)} className="w-full mt-3 py-2.5 rounded-xl text-sm font-medium text-white flex items-center justify-center gap-2" style={{ background: LARANJA }}>
-                  <BadgePercent size={15} /> Calcular receita dos últimos {dias} dias
-                </button>
-              )}
-              {!receita && !carregR && <div className="text-[11px] text-faint mt-2 text-center">Varre os pedidos do período — leva alguns segundos e fica em cache.</div>}
-              {carregR && <div className="py-8 text-center text-faint flex items-center justify-center gap-2"><Loader2 size={16} className="animate-spin" /> varrendo os pedidos e atribuindo às promoções…</div>}
-              {receita?.erro && <div className="py-4 text-center text-sm" style={{ color: '#FF6F6F' }}>{typeof receita.erro === 'string' ? receita.erro : 'Não consegui calcular a receita.'}</div>}
-
-              {r && (
-                <div className="mt-3 space-y-3">
-                  <div className="grid grid-cols-3 gap-2">
-                    <FinMetric icon={TrendingUp} rotulo="Receita em promo" valor={brl(r.total.receita)} cor="#2DD4BF" />
-                    <FinMetric icon={ShoppingBag} rotulo="Unidades" valor={r.total.unidades} />
-                    <FinMetric icon={Package} rotulo="Pedidos" valor={r.total.pedidos} sub={`de ${r.pedidos_no_periodo} no período`} />
+      {r && (
+        <>
+          {/* GMV por tipo + Ranking */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.15fr', gap: 11 }}>
+            {/* por tipo */}
+            <div className="glass" style={{ padding: 16 }}>
+              <PSecao icon={TrendingUp} cor={PROMO.OK} titulo="GMV por tipo de promoção" extra={<div style={{ flex: 1 }} />} />
+              {r.por_tipo.length === 0 ? <div style={{ fontSize: 10.5, color: 'var(--faint)', padding: 14, textAlign: 'center' }}>Sem receita atribuída por tipo no período.</div>
+                : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {r.por_tipo.map((t) => {
+                      const [lab, , bg] = tag(t.tipo); const pctReceita = r.total.receita ? Math.round(t.receita / r.total.receita * 100) : 0
+                      return (
+                        <div key={t.tipo}>
+                          <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                            <PBadge c={tag(t.tipo)[1]} bg={bg}>{lab}</PBadge>
+                            <div style={{ flex: 1 }} />
+                            <b className="num" style={{ fontSize: 12, color: PROMO.OK }}>{fmtBRL(t.receita)}</b>
+                            <span className="num" style={{ fontSize: 8.5, color: 'var(--faint)', width: 30, textAlign: 'right' }}>{pctReceita}%</span>
+                          </div>
+                          <div style={{ height: 8, borderRadius: 4, background: 'rgba(255,255,255,.05)', overflow: 'hidden' }}><div style={{ width: `${Math.max(4, t.receita / maxTipo * 100)}%`, height: '100%', borderRadius: 4, background: bg }} /></div>
+                          <div className="num" style={{ fontSize: 8, color: 'var(--faint)', marginTop: 3 }}>{t.unidades} un · {t.pedidos} pedido(s)</div>
+                        </div>
+                      )
+                    })}
                   </div>
+                )}
+            </div>
+            {/* ranking */}
+            <div className="glass" style={{ padding: 16 }}>
+              <PSecao icon={BarChart3} cor={PROMO.GOLD} titulo="Campanhas que mais venderam" extra={<div style={{ flex: 1 }} />} />
+              {r.top_campanhas.length === 0 ? <div style={{ fontSize: 10.5, color: 'var(--faint)', padding: 14, textAlign: 'center' }}>Nenhuma campanha com venda atribuída no período.</div>
+                : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                    {r.top_campanhas.map((c, i) => {
+                      const [lab, tc, bg] = tag(c.tipo)
+                      const medal = i === 0 ? PROMO.GOLD : i === 1 ? '#c8c8d0' : i === 2 ? '#cd7f42' : 'var(--faint)'
+                      return (
+                        <div key={c.id} className="glass" style={{ padding: '9px 11px', borderRadius: 11, borderLeft: `2px solid ${i < 3 ? medal : 'transparent'}` }}>
+                          <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span className="num serif" style={{ fontSize: 13, fontWeight: 800, color: medal, width: 16, textAlign: 'center', flex: 'none' }}>{i + 1}</span>
+                            <PBadge c={tc} bg={bg}>{lab}</PBadge>
+                            <span style={{ fontSize: 10.5, flex: 1, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{c.nome || `#${c.id}`}</span>
+                            <b className="num" style={{ fontSize: 12.5, color: PROMO.OK, flex: 'none' }}>{fmtBRL(c.receita)}</b>
+                          </div>
+                          <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
+                            <div style={{ flex: 1, height: 5, borderRadius: 3, background: 'rgba(255,255,255,.05)', overflow: 'hidden' }}><div style={{ width: `${Math.max(4, c.receita / maxCamp * 100)}%`, height: '100%', borderRadius: 3, background: bg }} /></div>
+                            <span className="num" style={{ fontSize: 8, color: 'var(--faint)', flex: 'none' }}>{c.unidades} un · {c.pedidos} ped.</span>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+            </div>
+          </div>
 
-                  {r.por_tipo.length > 0 && (
-                    <div>
-                      <div className="text-xs text-faint mb-1.5">Por tipo de promoção</div>
-                      <div className="space-y-1.5">
-                        {r.por_tipo.map((t) => {
-                          const meta = TIPO_META[t.tipo] || { rotulo: t.tipo, cor: '#888' }
-                          return (
-                            <div key={t.tipo} className="flex items-center gap-2">
-                              <span className="text-[11px] w-16 shrink-0" style={{ color: meta.cor }}>{meta.rotulo}</span>
-                              <div className="flex-1 h-5 rounded-md overflow-hidden relative" style={{ background: 'var(--glass-hover)' }}>
-                                <div className="h-full rounded-md flex items-center px-2" style={{ width: `${Math.max(8, (t.receita / maxTipo) * 100)}%`, background: `color-mix(in srgb, ${meta.cor} 35%, transparent)` }}>
-                                  <span className="text-[10px] font-semibold num whitespace-nowrap" style={{ color: meta.cor }}>{brl(t.receita)}</span>
-                                </div>
-                              </div>
-                              <span className="text-[10px] text-faint num w-12 text-right shrink-0">{t.unidades} un</span>
-                            </div>
-                          )
-                        })}
+          {r.total.receita === 0 && <div className="glass" style={{ padding: 14, textAlign: 'center', fontSize: 10.5, color: 'var(--faint)' }}>Nenhuma venda atribuída a promoções no período — ou não houve vendas com oferta ativa, ou os pedidos ainda não trazem a marcação de promoção da Shopee.</div>}
+          {r.parcial && <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'center', fontSize: 9, color: 'var(--faint)' }}><Clock size={10} />período grande — amostra dos pedidos mais recentes; os totais podem crescer.</div>}
+        </>
+      )}
+
+      {/* LINHA DO TEMPO + GUARDIÃO */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr', gap: 11 }}>
+        {/* timeline */}
+        <div className="glass" style={{ padding: 16 }}>
+          <PSecao icon={Clock} cor={PROMO.SHOPEE} titulo="Linha do tempo das campanhas" extra={<><div style={{ flex: 1 }} /><PBadge c={PROMO.OK} bg="rgba(47,217,141,.1)">{ativas.length} ativas</PBadge></>} />
+          {agenda === null ? <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 16, color: 'var(--faint)', fontSize: 10.5 }}><Loader2 size={13} className="animate-spin" />carregando campanhas…</div>
+            : (ativas.length === 0 && agendadas.length === 0) ? <div style={{ fontSize: 10.5, color: 'var(--faint)', padding: 16, textAlign: 'center' }}>Nenhuma campanha ativa ou agendada. Crie nas abas de criação ou pelo motor.</div>
+              : (
+                <div>
+                  {ativas.length > 0 && <div className="up" style={{ fontSize: 7, color: PROMO.OK, marginBottom: 7 }}>▸ rodando agora</div>}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginBottom: agendadas.length ? 12 : 0 }}>
+                    {ativas.map((c) => { const [lab, tc, bg] = tag(c.tipo); return (
+                      <div key={c.tipo + c.id} className="glass" style={{ padding: '8px 11px', borderRadius: 10 }}>
+                        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <PBadge c={tc} bg={bg}>{lab}</PBadge>
+                          <span style={{ fontSize: 10, flex: 1, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{c.nome || `#${c.id}`}</span>
+                          <span className="num" style={{ fontSize: 8.5, color: PROMO.OK, flex: 'none' }}>{fmtDur(c.ci.restante * 1000)}</span>
+                        </div>
+                        <div style={{ height: 4, borderRadius: 3, background: 'rgba(255,255,255,.05)', overflow: 'hidden', marginTop: 6 }}><div style={{ width: `${c.ci.prog}%`, height: '100%', borderRadius: 3, background: bg }} /></div>
                       </div>
-                    </div>
-                  )}
-
-                  {r.top_campanhas.length > 0 && (
-                    <div>
-                      <div className="text-xs text-faint mb-1.5">Campanhas que mais venderam</div>
-                      <div className="space-y-1.5">
-                        {r.top_campanhas.map((c, i) => {
-                          const meta = TIPO_META[c.tipo] || { rotulo: c.tipo, cor: '#888' }
-                          return (
-                            <div key={c.id} className="flex items-center gap-2 rounded-lg px-3 py-2" style={{ background: 'var(--glass-hover)' }}>
-                              <span className="text-[11px] num text-faint w-4 shrink-0">{i + 1}</span>
-                              <span className="text-[9px] px-1.5 py-0.5 rounded font-bold uppercase shrink-0" style={{ background: `color-mix(in srgb, ${meta.cor} 16%, transparent)`, color: meta.cor }}>{meta.rotulo}</span>
-                              <span className="text-xs flex-1 min-w-0 truncate">{c.nome || `#${c.id}`}</span>
-                              <span className="text-[10px] text-faint num shrink-0">{c.unidades} un</span>
-                              <span className="text-sm font-bold num shrink-0" style={{ color: '#2DD4BF' }}>{brl(c.receita)}</span>
-                            </div>
-                          )
-                        })}
+                    )})}
+                  </div>
+                  {agendadas.length > 0 && <div className="up" style={{ fontSize: 7, color: 'var(--faint)', marginBottom: 7 }}>▸ próximas</div>}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {agendadas.slice(0, 6).map((c) => { const [lab, tc, bg] = tag(c.tipo); return (
+                      <div key={c.tipo + c.id} className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 11px', borderRadius: 9, background: 'rgba(0,0,0,.15)' }}>
+                        <PBadge c={tc} bg={bg}>{lab}</PBadge>
+                        <span style={{ fontSize: 9.5, flex: 1, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{c.nome || `#${c.id}`}</span>
+                        <span className="num" style={{ fontSize: 8, color: 'var(--faint)', flex: 'none' }}>em {fmtDur(c.ci.paraInicio * 1000)}</span>
                       </div>
-                    </div>
-                  )}
-
-                  {r.total.receita === 0 && <div className="text-xs text-faint text-center py-2">Nenhuma venda atribuída a promoções no período. Ou não houve vendas com promoção ativa, ou os pedidos ainda não têm a marcação de promoção.</div>}
-                  {r.parcial && <div className="text-[10px] text-faint text-center">Período grande — amostra parcial dos pedidos mais recentes.</div>}
+                    )})}
+                  </div>
                 </div>
               )}
+        </div>
+        {/* guardião */}
+        <div className="glass" style={{ padding: 0, overflow: 'hidden', border: '1px solid transparent', background: 'linear-gradient(var(--surface),var(--surface)) padding-box,linear-gradient(140deg,rgba(47,217,141,.4),rgba(91,141,239,.3)) border-box' }}>
+          <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--glass-border)', background: 'linear-gradient(140deg,rgba(47,217,141,.07),transparent)' }}>
+            <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ width: 34, height: 34, borderRadius: 10, background: 'linear-gradient(145deg,#2FD98D,#1a9a63)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}><Lock size={16} color="#0d0d0d" /></div>
+              <div><b className="serif" style={{ fontSize: 14 }}>Proteção do guardião</b><div style={{ fontSize: 8.5, color: 'var(--dim)' }}>a margem nunca é furada</div></div>
             </div>
-          </>}
+          </div>
+          <div style={{ padding: '14px 16px' }}>
+            <div className="row" style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10 }}>
+              <span style={{ fontSize: 10, color: 'var(--dim)' }}>Piso de margem em vigor</span>
+              <div style={{ flex: 1 }} />
+              <b className="num serif" style={{ fontSize: 26, color: PROMO.OK }}>{piso != null ? `${piso}%` : '—'}</b>
+            </div>
+            <div style={{ fontSize: 10, color: 'var(--dim)', lineHeight: 1.5, marginBottom: 12 }}>Todo desconto automático é calculado para manter a margem líquida <b style={{ color: PROMO.OK }}>acima do piso</b>. Quando o desconto pedido furaria a margem, o guardião o <b style={{ color: 'var(--text)' }}>reduz</b> até caber — e nunca cria abaixo dela.</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+              {[['Preço de lista', 'preço real do anúncio na Shopee'], ['Líquido preservado', 'o Preço Bling (líquido-alvo) continua protegido'], ['Anti-duplicação', 'itens já em campanha ficam de fora até encerrar']].map(([t, d]) => (
+                <div key={t} className="row" style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                  <Check size={12} style={{ color: PROMO.OK, flex: 'none', marginTop: 1 }} />
+                  <div><div style={{ fontSize: 9.5, fontWeight: 600 }}>{t}</div><div style={{ fontSize: 8, color: 'var(--faint)' }}>{d}</div></div>
+                </div>
+              ))}
+            </div>
+            {cfg && cfg.desconto_max != null && <div className="row" style={{ display: 'flex', gap: 12, marginTop: 12, paddingTop: 11, borderTop: '1px solid var(--glass-border)', fontSize: 9, color: 'var(--faint)' }}><span>teto de desconto: <b className="num" style={{ color: 'var(--dim)' }}>{cfg.desconto_max}%</b></span><span>motor: <b style={{ color: cfg.ativo ? PROMO.OK : 'var(--faint)' }}>{cfg.ativo ? (cfg.modo === 'auto' ? 'automático' : 'sugerir') : 'desligado'}</b></span></div>}
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
@@ -4767,56 +4844,258 @@ function AbasStatus({ valor, onChange, opcoes }) {
   )
 }
 
-function Cupons({ notify }) {
-  const [lista, setLista] = useState(null)
-  const [form, setForm] = useState(false)
-  const [rep, setRep] = useState(null)
+function Cupons({ conectado, notify }) {
+  const [listas, setListas] = useState({ ongoing: null, upcoming: null, expired: null })
+  const [tab, setTab] = useState('ongoing')
+  const [sync, setSync] = useState(false)
+  const [nome, setNome] = useState('')
+  const [codigo, setCodigo] = useState('')
+  const [tipoDesc, setTipoDesc] = useState(2)     // 2=percentual, 1=valor fixo
+  const [valor, setValor] = useState(10)
+  const [minc, setMinc] = useState(0)
+  const [quota, setQuota] = useState(100)
+  const [escopo, setEscopo] = useState(1)         // 1=loja, 2=produto
+  const [dias, setDias] = useState(7)
+  const [criando, setCriando] = useState(false)
   const [enc, setEnc] = useState(null)
-  const [stat, setStat] = useState('ongoing')
-  const carregar = () => { setLista(null); api.shopeeCupons(stat).then(setLista).catch(() => setLista({ erro: true })) }
-  useEffect(carregar, [stat])
-  const cupons = lista?.response?.voucher_list || []
-  const encerrar = async (id) => {
-    setEnc(id)
-    try { await api.shopeeEncerrarCupom(id); notify('Cupom encerrado', 'ok'); carregar() }
-    catch (e) { notify(e.message, 'danger') }
-    setEnc(null)
+  const [rep, setRep] = useState(null)
+  const agora = useAgora(30000)
+
+  const carregar = async (forcar) => {
+    if (!forcar) setListas({ ongoing: null, upcoming: null, expired: null })
+    try {
+      const [o, u, e] = await Promise.all([
+        api.shopeeCupons('ongoing').catch(() => ({})),
+        api.shopeeCupons('upcoming').catch(() => ({})),
+        api.shopeeCupons('expired').catch(() => ({})),
+      ])
+      const pick = (r) => (r && r.response && r.response.voucher_list) || []
+      setListas({ ongoing: pick(o), upcoming: pick(u), expired: pick(e) })
+    } catch (e) { notify(e.message, 'danger') }
   }
+  useEffect(() => { if (conectado) carregar() }, [conectado])
+  const sincronizar = async () => { setSync(true); try { await carregar(true) } finally { setSync(false) } }
+
+  const gerarCodigo = () => setCodigo(('SOS' + Math.random().toString(36).slice(2, 7)).toUpperCase())
+  const criar = async () => {
+    const cod = (codigo || '').trim()
+    if (!nome.trim() || !cod) { notify('Preencha nome e código do cupom.', 'warn'); return }
+    if (!/^[A-Za-z0-9]{3,16}$/.test(cod)) { notify('Código: 3 a 16 letras/números, sem espaços.', 'warn'); return }
+    setCriando(true)
+    try {
+      const inicio = Math.floor(Date.now() / 1000) + 600
+      const fim = inicio + dias * 86400
+      await api.shopeeCriarCupom({ nome: nome.trim().slice(0, 40), codigo: cod, inicio, fim, tipo_desconto: tipoDesc, valor: Number(valor), compra_minima: Number(minc), quantidade: Number(quota), escopo })
+      notify(`Cupom ${cod} criado — começa em ~10 min.`, 'ok')
+      setNome(''); setCodigo(''); carregar(true)
+    } catch (e) { notify(e.message, 'danger') } finally { setCriando(false) }
+  }
+  const encerrar = async (id) => { setEnc(id); try { await api.shopeeEncerrarCupom(id); notify('Cupom encerrado.', 'ok'); carregar(true) } catch (e) { notify(e.message, 'danger') } setEnc(null) }
   const repetir = async (c) => {
     setRep(c.voucher_id)
     try {
-      const inicio = Math.floor(Date.now() / 1000) + 300
-      const fim = inicio + Math.max(3600, (c.end_time - c.start_time) || 7 * 86400)
-      const codigo = (c.voucher_code || 'CUPOM').replace(/\s/g, '').slice(0, 10) + String(inicio).slice(-4)
-      await api.shopeeCriarCupom({ nome: (c.voucher_name || 'Cupom').slice(0, 20) + ' (rep.)', codigo,
-        tipo_desconto: c.reward_type, valor: c.reward_type === 2 ? c.percentage : c.discount_amount,
-        compra_minima: c.min_basket_price || 0, quantidade: c.usage_quantity || 100,
-        inicio, fim, escopo: c.voucher_type_id || 1 })
-      notify(`Cupom repetido como ${codigo} — começa em ~5 min`, 'ok'); carregar()
+      const inicio = Math.floor(Date.now() / 1000) + 600
+      const fim = inicio + Math.max(86400, (c.end_time - c.start_time) || 7 * 86400)
+      const cod = (c.voucher_code || 'CUPOM').replace(/\s/g, '').slice(0, 10) + String(inicio).slice(-4)
+      await api.shopeeCriarCupom({ nome: (c.voucher_name || 'Cupom').slice(0, 30) + ' (rep.)', codigo: cod, inicio, fim, tipo_desconto: c.reward_type, valor: c.reward_type === 2 ? c.percentage : c.discount_amount, compra_minima: c.min_basket_price || 0, quantidade: c.usage_quantity || 100, escopo: c.voucher_type_id || 1 })
+      notify(`Cupom repetido como ${cod}.`, 'ok'); carregar(true)
     } catch (e) { notify(e.message, 'danger') }
     setRep(null)
   }
+
+  if (!conectado) return <Vazio txt="Conecte a loja Shopee para gerenciar cupons." />
+
+  const on = listas.ongoing, up = listas.upcoming, ex = listas.expired
+  const carregando = on === null
+  const nOn = (on || []).length, nUp = (up || []).length, nEx = (ex || []).length
+  const valorCupom = (c) => c.reward_type === 2 ? `${c.percentage}%` : fmtBRL(c.discount_amount)
+  const quotaTotal = (on || []).reduce((a, c) => a + (c.usage_quantity || 0), 0)
+  const pctPerc = nOn ? Math.round((on || []).filter((c) => c.reward_type === 2).length / nOn * 100) : 0
+  const nLoja = (on || []).filter((c) => (c.voucher_type_id || 1) === 1).length
+  const expira24 = (on || []).filter((c) => c.end_time && (c.end_time - agora / 1000) <= 86400 && (c.end_time - agora / 1000) > 0)
+  const lista = tab === 'ongoing' ? on : tab === 'upcoming' ? up : ex
+  const previewVal = tipoDesc === 2 ? `${valor}%` : fmtBRL(valor)
+
   return (
     <div className="space-y-3">
-      <div className="flex justify-between items-center gap-2 flex-wrap">
-        <AbasStatus valor={stat} onChange={setStat} />
-        <button onClick={() => setForm(true)} className="rounded-lg px-3 py-1.5 text-sm font-medium text-white flex items-center gap-1.5" style={{ background: LARANJA }}><Plus size={14} /> Novo cupom</button>
+      {/* COMMAND BAR */}
+      <div className="glass" style={{ padding: '15px 18px', border: '1px solid transparent', background: 'linear-gradient(var(--surface),var(--surface)) padding-box,linear-gradient(110deg,rgba(242,194,0,.5),rgba(214,0,127,.38),rgba(238,77,45,.3)) border-box' }}>
+        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 13, flexWrap: 'wrap' }}>
+          <div style={{ width: 44, height: 44, borderRadius: 12, background: 'linear-gradient(145deg,#F2C200,#c99b00)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none', boxShadow: '0 6px 20px rgba(242,194,0,.35)' }}><Ticket size={22} color="#0d0d0d" /></div>
+          <div>
+            <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <b className="serif" style={{ fontSize: 20 }}>Cupons</b>
+              <PBadge c="#fff" bg={PROMO.SHOPEE}>SHOPEE</PBadge>
+              <PBadge c="#0d0d0d" bg={PROMO.GOLD}>CÓDIGO DE DESCONTO</PBadge>
+              <PBadge c="#e9dbfb" bg="rgba(160,107,232,.2)">LOJA OU PRODUTOS</PBadge>
+            </div>
+            <div style={{ fontSize: 10.5, color: 'var(--dim)' }}>Crie códigos de desconto para incentivar a compra — por valor ou percentual, com compra mínima, limite de uso e escopo</div>
+          </div>
+          <div style={{ flex: 1 }} />
+          <div style={{ textAlign: 'right' }}><div className="up" style={{ fontSize: 7, color: 'var(--faint)' }}>Resgates configurados · ativos</div><b className="num serif" style={{ fontSize: 19, color: PROMO.GOLD }}>{quotaTotal.toLocaleString('pt-BR')}</b><div className="num" style={{ fontSize: 8, color: 'var(--faint)' }}>{nOn} cupons no ar</div></div>
+          <div style={{ width: 1, height: 30, background: 'var(--glass-border)' }} />
+          <button onClick={sincronizar} disabled={sync} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 700, padding: '8px 12px', borderRadius: 9, cursor: 'pointer', color: 'var(--dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)' }}>{sync ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}Sincronizar</button>
+        </div>
+        <div className="row" style={{ display: 'flex', gap: 15, marginTop: 10, fontSize: 9.5, color: 'var(--faint)', flexWrap: 'wrap' }}>
+          <span>ativos: <b style={{ color: PROMO.GOLD }}>{nOn}</b></span>
+          <span>agendados: <b style={{ color: 'var(--text)' }}>{nUp}</b></span>
+          <span>expira em 24h: <b style={{ color: PROMO.WARN }}>{expira24.length}</b></span>
+          <span>escopo loja inteira: <b style={{ color: 'var(--text)' }}>{nLoja} de {nOn}</b></span>
+        </div>
       </div>
-      {lista === null ? <Carregando txt="carregando cupons…" />
-        : cupons.length === 0 ? <Vazio txt={stat === 'ongoing' ? 'Nenhum cupom ativo. Crie um para incentivar a compra.' : stat === 'upcoming' ? 'Nenhum cupom agendado.' : 'Nenhum cupom expirado no histórico recente.'} />
-        : <div className="space-y-2.5">{cupons.map((c) => {
-            const flags = [{ icon: Ticket, texto: c.voucher_code, cor: '#8B5CF6' },
-              { texto: c.reward_type === 2 ? `${c.percentage}% OFF` : brl(c.discount_amount), cor: LARANJA }]
-            if (c.min_basket_price) flags.push({ texto: `mín ${brl(c.min_basket_price)}` })
-            flags.push({ texto: (c.voucher_type_id === 1 || !c.voucher_type_id) ? 'loja inteira' : 'produtos específicos' })
-            return (
-              <CampaignCard key={c.voucher_id} tipo="cupom" id={c.voucher_id} nome={c.voucher_name}
-                inicio={c.start_time} fim={c.end_time} flags={flags} temProdutos={false}
-                podeEncerrar={stat !== 'expired'} onEncerrar={encerrar} encerrando={enc === c.voucher_id}
-                onRepetir={() => repetir(c)} repetindo={rep === c.voucher_id} />
-            )
-          })}</div>}
-      {form && <CupomForm onClose={() => setForm(false)} onSaved={() => { setForm(false); carregar() }} notify={notify} />}
+
+      {/* KPIs */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 9 }}>
+        <PKpi label="Ativos" value={nOn} sub="no ar" cor={PROMO.GOLD} borda="rgba(242,194,0,.4)" />
+        <PKpi label="Agendados" value={nUp} sub="programados" />
+        <PKpi label="Expirados" value={nEx} sub="histórico" />
+        <PKpi label="Resgates" value={quotaTotal.toLocaleString('pt-BR')} sub="limite total" cor={PROMO.OK} />
+        <PKpi label="Percentuais" value={`${pctPerc}%`} sub="vs valor fixo" />
+        <PKpi label="Expiram 24h" value={expira24.length} sub="renovar?" cor={PROMO.WARN} borda="rgba(224,162,60,.4)" />
+      </div>
+
+      {/* INSIGHTS honestos */}
+      {!carregando && (nOn === 0 || expira24.length > 0) && (
+        <div style={{ display: 'grid', gridTemplateColumns: expira24.length > 0 && nOn === 0 ? '1fr 1fr' : '1fr', gap: 11 }}>
+          {nOn === 0 && (
+            <div className="glass row" style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '12px 15px', borderColor: 'rgba(242,194,0,.4)', background: 'rgba(242,194,0,.05)' }}>
+              <Sparkles size={16} style={{ color: PROMO.GOLD, flex: 'none' }} />
+              <div style={{ flex: 1, fontSize: 10, color: 'var(--dim)' }}><b style={{ color: PROMO.GOLD }}>Nenhum cupom ativo.</b> Um cupom de primeira compra ou de compra mínima costuma aumentar a conversão — crie um abaixo.</div>
+            </div>
+          )}
+          {expira24.length > 0 && (
+            <div className="glass row" style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '12px 15px', borderColor: 'rgba(224,162,60,.4)', background: 'rgba(224,162,60,.05)' }}>
+              <Clock size={16} style={{ color: PROMO.WARN, flex: 'none' }} />
+              <div style={{ flex: 1, fontSize: 10, color: 'var(--dim)' }}><b style={{ color: PROMO.WARN }}>{expira24.length} cupom(ns) expira(m) em 24h.</b> Repita para não perder o incentivo — o botão ↻ Repetir cria um novo com os mesmos parâmetros.</div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ESTÚDIO DE CRIAÇÃO */}
+      <div className="glass" style={{ padding: 0, overflow: 'hidden', border: '1px solid transparent', background: 'linear-gradient(var(--surface),var(--surface)) padding-box,linear-gradient(110deg,rgba(242,194,0,.4),rgba(160,107,232,.35)) border-box' }}>
+        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '13px 16px', borderBottom: '1px solid var(--glass-border)', flexWrap: 'wrap' }}>
+          <PSecao icon={Plus} cor={PROMO.GOLD} titulo="Criar cupom" extra={<div style={{ flex: 1 }} />} />
+          <PBadge c="#0d0d0d" bg={PROMO.GOLD}>GUIADO · COM PRÉVIA</PBadge>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr .9fr', gap: 0 }}>
+          <div style={{ padding: 16, borderRight: '1px solid var(--glass-border)' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr', gap: 11, marginBottom: 12 }}>
+              <div>
+                <div style={{ fontSize: 8.5, color: 'var(--dim)', marginBottom: 4 }}>Nome do cupom</div>
+                <input value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Ex.: Primeira compra" style={{ width: '100%', padding: '8px 11px', fontSize: 11.5, color: 'var(--text)', background: 'rgba(0,0,0,.25)', border: '1px solid var(--glass-border)', borderRadius: 10 }} />
+              </div>
+              <div>
+                <div style={{ fontSize: 8.5, color: 'var(--dim)', marginBottom: 4 }}>Código</div>
+                <div className="row" style={{ display: 'flex', gap: 5 }}>
+                  <input value={codigo} onChange={(e) => setCodigo(e.target.value.toUpperCase())} placeholder="SOS10" maxLength={16} style={{ width: '100%', padding: '8px 11px', fontSize: 11.5, fontWeight: 700, letterSpacing: '.5px', color: PROMO.GOLD, background: 'rgba(0,0,0,.25)', border: '1px solid var(--glass-border)', borderRadius: 10 }} />
+                  <button onClick={gerarCodigo} title="gerar código" style={{ padding: '0 10px', borderRadius: 9, cursor: 'pointer', color: 'var(--dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)', fontSize: 13 }}>⟳</button>
+                </div>
+              </div>
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 8.5, color: 'var(--dim)', marginBottom: 5 }}>Tipo de desconto</div>
+              <div className="row" style={{ display: 'flex', gap: 7 }}>
+                {[[2, 'Percentual (%)'], [1, 'Valor fixo (R$)']].map(([v, l]) => <span key={v} onClick={() => setTipoDesc(v)} style={{ flex: 1, textAlign: 'center', fontSize: 10, fontWeight: 700, padding: '8px', borderRadius: 9, cursor: 'pointer', color: tipoDesc === v ? '#0d0d0d' : 'var(--dim)', background: tipoDesc === v ? PROMO.GOLD : 'rgba(255,255,255,.04)', border: `1px solid ${tipoDesc === v ? 'transparent' : 'var(--glass-border)'}` }}>{l}</span>)}
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 11, marginBottom: 12 }}>
+              <div>
+                <div className="row" style={{ display: 'flex', marginBottom: 3 }}><span style={{ fontSize: 8.5, color: 'var(--dim)' }}>{tipoDesc === 2 ? 'Percentual' : 'Valor do desconto'}</span><div style={{ flex: 1 }} /><b className="num" style={{ fontSize: 9.5, color: PROMO.GOLD }}>{previewVal}</b></div>
+                {tipoDesc === 2
+                  ? <input type="range" min={1} max={90} value={valor} onChange={(e) => setValor(Number(e.target.value))} style={{ width: '100%' }} />
+                  : <input type="number" min={1} value={valor} onChange={(e) => setValor(Number(e.target.value))} style={{ width: '100%', padding: '6px 9px', fontSize: 11, color: 'var(--text)', background: 'rgba(0,0,0,.25)', border: '1px solid var(--glass-border)', borderRadius: 8 }} />}
+              </div>
+              <div>
+                <div style={{ fontSize: 8.5, color: 'var(--dim)', marginBottom: 3 }}>Compra mínima (R$)</div>
+                <input type="number" min={0} value={minc} onChange={(e) => setMinc(Number(e.target.value))} placeholder="0 = sem mínimo" style={{ width: '100%', padding: '6px 9px', fontSize: 11, color: 'var(--text)', background: 'rgba(0,0,0,.25)', border: '1px solid var(--glass-border)', borderRadius: 8 }} />
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 11 }}>
+              <div>
+                <div style={{ fontSize: 8.5, color: 'var(--dim)', marginBottom: 3 }}>Limite de usos</div>
+                <input type="number" min={1} value={quota} onChange={(e) => setQuota(Number(e.target.value))} style={{ width: '100%', padding: '6px 9px', fontSize: 11, color: 'var(--text)', background: 'rgba(0,0,0,.25)', border: '1px solid var(--glass-border)', borderRadius: 8 }} />
+              </div>
+              <div>
+                <div className="row" style={{ display: 'flex', marginBottom: 3 }}><span style={{ fontSize: 8.5, color: 'var(--dim)' }}>Validade</span><div style={{ flex: 1 }} /><b className="num" style={{ fontSize: 9, color: PROMO.GOLD }}>{dias}d</b></div>
+                <input type="range" min={1} max={60} value={dias} onChange={(e) => setDias(Number(e.target.value))} style={{ width: '100%', marginTop: 8 }} />
+              </div>
+              <div>
+                <div style={{ fontSize: 8.5, color: 'var(--dim)', marginBottom: 3 }}>Escopo</div>
+                <div className="row" style={{ display: 'flex', gap: 4 }}>
+                  {[[1, 'Loja'], [2, 'Produtos']].map(([v, l]) => <span key={v} onClick={() => setEscopo(v)} style={{ flex: 1, textAlign: 'center', fontSize: 9, fontWeight: 700, padding: '6px 4px', borderRadius: 8, cursor: 'pointer', color: escopo === v ? '#0d0d0d' : 'var(--dim)', background: escopo === v ? PROMO.GOLD : 'rgba(255,255,255,.04)', border: `1px solid ${escopo === v ? 'transparent' : 'var(--glass-border)'}` }}>{l}</span>)}
+                </div>
+              </div>
+            </div>
+            {escopo === 2 && <div style={{ fontSize: 8.5, color: 'var(--faint)', marginTop: 8 }}>Cupom por produtos: após criar, a Shopee pede a seleção dos itens no Seller Center (a API de cupom por produto ainda não expõe a lista aqui).</div>}
+          </div>
+          {/* prévia do cupom */}
+          <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ fontSize: 8, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)' }}>Prévia do cupom</div>
+            <div style={{ position: 'relative', borderRadius: 14, padding: '16px 18px', background: 'linear-gradient(120deg,#F2C200,#e0a500)', color: '#0d0d0d', boxShadow: '0 10px 30px rgba(242,194,0,.25)' }}>
+              <div style={{ position: 'absolute', left: -7, top: '50%', width: 14, height: 14, borderRadius: '50%', background: 'var(--surface)', transform: 'translateY(-50%)' }} />
+              <div style={{ position: 'absolute', right: -7, top: '50%', width: 14, height: 14, borderRadius: '50%', background: 'var(--surface)', transform: 'translateY(-50%)' }} />
+              <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Ticket size={26} />
+                <div style={{ flex: 1 }}>
+                  <b className="serif num" style={{ fontSize: 26, lineHeight: 1 }}>{previewVal}</b>
+                  <div style={{ fontSize: 9, fontWeight: 700, opacity: .8 }}>DE DESCONTO{Number(minc) > 0 ? ` · mín ${fmtBRL(minc)}` : ''}</div>
+                </div>
+              </div>
+              <div style={{ marginTop: 11, paddingTop: 10, borderTop: '1.5px dashed rgba(0,0,0,.25)' }} className="row">
+                <span className="num" style={{ fontSize: 13, fontWeight: 800, letterSpacing: '1px' }}>{codigo || 'SEUCODIGO'}</span>
+                <div style={{ flex: 1 }} />
+                <span style={{ fontSize: 8, fontWeight: 700, opacity: .75 }}>{escopo === 1 ? 'LOJA INTEIRA' : 'PRODUTOS'} · {quota} usos · {dias}d</span>
+              </div>
+            </div>
+            <button onClick={criar} disabled={criando} className="row" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7, fontSize: 12, fontWeight: 800, padding: '11px', borderRadius: 11, cursor: 'pointer', color: '#0d0d0d', border: 'none', background: 'linear-gradient(135deg,#F2C200,#c99b00)', opacity: criando ? .7 : 1 }}>{criando ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}Criar cupom</button>
+            <div style={{ fontSize: 8, color: 'var(--faint)', textAlign: 'center', lineHeight: 1.4 }}>começa em ~10 min (exigência Shopee) · o código precisa ser único na loja</div>
+          </div>
+        </div>
+      </div>
+
+      {/* LISTA DE CUPONS */}
+      <div className="glass" style={{ padding: 16 }}>
+        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+          <PSecao icon={Ticket} cor={PROMO.GOLD} titulo="Cupons da loja" extra={<div style={{ flex: 1 }} />} />
+          {[['ongoing', `Ativos (${nOn})`], ['upcoming', `Agendados (${nUp})`], ['expired', `Expirados (${nEx})`]].map(([v, l]) => <span key={v} onClick={() => setTab(v)} style={{ fontSize: 9.5, fontWeight: 700, padding: '5px 11px', borderRadius: 99, cursor: 'pointer', color: tab === v ? '#0d0d0d' : 'var(--dim)', background: tab === v ? PROMO.GOLD : 'rgba(255,255,255,.04)', border: `1px solid ${tab === v ? 'transparent' : 'var(--glass-border)'}` }}>{l}</span>)}
+        </div>
+        {carregando ? <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 22, justifyContent: 'center', color: 'var(--faint)', fontSize: 11 }}><Loader2 size={14} className="animate-spin" />Carregando cupons…</div>
+          : (!lista || lista.length === 0) ? <div style={{ fontSize: 11, color: 'var(--faint)', padding: 20, textAlign: 'center' }}>{tab === 'ongoing' ? 'Nenhum cupom ativo. Crie um acima.' : tab === 'upcoming' ? 'Nenhum cupom agendado.' : 'Nenhum cupom expirado no histórico recente.'}</div>
+            : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 10 }}>
+                {lista.map((c) => {
+                  const ini = c.start_time || 0, fim = c.end_time || 0
+                  const dur = Math.max(1, fim - ini)
+                  const pct = tab === 'ongoing' ? Math.min(100, Math.max(0, (agora / 1000 - ini) / dur * 100)) : tab === 'upcoming' ? 0 : 100
+                  const rem = fim - agora / 1000
+                  const urgente = tab === 'ongoing' && rem > 0 && rem <= 86400
+                  return (
+                    <div key={c.voucher_id} className="glass" style={{ padding: '13px 15px', borderRadius: 13, borderLeft: `3px solid ${PROMO.GOLD}` }}>
+                      <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <span className="num" style={{ fontSize: 12, fontWeight: 800, letterSpacing: '.5px', color: PROMO.GOLD, background: 'rgba(242,194,0,.1)', border: '1px solid rgba(242,194,0,.3)', borderRadius: 7, padding: '3px 9px' }}>{c.voucher_code}</span>
+                        <b style={{ fontSize: 11.5, flex: 1, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{c.voucher_name || 'Cupom'}</b>
+                        <PBadge c="#0d0d0d" bg={PROMO.GOLD}>{valorCupom(c)} OFF</PBadge>
+                        {urgente && <PBadge c={PROMO.WARN} bg="rgba(224,162,60,.12)">⏳ 24H</PBadge>}
+                      </div>
+                      <div className="row" style={{ display: 'flex', gap: 12, margin: '9px 0 8px', fontSize: 8.5, color: 'var(--faint)', flexWrap: 'wrap' }}>
+                        <span>{(c.voucher_type_id || 1) === 1 ? 'loja inteira' : 'produtos específicos'}</span>
+                        {c.min_basket_price ? <span>mín <b className="num" style={{ color: 'var(--dim)' }}>{fmtBRL(c.min_basket_price)}</b></span> : <span>sem mínimo</span>}
+                        <span>limite <b className="num" style={{ color: 'var(--dim)' }}>{(c.usage_quantity || 0).toLocaleString('pt-BR')} usos</b></span>
+                      </div>
+                      <div className="prog" style={{ height: 5, borderRadius: 3, background: 'rgba(255,255,255,.07)', overflow: 'hidden', marginBottom: 9 }}><div style={{ width: `${pct}%`, height: '100%', borderRadius: 3, background: `linear-gradient(90deg,${PROMO.GOLD},#c99b00)` }} /></div>
+                      <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span className="num" style={{ fontSize: 8, color: urgente ? PROMO.WARN : 'var(--faint)' }}>{tab === 'upcoming' ? `começa ${new Date(ini * 1000).toLocaleDateString('pt-BR')}` : rem > 0 ? `${fmtDur(rem * 1000)} restante` : 'encerrado'}</span>
+                        <div style={{ flex: 1 }} />
+                        <button onClick={() => repetir(c)} disabled={rep === c.voucher_id} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9, fontWeight: 700, padding: '4px 10px', borderRadius: 8, cursor: 'pointer', color: 'var(--dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)' }}>{rep === c.voucher_id ? <Loader2 size={10} className="animate-spin" /> : <RotateCcw size={10} />}Repetir</button>
+                        {tab !== 'expired' && <button onClick={() => encerrar(c.voucher_id)} disabled={enc === c.voucher_id} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9, fontWeight: 700, padding: '4px 10px', borderRadius: 8, cursor: 'pointer', color: PROMO.DANGER, background: 'rgba(255,122,122,.06)', border: '1px solid rgba(255,122,122,.3)' }}>{enc === c.voucher_id ? <Loader2 size={10} className="animate-spin" /> : 'Encerrar'}</button>}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+      </div>
     </div>
   )
 }
@@ -5295,50 +5574,233 @@ function SeletorItens({ titulo, comPreco, onConfirmar, onClose }) {
 }
 
 /* ------------------------------ Bundle ----------------------------------- */
-function Bundles({ notify }) {
-  const [lista, setLista] = useState(null)
-  const [form, setForm] = useState(false)
-  const [rep, setRep] = useState(null)
+function Bundles({ conectado, notify }) {
+  const [listas, setListas] = useState({ ongoing: null, upcoming: null, expired: null })
+  const [tab, setTab] = useState('ongoing')
+  const [sync, setSync] = useState(false)
+  const [nome, setNome] = useState('')
+  const [rule, setRule] = useState(2)            // 1=preço fixo, 2=%, 3=valor
+  const [valor, setValor] = useState(10)
+  const [minItens, setMinItens] = useState(2)
+  const [dias, setDias] = useState(14)
+  const [criando, setCriando] = useState(false)
   const [enc, setEnc] = useState(null)
-  const [stat, setStat] = useState('ongoing')
-  const carregar = () => { setLista(null); api.shopeeBundles(stat).then(setLista).catch(() => setLista({ erro: true })) }
-  useEffect(carregar, [stat])
-  const bs = lista?.response?.bundle_deal_list || []
-  const repetir = async (c) => {
-    setRep(c.id)
-    try { const r = await api.shopeeCampanhaRepetir('bundle', c.id); notify(`Combo repetido com ${r.itens || 0} produto(s) — começa em ~5 min`, 'ok'); carregar() }
-    catch (e) { notify(e.message, 'danger') }
+  const [rep, setRep] = useState(null)
+  // picker de produtos do combo
+  const [cat, setCat] = useState([])
+  const [trava, setTrava] = useState(new Set())
+  const [carregandoCat, setCarregandoCat] = useState(true)
+  const [offset, setOffset] = useState(0)
+  const [temMais, setTemMais] = useState(false)
+  const [buscaCat, setBuscaCat] = useState('')
+  const [sel, setSel] = useState({})
+  const agora = useAgora(30000)
+  const PAG = 50
+
+  const carregar = async (forcar) => {
+    if (!forcar) setListas({ ongoing: null, upcoming: null, expired: null })
+    try {
+      const [o, u, e] = await Promise.all([
+        api.shopeeBundles('ongoing').catch(() => ({})),
+        api.shopeeBundles('upcoming').catch(() => ({})),
+        api.shopeeBundles('expired').catch(() => ({})),
+      ])
+      const pick = (r) => (r && r.response && (r.response.bundle_deal_list || r.response.bundle_list)) || []
+      setListas({ ongoing: pick(o), upcoming: pick(u), expired: pick(e) })
+    } catch (e) { notify(e.message, 'danger') }
+  }
+  const carregarCat = async (off) => {
+    setCarregandoCat(true)
+    try {
+      const r = await api.shopeeProdutos(off, PAG)
+      const lote = (r && r.response && (r.response.item || r.response.itens)) || []
+      setCat((prev) => off === 0 ? lote : [...prev, ...lote])
+      setTemMais(lote.length >= PAG); setOffset(off + lote.length)
+    } catch (e) { /* silencioso */ } finally { setCarregandoCat(false) }
+  }
+  useEffect(() => {
+    if (!conectado) return
+    carregar(); carregarCat(0)
+    api.shopeePromoTrava().then((r) => setTrava(new Set((r.ids || []).map(Number)))).catch(() => {})
+  }, [conectado])
+  const sincronizar = async () => { setSync(true); try { await carregar(true) } finally { setSync(false) } }
+
+  const selArr = Object.values(sel)
+  const toggle = (it) => { const id = it.item_id; if (trava.has(Number(id))) return; setSel((s) => { const n = { ...s }; n[id] ? delete n[id] : (n[id] = it); return n }) }
+  const criar = async () => {
+    if (!nome.trim()) { notify('Dê um nome ao combo.', 'warn'); return }
+    if (selArr.length < 1) { notify('Escolha os produtos que fazem parte do combo.', 'warn'); return }
+    setCriando(true)
+    try {
+      const inicio = Math.floor(Date.now() / 1000) + 3900
+      const fim = inicio + dias * 86400
+      const r = await api.shopeeCriarBundle({ nome: nome.trim().slice(0, 40), inicio, fim, rule_type: rule, valor: Number(valor), min_itens: Number(minItens), item_ids: selArr.map((x) => x.item_id) })
+      const add = r?.itens_adicionados ?? selArr.length
+      notify(`Combo criado com ${add} produto(s).`, 'ok'); setNome(''); setSel({}); carregar(true)
+    } catch (e) { notify(e.message, 'danger') } finally { setCriando(false) }
+  }
+  const encerrar = async (id) => { setEnc(id); try { await api.shopeeEncerrarBundle(id); notify('Combo encerrado.', 'ok'); carregar(true) } catch (e) { notify(e.message, 'danger') } setEnc(null) }
+  const repetir = async (b) => {
+    setRep(b.bundle_deal_id)
+    try {
+      const inicio = Math.floor(Date.now() / 1000) + 3900
+      const fim = inicio + Math.max(86400, (b.end_time - b.start_time) || 14 * 86400)
+      const rr = b.bundle_deal_rule || {}
+      await api.shopeeCriarBundle({ nome: (b.name || 'Combo').slice(0, 30) + ' (rep.)', inicio, fim, rule_type: rr.rule_type || 2, valor: rr.discount_value || 10, min_itens: rr.min_amount || 2, item_ids: [] })
+      notify('Combo repetido (adicione os itens no Seller Center se necessário).', 'ok'); carregar(true)
+    } catch (e) { notify(e.message, 'danger') }
     setRep(null)
   }
-  const encerrar = async (id) => {
-    setEnc(id)
-    try { await api.shopeeEncerrarBundle(id); notify('Combo encerrado', 'ok'); carregar() }
-    catch (e) { notify(e.message, 'danger') }
-    setEnc(null)
-  }
+
+  if (!conectado) return <Vazio txt="Conecte a loja Shopee para gerenciar combos." />
+
+  const on = listas.ongoing, up = listas.upcoming, ex = listas.expired
+  const carregando = on === null
+  const nOn = (on || []).length, nUp = (up || []).length, nEx = (ex || []).length
+  const lista = tab === 'ongoing' ? on : tab === 'upcoming' ? up : ex
+  const RULES = { 1: 'preço fixo do combo', 2: '% de desconto', 3: 'valor de desconto' }
+  const regraTxt = (rr) => { if (!rr) return '—'; const v = rr.discount_value; return rr.rule_type === 2 ? `-${v}%` : `R$ ${Number(v || 0).toFixed(2)}${rr.rule_type === 1 ? ' o combo' : ' off'}` }
+  const catFiltrado = cat.filter((it) => !buscaCat || (it.item_name || it.nome || '').toLowerCase().includes(buscaCat.toLowerCase()))
+  const previewRegra = rule === 2 ? `-${valor}%` : rule === 1 ? `R$ ${Number(valor).toFixed(2)} o combo` : `R$ ${Number(valor).toFixed(2)} off`
+
   return (
     <div className="space-y-3">
-      <div className="flex justify-between items-center gap-2 flex-wrap">
-        <AbasStatus valor={stat} onChange={setStat} />
-        <button onClick={() => setForm(true)} className="rounded-lg px-3 py-1.5 text-sm font-medium text-white flex items-center gap-1.5" style={{ background: LARANJA }}><Plus size={14} /> Novo bundle</button>
+      {/* COMMAND BAR */}
+      <div className="glass" style={{ padding: '15px 18px', border: '1px solid transparent', background: 'linear-gradient(var(--surface),var(--surface)) padding-box,linear-gradient(110deg,rgba(160,107,232,.5),rgba(214,0,127,.38),rgba(238,77,45,.3)) border-box' }}>
+        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 13, flexWrap: 'wrap' }}>
+          <div style={{ width: 44, height: 44, borderRadius: 12, background: 'linear-gradient(145deg,#a06be8,#7b2a8c)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none', boxShadow: '0 6px 20px rgba(160,107,232,.35)' }}><Package size={22} color="#fff" /></div>
+          <div>
+            <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <b className="serif" style={{ fontSize: 20 }}>Bundle · Leve+ por menos</b>
+              <PBadge c="#fff" bg={PROMO.SHOPEE}>SHOPEE</PBadge>
+              <PBadge c="#e9dbfb" bg="rgba(160,107,232,.2)">COMBO DE PRODUTOS</PBadge>
+              <PBadge c={PROMO.OK} bg="rgba(47,217,141,.12)">SOBE O TICKET MÉDIO</PBadge>
+            </div>
+            <div style={{ fontSize: 10.5, color: 'var(--dim)' }}>Crie combos "compre N, leve com desconto" para aumentar o valor do pedido — preço fixo, percentual ou valor</div>
+          </div>
+          <div style={{ flex: 1 }} />
+          <div style={{ textAlign: 'right' }}><div className="up" style={{ fontSize: 7, color: 'var(--faint)' }}>Combos ativos</div><b className="num serif" style={{ fontSize: 19, color: PROMO.PURPLE }}>{nOn}</b><div className="num" style={{ fontSize: 8, color: 'var(--faint)' }}>{nUp} agendados</div></div>
+          <div style={{ width: 1, height: 30, background: 'var(--glass-border)' }} />
+          <button onClick={sincronizar} disabled={sync} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 700, padding: '8px 12px', borderRadius: 9, cursor: 'pointer', color: 'var(--dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)' }}>{sync ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}Sincronizar</button>
+        </div>
       </div>
-      {lista === null ? <Carregando txt="carregando bundles…" />
-        : bs.length === 0 ? <Vazio txt={stat === 'ongoing' ? 'Nenhum combo ativo. Crie um na aba acima — leve 2+ por um preço melhor.' : stat === 'upcoming' ? 'Nenhum combo agendado.' : 'Nenhum combo expirado no histórico recente.'} />
-        : <div className="space-y-2.5">{bs.map((b) => {
-            const reg = b.bundle_deal_rule || {}
-            const flags = []
-            if (reg.min_amount) flags.push({ icon: Layers, texto: `leve ${reg.min_amount}+`, cor: '#14B8A6' })
-            if (reg.rule_type === 2 && reg.discount_value) flags.push({ icon: Percent, texto: `-${reg.discount_value}%`, cor: LARANJA })
-            else if (reg.rule_type === 3 && reg.discount_value) flags.push({ texto: `-R$ ${reg.discount_value}`, cor: LARANJA })
-            else if (reg.rule_type === 1 && reg.discount_value) flags.push({ texto: `combo R$ ${reg.discount_value}`, cor: LARANJA })
-            return (
-              <CampaignCard key={b.bundle_deal_id} tipo="bundle" id={b.bundle_deal_id} nome={b.name}
-                inicio={b.start_time} fim={b.end_time} flags={flags}
-                podeEncerrar={stat !== 'expired'} onEncerrar={encerrar} encerrando={enc === b.bundle_deal_id}
-                onRepetir={repetir} repetindo={rep === b.bundle_deal_id} />
-            )
-          })}</div>}
-      {form && <BundleForm onClose={() => setForm(false)} onSaved={() => { setForm(false); carregar() }} notify={notify} />}
+
+      {/* KPIs */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 9 }}>
+        <PKpi label="Combos ativos" value={nOn} sub="no ar" cor={PROMO.PURPLE} borda="rgba(160,107,232,.4)" />
+        <PKpi label="Agendados" value={nUp} sub="programados" />
+        <PKpi label="Expirados" value={nEx} sub="histórico" />
+        <PKpi label="Na trava" value={trava.size} sub="itens em oferta" cor={PROMO.BLUE} />
+      </div>
+
+      {/* ESTÚDIO DE CRIAÇÃO */}
+      <div className="glass" style={{ padding: 0, overflow: 'hidden', border: '1px solid transparent', background: 'linear-gradient(var(--surface),var(--surface)) padding-box,linear-gradient(110deg,rgba(160,107,232,.4),rgba(238,77,45,.3)) border-box' }}>
+        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '13px 16px', borderBottom: '1px solid var(--glass-border)', flexWrap: 'wrap' }}>
+          <PSecao icon={Plus} cor={PROMO.PURPLE} titulo="Criar combo" extra={<div style={{ flex: 1 }} />} />
+          <PBadge c="#cfaef5" bg="rgba(160,107,232,.15)">REGRA + PRODUTOS</PBadge>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '.9fr 1.1fr' }}>
+          {/* regra */}
+          <div style={{ padding: 16, borderRight: '1px solid var(--glass-border)' }}>
+            <div style={{ fontSize: 8.5, color: 'var(--dim)', marginBottom: 4 }}>Nome do combo</div>
+            <input value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Ex.: Kit 3 fios de seda" style={{ width: '100%', padding: '8px 11px', fontSize: 11.5, color: 'var(--text)', background: 'rgba(0,0,0,.25)', border: '1px solid var(--glass-border)', borderRadius: 10, marginBottom: 12 }} />
+            <div style={{ fontSize: 8.5, color: 'var(--dim)', marginBottom: 5 }}>Tipo de regra</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
+              {[[2, '% de desconto', 'ex.: 10% off no combo'], [1, 'Preço fixo do combo', 'ex.: leve 3 por R$ 25'], [3, 'Valor de desconto', 'ex.: R$ 5 off no combo']].map(([v, l, h]) => (
+                <div key={v} onClick={() => setRule(v)} className="row" style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 11px', borderRadius: 10, cursor: 'pointer', background: rule === v ? 'rgba(160,107,232,.1)' : 'rgba(0,0,0,.18)', border: `1px solid ${rule === v ? 'rgba(160,107,232,.45)' : 'var(--glass-border)'}` }}>
+                  <span style={{ width: 15, height: 15, borderRadius: '50%', flex: 'none', border: `2px solid ${rule === v ? PROMO.PURPLE : 'var(--glass-border)'}`, background: rule === v ? PROMO.PURPLE : 'transparent' }} />
+                  <div style={{ flex: 1 }}><div style={{ fontSize: 10.5, fontWeight: 600 }}>{l}</div><div style={{ fontSize: 8, color: 'var(--faint)' }}>{h}</div></div>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 11 }}>
+              <div>
+                <div className="row" style={{ display: 'flex', marginBottom: 3 }}><span style={{ fontSize: 8.5, color: 'var(--dim)' }}>{rule === 2 ? 'Percentual' : 'Valor (R$)'}</span><div style={{ flex: 1 }} /><b className="num" style={{ fontSize: 9.5, color: PROMO.PURPLE }}>{rule === 2 ? `${valor}%` : `R$ ${valor}`}</b></div>
+                {rule === 2 ? <input type="range" min={1} max={80} value={valor} onChange={(e) => setValor(Number(e.target.value))} style={{ width: '100%' }} /> : <input type="number" min={1} value={valor} onChange={(e) => setValor(Number(e.target.value))} style={{ width: '100%', padding: '6px 9px', fontSize: 11, color: 'var(--text)', background: 'rgba(0,0,0,.25)', border: '1px solid var(--glass-border)', borderRadius: 8 }} />}
+              </div>
+              <div>
+                <div className="row" style={{ display: 'flex', marginBottom: 3 }}><span style={{ fontSize: 8.5, color: 'var(--dim)' }}>Compre N (mín.)</span><div style={{ flex: 1 }} /><b className="num" style={{ fontSize: 9.5, color: PROMO.PURPLE }}>{minItens}</b></div>
+                <input type="range" min={1} max={10} value={minItens} onChange={(e) => setMinItens(Number(e.target.value))} style={{ width: '100%', marginTop: 8 }} />
+              </div>
+            </div>
+            <div style={{ marginTop: 12 }}>
+              <div className="row" style={{ display: 'flex', marginBottom: 3 }}><span style={{ fontSize: 8.5, color: 'var(--dim)' }}>Validade</span><div style={{ flex: 1 }} /><b className="num" style={{ fontSize: 9, color: PROMO.PURPLE }}>{dias} dias</b></div>
+              <input type="range" min={1} max={60} value={dias} onChange={(e) => setDias(Number(e.target.value))} style={{ width: '100%', marginTop: 8 }} />
+            </div>
+            <div style={{ marginTop: 13, background: 'rgba(160,107,232,.05)', border: '1px solid rgba(160,107,232,.25)', borderRadius: 11, padding: '10px 12px' }}>
+              <div className="up" style={{ fontSize: 7, color: PROMO.PURPLE, marginBottom: 5 }}>Prévia da regra</div>
+              <div style={{ fontSize: 11, color: 'var(--text)' }}>Comprando <b className="num" style={{ color: PROMO.PURPLE }}>{minItens}+</b> itens do combo: <b style={{ color: PROMO.OK }}>{previewRegra}</b></div>
+              <div style={{ fontSize: 8.5, color: 'var(--faint)', marginTop: 3 }}>{selArr.length} produto(s) selecionado(s)</div>
+            </div>
+          </div>
+          {/* seletor de produtos do combo */}
+          <div style={{ padding: 16 }}>
+            <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+              <span className="sec-title" style={{ fontSize: 8.5, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)' }}>Produtos do combo</span>
+              <div style={{ flex: 1 }} />
+              <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'rgba(0,0,0,.25)', border: '1px solid var(--glass-border)', borderRadius: 9, padding: '5px 10px' }}><Search size={11} style={{ color: 'var(--faint)' }} /><input value={buscaCat} onChange={(e) => setBuscaCat(e.target.value)} placeholder="buscar no catálogo" style={{ background: 'transparent', border: 'none', outline: 'none', color: 'var(--text)', fontSize: 10, width: 110 }} /></div>
+              <PBadge c={PROMO.OK} bg="rgba(47,217,141,.1)">{selArr.length} SEL.</PBadge>
+            </div>
+            <div style={{ maxHeight: 250, overflowY: 'auto', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7 }}>
+              {catFiltrado.map((it) => {
+                const id = it.item_id; const travado = trava.has(Number(id)); const on = !!sel[id]; const preco = Number(it.price || it.preco || 0)
+                return (
+                  <div key={id} onClick={() => toggle(it)} className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 9px', borderRadius: 10, cursor: travado ? 'not-allowed' : 'pointer', background: on ? 'rgba(160,107,232,.1)' : 'rgba(0,0,0,.2)', border: `1px solid ${on ? 'rgba(160,107,232,.45)' : 'var(--glass-border)'}`, opacity: travado ? .5 : 1 }}>
+                    <span style={{ width: 15, height: 15, borderRadius: 4, flex: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: on ? PROMO.PURPLE : 'transparent', border: on ? 'none' : `2px solid ${travado ? 'var(--faint)' : 'var(--glass-border)'}` }}>{on && <Check size={10} color="#fff" />}</span>
+                    <div style={{ width: 26, height: 26, borderRadius: 6, overflow: 'hidden', flex: 'none', background: 'linear-gradient(135deg,rgba(238,77,45,.25),rgba(160,107,232,.2))', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{it.image ? <img src={it.image} alt="" loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Package size={12} style={{ color: 'rgba(255,255,255,.6)' }} />}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 9.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.item_name || it.nome || `#${id}`}</div><div className="num" style={{ fontSize: 8, color: travado ? PROMO.BLUE : 'var(--faint)' }}>{travado ? '🔒 em campanha' : preco > 0 ? fmtBRL(preco) : ''}</div></div>
+                  </div>
+                )
+              })}
+            </div>
+            {temMais && !buscaCat && <div style={{ textAlign: 'center', marginTop: 9 }}><button onClick={() => carregarCat(offset)} disabled={carregandoCat} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 9.5, padding: '5px 12px', borderRadius: 8, cursor: 'pointer', color: 'var(--dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)' }}>{carregandoCat ? <Loader2 size={10} className="animate-spin" /> : <ChevronRight size={10} />}carregar mais</button></div>}
+            {carregandoCat && cat.length === 0 && <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 18, justifyContent: 'center', color: 'var(--faint)', fontSize: 10.5 }}><Loader2 size={13} className="animate-spin" />carregando catálogo…</div>}
+            <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, paddingTop: 11, borderTop: '1px solid var(--glass-border)' }}>
+              <span style={{ fontSize: 8.5, color: 'var(--faint)', flex: 1 }}>o combo começa em ~1h (exigência Shopee) · itens 🔒 já em campanha ficam de fora</span>
+              <button onClick={criar} disabled={criando || selArr.length === 0} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, fontWeight: 800, padding: '9px 17px', borderRadius: 10, cursor: selArr.length ? 'pointer' : 'default', color: '#fff', border: 'none', background: 'linear-gradient(135deg,#a06be8,#7b2a8c)', opacity: (criando || !selArr.length) ? .6 : 1 }}>{criando ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}Criar combo ({selArr.length})</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* LISTA DE COMBOS */}
+      <div className="glass" style={{ padding: 16 }}>
+        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+          <PSecao icon={Package} cor={PROMO.PURPLE} titulo="Combos da loja" extra={<div style={{ flex: 1 }} />} />
+          {[['ongoing', `Ativos (${nOn})`], ['upcoming', `Agendados (${nUp})`], ['expired', `Expirados (${nEx})`]].map(([v, l]) => <span key={v} onClick={() => setTab(v)} style={{ fontSize: 9.5, fontWeight: 700, padding: '5px 11px', borderRadius: 99, cursor: 'pointer', color: tab === v ? '#fff' : 'var(--dim)', background: tab === v ? 'linear-gradient(135deg,#a06be8,#7b2a8c)' : 'rgba(255,255,255,.04)', border: `1px solid ${tab === v ? 'transparent' : 'var(--glass-border)'}` }}>{l}</span>)}
+        </div>
+        {carregando ? <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 22, justifyContent: 'center', color: 'var(--faint)', fontSize: 11 }}><Loader2 size={14} className="animate-spin" />Carregando combos…</div>
+          : (!lista || lista.length === 0) ? <div style={{ fontSize: 11, color: 'var(--faint)', padding: 20, textAlign: 'center' }}>{tab === 'ongoing' ? 'Nenhum combo ativo. Crie um acima para subir o ticket médio.' : tab === 'upcoming' ? 'Nenhum combo agendado.' : 'Nenhum combo expirado no histórico recente.'}</div>
+            : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 10 }}>
+                {lista.map((b) => {
+                  const ini = b.start_time || 0, fim = b.end_time || 0, dur = Math.max(1, fim - ini)
+                  const pct = tab === 'ongoing' ? Math.min(100, Math.max(0, (agora / 1000 - ini) / dur * 100)) : tab === 'upcoming' ? 0 : 100
+                  const rem = fim - agora / 1000; const rr = b.bundle_deal_rule || {}
+                  return (
+                    <div key={b.bundle_deal_id} className="glass" style={{ padding: '13px 15px', borderRadius: 13, borderLeft: `3px solid ${PROMO.PURPLE}` }}>
+                      <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <Package size={14} style={{ color: PROMO.PURPLE, flex: 'none' }} />
+                        <b style={{ fontSize: 11.5, flex: 1, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{b.name || 'Combo'}</b>
+                        <PBadge c="#fff" bg={PROMO.PURPLE}>{regraTxt(rr)}</PBadge>
+                      </div>
+                      <div className="row" style={{ display: 'flex', gap: 12, margin: '9px 0 8px', fontSize: 8.5, color: 'var(--faint)', flexWrap: 'wrap' }}>
+                        <span>regra: <b style={{ color: 'var(--dim)' }}>{RULES[rr.rule_type] || '—'}</b></span>
+                        <span>compre <b className="num" style={{ color: 'var(--dim)' }}>{rr.min_amount || 2}+</b></span>
+                      </div>
+                      <div className="prog" style={{ height: 5, borderRadius: 3, background: 'rgba(255,255,255,.07)', overflow: 'hidden', marginBottom: 9 }}><div style={{ width: `${pct}%`, height: '100%', borderRadius: 3, background: 'linear-gradient(90deg,#a06be8,#7b2a8c)' }} /></div>
+                      <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span className="num" style={{ fontSize: 8, color: 'var(--faint)' }}>{tab === 'upcoming' ? `começa ${new Date(ini * 1000).toLocaleDateString('pt-BR')}` : rem > 0 ? `${fmtDur(rem * 1000)} restante` : 'encerrado'}</span>
+                        <div style={{ flex: 1 }} />
+                        <button onClick={() => repetir(b)} disabled={rep === b.bundle_deal_id} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9, fontWeight: 700, padding: '4px 10px', borderRadius: 8, cursor: 'pointer', color: 'var(--dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)' }}>{rep === b.bundle_deal_id ? <Loader2 size={10} className="animate-spin" /> : <RotateCcw size={10} />}Repetir</button>
+                        {tab !== 'expired' && <button onClick={() => encerrar(b.bundle_deal_id)} disabled={enc === b.bundle_deal_id} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9, fontWeight: 700, padding: '4px 10px', borderRadius: 8, cursor: 'pointer', color: PROMO.DANGER, background: 'rgba(255,122,122,.06)', border: '1px solid rgba(255,122,122,.3)' }}>{enc === b.bundle_deal_id ? <Loader2 size={10} className="animate-spin" /> : 'Encerrar'}</button>}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+      </div>
     </div>
   )
 }
@@ -5384,42 +5846,254 @@ function BundleForm({ onClose, onSaved, notify }) {
 }
 
 /* ------------------------------ Add-on ----------------------------------- */
-function Addons({ notify }) {
-  const [lista, setLista] = useState(null)
-  const [form, setForm] = useState(false)
-  const [rep, setRep] = useState(null)
+function Addons({ conectado, notify }) {
+  const [listas, setListas] = useState({ ongoing: null, upcoming: null, expired: null })
+  const [tab, setTab] = useState('ongoing')
+  const [sync, setSync] = useState(false)
+  const [nome, setNome] = useState('')
+  const [promoType, setPromoType] = useState(0)   // 0=add-on com desconto, 1=brinde por valor mínimo
+  const [dias, setDias] = useState(14)
+  const [descAdd, setDescAdd] = useState(20)       // % de desconto sugerido nos adicionais
+  const [criando, setCriando] = useState(false)
   const [enc, setEnc] = useState(null)
-  const [stat, setStat] = useState('ongoing')
-  const carregar = () => { setLista(null); api.shopeeAddons(stat).then(setLista).catch(() => setLista({ erro: true })) }
-  useEffect(carregar, [stat])
-  const as = lista?.response?.add_on_deal_list || []
-  const repetir = async (c) => {
-    setRep(c.id)
-    try { const r = await api.shopeeCampanhaRepetir('addon', c.id); notify('Add-on repetido — começa em ~5 min', 'ok'); carregar() }
-    catch (e) { notify(e.message, 'danger') }
+  const [rep, setRep] = useState(null)
+  // catálogo + seleção de dois papéis
+  const [cat, setCat] = useState([])
+  const [trava, setTrava] = useState(new Set())
+  const [carregandoCat, setCarregandoCat] = useState(true)
+  const [offset, setOffset] = useState(0)
+  const [temMais, setTemMais] = useState(false)
+  const [buscaCat, setBuscaCat] = useState('')
+  const [papel, setPapel] = useState('main')       // main | sub
+  const [principais, setPrincipais] = useState({}) // id -> item
+  const [adicionais, setAdicionais] = useState({}) // id -> {item, preco}
+  const agora = useAgora(30000)
+  const PAG = 50
+
+  const carregar = async (forcar) => {
+    if (!forcar) setListas({ ongoing: null, upcoming: null, expired: null })
+    try {
+      const [o, u, e] = await Promise.all([
+        api.shopeeAddons('ongoing').catch(() => ({})),
+        api.shopeeAddons('upcoming').catch(() => ({})),
+        api.shopeeAddons('expired').catch(() => ({})),
+      ])
+      const pick = (r) => (r && r.response && r.response.add_on_deal_list) || []
+      setListas({ ongoing: pick(o), upcoming: pick(u), expired: pick(e) })
+    } catch (e) { notify(e.message, 'danger') }
+  }
+  const carregarCat = async (off) => {
+    setCarregandoCat(true)
+    try {
+      const r = await api.shopeeProdutos(off, PAG)
+      const lote = (r && r.response && (r.response.item || r.response.itens)) || []
+      setCat((prev) => off === 0 ? lote : [...prev, ...lote])
+      setTemMais(lote.length >= PAG); setOffset(off + lote.length)
+    } catch (e) { /* silencioso */ } finally { setCarregandoCat(false) }
+  }
+  useEffect(() => {
+    if (!conectado) return
+    carregar(); carregarCat(0)
+    api.shopeePromoTrava().then((r) => setTrava(new Set((r.ids || []).map(Number)))).catch(() => {})
+  }, [conectado])
+  const sincronizar = async () => { setSync(true); try { await carregar(true) } finally { setSync(false) } }
+
+  const precoDe = (it) => Number(it.price || it.preco || 0)
+  const toggle = (it) => {
+    const id = it.item_id; if (trava.has(Number(id))) return
+    if (papel === 'main') {
+      setPrincipais((s) => { const n = { ...s }; n[id] ? delete n[id] : (n[id] = it); return n })
+    } else {
+      setAdicionais((s) => { const n = { ...s }; if (n[id]) delete n[id]; else n[id] = { item: it, preco: +(precoDe(it) * (1 - descAdd / 100)).toFixed(2) }; return n })
+    }
+  }
+  const mainArr = Object.values(principais)
+  const subArr = Object.values(adicionais)
+  const setPrecoAdd = (id, v) => setAdicionais((s) => ({ ...s, [id]: { ...s[id], preco: v } }))
+
+  const criar = async () => {
+    if (!nome.trim()) { notify('Dê um nome ao add-on.', 'warn'); return }
+    if (mainArr.length === 0) { notify('Escolha ao menos um produto principal.', 'warn'); return }
+    if (subArr.length === 0) { notify(promoType === 1 ? 'Escolha o(s) brinde(s).' : 'Escolha os produtos adicionais.', 'warn'); return }
+    setCriando(true)
+    try {
+      const inicio = Math.floor(Date.now() / 1000) + 3900
+      const fim = inicio + dias * 86400
+      const adic = subArr.map((s) => ({ item_id: s.item.item_id, add_on_deal_price: promoType === 1 ? 0 : Number(s.preco) }))
+      const r = await api.shopeeCriarAddon({ nome: nome.trim().slice(0, 40), inicio, fim, promotion_type: promoType, principais: mainArr.map((x) => x.item_id), adicionais: adic })
+      notify(`Add-on criado — ${r?.principais_ok ?? mainArr.length} principal(is) e ${r?.adicionais_ok ?? subArr.length} adicional(is).`, 'ok')
+      setNome(''); setPrincipais({}); setAdicionais({}); carregar(true)
+    } catch (e) { notify(e.message, 'danger') } finally { setCriando(false) }
+  }
+  const encerrar = async (id) => { setEnc(id); try { await api.shopeeEncerrarAddon(id); notify('Add-on encerrado.', 'ok'); carregar(true) } catch (e) { notify(e.message, 'danger') } setEnc(null) }
+  const repetir = async (a) => {
+    setRep(a.add_on_deal_id)
+    try {
+      const inicio = Math.floor(Date.now() / 1000) + 3900
+      const fim = inicio + Math.max(86400, (a.end_time - a.start_time) || 14 * 86400)
+      await api.shopeeCriarAddon({ nome: (a.add_on_deal_name || 'Add-on').slice(0, 30) + ' (rep.)', inicio, fim, promotion_type: a.promotion_type || 0, principais: [], adicionais: [] })
+      notify('Add-on repetido (defina os itens no Seller Center se necessário).', 'ok'); carregar(true)
+    } catch (e) { notify(e.message, 'danger') }
     setRep(null)
   }
-  const encerrar = async (id) => {
-    setEnc(id)
-    try { await api.shopeeEncerrarAddon(id); notify('Add-on encerrado', 'ok'); carregar() }
-    catch (e) { notify(e.message, 'danger') }
-    setEnc(null)
-  }
+
+  if (!conectado) return <Vazio txt="Conecte a loja Shopee para gerenciar add-ons." />
+
+  const on = listas.ongoing, up = listas.upcoming, ex = listas.expired
+  const carregando = on === null
+  const nOn = (on || []).length, nUp = (up || []).length, nEx = (ex || []).length
+  const lista = tab === 'ongoing' ? on : tab === 'upcoming' ? up : ex
+  const catFiltrado = cat.filter((it) => !buscaCat || (it.item_name || it.nome || '').toLowerCase().includes(buscaCat.toLowerCase()))
+  const setAtual = papel === 'main' ? principais : adicionais
+  const tipoLabel = promoType === 1 ? 'Brinde por valor mínimo' : 'Add-on com desconto'
+
   return (
     <div className="space-y-3">
-      <div className="flex justify-between items-center gap-2 flex-wrap">
-        <AbasStatus valor={stat} onChange={setStat} />
-        <button onClick={() => setForm(true)} className="rounded-lg px-3 py-1.5 text-sm font-medium text-white flex items-center gap-1.5" style={{ background: LARANJA }}><Plus size={14} /> Novo add-on</button>
+      {/* COMMAND BAR */}
+      <div className="glass" style={{ padding: '15px 18px', border: '1px solid transparent', background: 'linear-gradient(var(--surface),var(--surface)) padding-box,linear-gradient(110deg,rgba(47,201,217,.5),rgba(214,0,127,.36),rgba(238,77,45,.3)) border-box' }}>
+        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 13, flexWrap: 'wrap' }}>
+          <div style={{ width: 44, height: 44, borderRadius: 12, background: 'linear-gradient(145deg,#2FC9D9,#1a9aa8)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none', boxShadow: '0 6px 20px rgba(47,201,217,.3)' }}><Plus size={24} color="#0d0d0d" /></div>
+          <div>
+            <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <b className="serif" style={{ fontSize: 20 }}>Add-on</b>
+              <PBadge c="#fff" bg={PROMO.SHOPEE}>SHOPEE</PBadge>
+              <PBadge c="#0d0d0d" bg={PROMO.TEAL}>LEVE JUNTO</PBadge>
+              <PBadge c={PROMO.OK} bg="rgba(47,217,141,.12)">SOBE O TICKET</PBadge>
+            </div>
+            <div style={{ fontSize: 10.5, color: 'var(--dim)' }}>Na compra do produto principal, o cliente leva os adicionais com desconto — ou ganha um brinde por valor mínimo</div>
+          </div>
+          <div style={{ flex: 1 }} />
+          <div style={{ textAlign: 'right' }}><div className="up" style={{ fontSize: 7, color: 'var(--faint)' }}>Add-ons ativos</div><b className="num serif" style={{ fontSize: 19, color: PROMO.TEAL }}>{nOn}</b><div className="num" style={{ fontSize: 8, color: 'var(--faint)' }}>{nUp} agendados</div></div>
+          <div style={{ width: 1, height: 30, background: 'var(--glass-border)' }} />
+          <button onClick={sincronizar} disabled={sync} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 700, padding: '8px 12px', borderRadius: 9, cursor: 'pointer', color: 'var(--dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)' }}>{sync ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}Sincronizar</button>
+        </div>
       </div>
-      {lista === null ? <Carregando txt="carregando add-ons…" />
-        : as.length === 0 ? <Vazio txt={stat === 'ongoing' ? 'Nenhum add-on ativo. Crie um na aba acima — adicional com desconto junto do principal.' : stat === 'upcoming' ? 'Nenhum add-on agendado.' : 'Nenhum add-on expirado no histórico recente.'} />
-        : <div className="space-y-2.5">{as.map((a) => (
-            <CampaignCard key={a.add_on_deal_id} tipo="addon" id={a.add_on_deal_id} nome={a.add_on_deal_name}
-              inicio={a.start_time} fim={a.end_time}
-              podeEncerrar={stat !== 'expired'} onEncerrar={encerrar} encerrando={enc === a.add_on_deal_id}
-              onRepetir={repetir} repetindo={rep === a.add_on_deal_id} />
-          ))}</div>}
-      {form && <AddonForm onClose={() => setForm(false)} onSaved={() => { setForm(false); carregar() }} notify={notify} />}
+
+      {/* KPIs */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 9 }}>
+        <PKpi label="Add-ons ativos" value={nOn} sub="no ar" cor={PROMO.TEAL} borda="rgba(47,201,217,.4)" />
+        <PKpi label="Agendados" value={nUp} sub="programados" />
+        <PKpi label="Expirados" value={nEx} sub="histórico" />
+        <PKpi label="Na trava" value={trava.size} sub="itens em oferta" cor={PROMO.BLUE} />
+      </div>
+
+      {/* ESTÚDIO DE CRIAÇÃO */}
+      <div className="glass" style={{ padding: 0, overflow: 'hidden', border: '1px solid transparent', background: 'linear-gradient(var(--surface),var(--surface)) padding-box,linear-gradient(110deg,rgba(47,201,217,.4),rgba(238,77,45,.3)) border-box' }}>
+        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '13px 16px', borderBottom: '1px solid var(--glass-border)', flexWrap: 'wrap' }}>
+          <PSecao icon={Plus} cor={PROMO.TEAL} titulo="Criar add-on" extra={<div style={{ flex: 1 }} />} />
+          <PBadge c="#0d0d0d" bg={PROMO.TEAL}>PRINCIPAIS + ADICIONAIS</PBadge>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '.85fr 1.15fr' }}>
+          {/* config */}
+          <div style={{ padding: 16, borderRight: '1px solid var(--glass-border)' }}>
+            <div style={{ fontSize: 8.5, color: 'var(--dim)', marginBottom: 4 }}>Nome do add-on</div>
+            <input value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Ex.: Leve os fechos com desconto" style={{ width: '100%', padding: '8px 11px', fontSize: 11.5, color: 'var(--text)', background: 'rgba(0,0,0,.25)', border: '1px solid var(--glass-border)', borderRadius: 10, marginBottom: 12 }} />
+            <div style={{ fontSize: 8.5, color: 'var(--dim)', marginBottom: 5 }}>Tipo</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
+              {[[0, 'Add-on com desconto', 'adicionais com preço menor ao levar o principal'], [1, 'Brinde por valor mínimo', 'ganha o adicional de graça ao comprar o principal']].map(([v, l, h]) => (
+                <div key={v} onClick={() => setPromoType(v)} className="row" style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 11px', borderRadius: 10, cursor: 'pointer', background: promoType === v ? 'rgba(47,201,217,.1)' : 'rgba(0,0,0,.18)', border: `1px solid ${promoType === v ? 'rgba(47,201,217,.45)' : 'var(--glass-border)'}` }}>
+                  <span style={{ width: 15, height: 15, borderRadius: '50%', flex: 'none', border: `2px solid ${promoType === v ? PROMO.TEAL : 'var(--glass-border)'}`, background: promoType === v ? PROMO.TEAL : 'transparent' }} />
+                  <div style={{ flex: 1 }}><div style={{ fontSize: 10.5, fontWeight: 600 }}>{l}</div><div style={{ fontSize: 8, color: 'var(--faint)' }}>{h}</div></div>
+                </div>
+              ))}
+            </div>
+            {promoType === 0 && (
+              <div style={{ marginBottom: 12 }}>
+                <div className="row" style={{ display: 'flex', marginBottom: 3 }}><span style={{ fontSize: 8.5, color: 'var(--dim)' }}>Desconto sugerido nos adicionais</span><div style={{ flex: 1 }} /><b className="num" style={{ fontSize: 9, color: PROMO.TEAL }}>{descAdd}%</b></div>
+                <input type="range" min={5} max={70} value={descAdd} onChange={(e) => setDescAdd(Number(e.target.value))} style={{ width: '100%', marginTop: 8 }} />
+                <div style={{ fontSize: 7.5, color: 'var(--faint)', marginTop: 3 }}>aplica em novos adicionais; você pode ajustar item a item</div>
+              </div>
+            )}
+            <div style={{ marginBottom: 12 }}>
+              <div className="row" style={{ display: 'flex', marginBottom: 3 }}><span style={{ fontSize: 8.5, color: 'var(--dim)' }}>Validade</span><div style={{ flex: 1 }} /><b className="num" style={{ fontSize: 9, color: PROMO.TEAL }}>{dias} dias</b></div>
+              <input type="range" min={1} max={60} value={dias} onChange={(e) => setDias(Number(e.target.value))} style={{ width: '100%', marginTop: 8 }} />
+            </div>
+            <div style={{ background: 'rgba(47,201,217,.05)', border: '1px solid rgba(47,201,217,.25)', borderRadius: 11, padding: '10px 12px' }}>
+              <div className="up" style={{ fontSize: 7, color: PROMO.TEAL, marginBottom: 5 }}>Resumo</div>
+              <div className="row" style={{ display: 'flex', gap: 8, marginBottom: 4 }}><span style={{ fontSize: 9, color: 'var(--dim)', flex: 1 }}>Principais</span><b className="num" style={{ fontSize: 11, color: PROMO.TEAL }}>{mainArr.length}</b></div>
+              <div className="row" style={{ display: 'flex', gap: 8 }}><span style={{ fontSize: 9, color: 'var(--dim)', flex: 1 }}>{promoType === 1 ? 'Brindes' : 'Adicionais'}</span><b className="num" style={{ fontSize: 11, color: PROMO.TEAL }}>{subArr.length}</b></div>
+            </div>
+            {/* tray de adicionais com preço */}
+            {promoType === 0 && subArr.length > 0 && (
+              <div style={{ marginTop: 12 }}>
+                <div className="up" style={{ fontSize: 7, color: 'var(--faint)', marginBottom: 6 }}>Preço dos adicionais</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 5, maxHeight: 130, overflowY: 'auto' }}>
+                  {subArr.map((s) => (
+                    <div key={s.item.item_id} className="row" style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                      <span style={{ fontSize: 9, color: 'var(--dim)', flex: 1, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{s.item.item_name || s.item.nome}</span>
+                      <span className="num" style={{ fontSize: 8, color: 'var(--faint)', textDecoration: 'line-through' }}>{fmtBRL(precoDe(s.item))}</span>
+                      <input type="number" value={s.preco} onChange={(e) => setPrecoAdd(s.item.item_id, Number(e.target.value))} style={{ width: 62, padding: '4px 6px', fontSize: 9.5, color: PROMO.OK, background: 'rgba(0,0,0,.25)', border: '1px solid var(--glass-border)', borderRadius: 7 }} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+          {/* seletor com papel */}
+          <div style={{ padding: 16 }}>
+            <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+              <span onClick={() => setPapel('main')} style={{ fontSize: 10, fontWeight: 700, padding: '6px 12px', borderRadius: 99, cursor: 'pointer', color: papel === 'main' ? '#0d0d0d' : 'var(--dim)', background: papel === 'main' ? PROMO.TEAL : 'rgba(255,255,255,.04)', border: `1px solid ${papel === 'main' ? 'transparent' : 'var(--glass-border)'}` }}>Principais ({mainArr.length})</span>
+              <span onClick={() => setPapel('sub')} style={{ fontSize: 10, fontWeight: 700, padding: '6px 12px', borderRadius: 99, cursor: 'pointer', color: papel === 'sub' ? '#0d0d0d' : 'var(--dim)', background: papel === 'sub' ? PROMO.TEAL : 'rgba(255,255,255,.04)', border: `1px solid ${papel === 'sub' ? 'transparent' : 'var(--glass-border)'}` }}>{promoType === 1 ? 'Brindes' : 'Adicionais'} ({subArr.length})</span>
+              <div style={{ flex: 1 }} />
+              <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'rgba(0,0,0,.25)', border: '1px solid var(--glass-border)', borderRadius: 9, padding: '5px 10px' }}><Search size={11} style={{ color: 'var(--faint)' }} /><input value={buscaCat} onChange={(e) => setBuscaCat(e.target.value)} placeholder="buscar" style={{ background: 'transparent', border: 'none', outline: 'none', color: 'var(--text)', fontSize: 10, width: 90 }} /></div>
+            </div>
+            <div style={{ fontSize: 8, color: 'var(--faint)', marginBottom: 8 }}>Escolhendo os <b style={{ color: PROMO.TEAL }}>{papel === 'main' ? 'produtos principais' : (promoType === 1 ? 'brindes' : 'adicionais')}</b> — {papel === 'main' ? 'quem o cliente precisa comprar' : (promoType === 1 ? 'o que ele ganha de graça' : 'o que ele leva com desconto')}</div>
+            <div style={{ maxHeight: 230, overflowY: 'auto', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7 }}>
+              {catFiltrado.map((it) => {
+                const id = it.item_id; const travado = trava.has(Number(id)); const on = !!setAtual[id]; const preco = precoDe(it)
+                return (
+                  <div key={id} onClick={() => toggle(it)} className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 9px', borderRadius: 10, cursor: travado ? 'not-allowed' : 'pointer', background: on ? 'rgba(47,201,217,.1)' : 'rgba(0,0,0,.2)', border: `1px solid ${on ? 'rgba(47,201,217,.45)' : 'var(--glass-border)'}`, opacity: travado ? .5 : 1 }}>
+                    <span style={{ width: 15, height: 15, borderRadius: 4, flex: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: on ? PROMO.TEAL : 'transparent', border: on ? 'none' : `2px solid ${travado ? 'var(--faint)' : 'var(--glass-border)'}` }}>{on && <Check size={10} color="#0d0d0d" />}</span>
+                    <div style={{ width: 26, height: 26, borderRadius: 6, overflow: 'hidden', flex: 'none', background: 'linear-gradient(135deg,rgba(238,77,45,.25),rgba(47,201,217,.2))', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{it.image ? <img src={it.image} alt="" loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Package size={12} style={{ color: 'rgba(255,255,255,.6)' }} />}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 9.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.item_name || it.nome || `#${id}`}</div><div className="num" style={{ fontSize: 8, color: travado ? PROMO.BLUE : 'var(--faint)' }}>{travado ? '🔒 em campanha' : preco > 0 ? fmtBRL(preco) : ''}</div></div>
+                  </div>
+                )
+              })}
+            </div>
+            {temMais && !buscaCat && <div style={{ textAlign: 'center', marginTop: 9 }}><button onClick={() => carregarCat(offset)} disabled={carregandoCat} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 9.5, padding: '5px 12px', borderRadius: 8, cursor: 'pointer', color: 'var(--dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)' }}>{carregandoCat ? <Loader2 size={10} className="animate-spin" /> : <ChevronRight size={10} />}carregar mais</button></div>}
+            {carregandoCat && cat.length === 0 && <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 18, justifyContent: 'center', color: 'var(--faint)', fontSize: 10.5 }}><Loader2 size={13} className="animate-spin" />carregando catálogo…</div>}
+            <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, paddingTop: 11, borderTop: '1px solid var(--glass-border)' }}>
+              <span style={{ fontSize: 8.5, color: 'var(--faint)', flex: 1 }}>começa em ~1h (exigência Shopee) · itens 🔒 já em campanha ficam de fora</span>
+              <button onClick={criar} disabled={criando || mainArr.length === 0 || subArr.length === 0} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, fontWeight: 800, padding: '9px 17px', borderRadius: 10, cursor: (mainArr.length && subArr.length) ? 'pointer' : 'default', color: '#0d0d0d', border: 'none', background: 'linear-gradient(135deg,#2FC9D9,#1a9aa8)', opacity: (criando || !mainArr.length || !subArr.length) ? .6 : 1 }}>{criando ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}Criar add-on</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* LISTA */}
+      <div className="glass" style={{ padding: 16 }}>
+        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+          <PSecao icon={Plus} cor={PROMO.TEAL} titulo="Add-ons da loja" extra={<div style={{ flex: 1 }} />} />
+          {[['ongoing', `Ativos (${nOn})`], ['upcoming', `Agendados (${nUp})`], ['expired', `Expirados (${nEx})`]].map(([v, l]) => <span key={v} onClick={() => setTab(v)} style={{ fontSize: 9.5, fontWeight: 700, padding: '5px 11px', borderRadius: 99, cursor: 'pointer', color: tab === v ? '#0d0d0d' : 'var(--dim)', background: tab === v ? PROMO.TEAL : 'rgba(255,255,255,.04)', border: `1px solid ${tab === v ? 'transparent' : 'var(--glass-border)'}` }}>{l}</span>)}
+        </div>
+        {carregando ? <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 22, justifyContent: 'center', color: 'var(--faint)', fontSize: 11 }}><Loader2 size={14} className="animate-spin" />Carregando add-ons…</div>
+          : (!lista || lista.length === 0) ? <div style={{ fontSize: 11, color: 'var(--faint)', padding: 20, textAlign: 'center' }}>{tab === 'ongoing' ? 'Nenhum add-on ativo. Crie um acima para vender mais por pedido.' : tab === 'upcoming' ? 'Nenhum add-on agendado.' : 'Nenhum add-on expirado no histórico recente.'}</div>
+            : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 10 }}>
+                {lista.map((a) => {
+                  const ini = a.start_time || 0, fim = a.end_time || 0, dur = Math.max(1, fim - ini)
+                  const pct = tab === 'ongoing' ? Math.min(100, Math.max(0, (agora / 1000 - ini) / dur * 100)) : tab === 'upcoming' ? 0 : 100
+                  const rem = fim - agora / 1000
+                  return (
+                    <div key={a.add_on_deal_id} className="glass" style={{ padding: '13px 15px', borderRadius: 13, borderLeft: `3px solid ${PROMO.TEAL}` }}>
+                      <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <Plus size={14} style={{ color: PROMO.TEAL, flex: 'none' }} />
+                        <b style={{ fontSize: 11.5, flex: 1, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{a.add_on_deal_name || 'Add-on'}</b>
+                        <PBadge c="#0d0d0d" bg={PROMO.TEAL}>{a.promotion_type === 1 ? 'BRINDE' : 'DESCONTO'}</PBadge>
+                      </div>
+                      <div className="prog" style={{ height: 5, borderRadius: 3, background: 'rgba(255,255,255,.07)', overflow: 'hidden', margin: '10px 0 9px' }}><div style={{ width: `${pct}%`, height: '100%', borderRadius: 3, background: 'linear-gradient(90deg,#2FC9D9,#1a9aa8)' }} /></div>
+                      <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span className="num" style={{ fontSize: 8, color: 'var(--faint)' }}>{tab === 'upcoming' ? `começa ${new Date(ini * 1000).toLocaleDateString('pt-BR')}` : rem > 0 ? `${fmtDur(rem * 1000)} restante` : 'encerrado'}</span>
+                        <div style={{ flex: 1 }} />
+                        <button onClick={() => repetir(a)} disabled={rep === a.add_on_deal_id} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9, fontWeight: 700, padding: '4px 10px', borderRadius: 8, cursor: 'pointer', color: 'var(--dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)' }}>{rep === a.add_on_deal_id ? <Loader2 size={10} className="animate-spin" /> : <RotateCcw size={10} />}Repetir</button>
+                        {tab !== 'expired' && <button onClick={() => encerrar(a.add_on_deal_id)} disabled={enc === a.add_on_deal_id} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9, fontWeight: 700, padding: '4px 10px', borderRadius: 8, cursor: 'pointer', color: PROMO.DANGER, background: 'rgba(255,122,122,.06)', border: '1px solid rgba(255,122,122,.3)' }}>{enc === a.add_on_deal_id ? <Loader2 size={10} className="animate-spin" /> : 'Encerrar'}</button>}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+      </div>
     </div>
   )
 }
@@ -5462,36 +6136,208 @@ function AddonForm({ onClose, onSaved, notify }) {
 }
 
 /* ----------------------------- Flash Sale -------------------------------- */
-function FlashSale({ notify }) {
-  const [lista, setLista] = useState(null)
-  const [form, setForm] = useState(false)
+function FlashSale({ conectado, notify }) {
+  const [listas, setListas] = useState({ ongoing: null, upcoming: null, expired: null })
+  const [tab, setTab] = useState('ongoing')
+  const [slots, setSlots] = useState(null)
+  const [sync, setSync] = useState(false)
+  const [slotSel, setSlotSel] = useState(null)
+  const [descPct, setDescPct] = useState(20)
+  const [criando, setCriando] = useState(false)
   const [enc, setEnc] = useState(null)
-  const [stat, setStat] = useState(2)
-  const carregar = () => { setLista(null); api.shopeeFlash(stat).then(setLista).catch(() => setLista({ erro: true })) }
-  useEffect(carregar, [stat])
-  const fs = lista?.response?.flash_sale_list || lista?.response || []
-  const arr = Array.isArray(fs) ? fs : []
-  const encerrar = async (id) => {
-    setEnc(id)
-    try { await api.shopeeEncerrarFlash(id); notify('Flash sale removida', 'ok'); carregar() }
-    catch (e) { notify(e.message, 'danger') }
-    setEnc(null)
+  const [cat, setCat] = useState([])
+  const [trava, setTrava] = useState(new Set())
+  const [carregandoCat, setCarregandoCat] = useState(true)
+  const [offset, setOffset] = useState(0)
+  const [temMais, setTemMais] = useState(false)
+  const [buscaCat, setBuscaCat] = useState('')
+  const [sel, setSel] = useState({})
+  const agora = useAgora(15000)
+  const PAG = 50
+
+  const carregar = async (forcar) => {
+    if (!forcar) setListas({ ongoing: null, upcoming: null, expired: null })
+    try {
+      const [o, u, e] = await Promise.all([
+        api.shopeeFlash(2).catch(() => ({})),   // 2 = ongoing
+        api.shopeeFlash(1).catch(() => ({})),   // 1 = upcoming
+        api.shopeeFlash(3).catch(() => ({})),   // 3 = expired
+      ])
+      const pick = (r) => (r && r.response && (r.response.flash_sale_list || r.response.flash_list)) || []
+      setListas({ ongoing: pick(o), upcoming: pick(u), expired: pick(e) })
+    } catch (e) { notify(e.message, 'danger') }
+    api.shopeeFlashSlots(7).then((r) => {
+      const resp = (r && r.response) || r || {}
+      setSlots(resp.timeslot_list || resp.time_slot_list || (Array.isArray(resp) ? resp : []))
+    }).catch(() => setSlots([]))
   }
+  const carregarCat = async (off) => {
+    setCarregandoCat(true)
+    try {
+      const r = await api.shopeeProdutos(off, PAG)
+      const lote = (r && r.response && (r.response.item || r.response.itens)) || []
+      setCat((prev) => off === 0 ? lote : [...prev, ...lote])
+      setTemMais(lote.length >= PAG); setOffset(off + lote.length)
+    } catch (e) { /* silencioso */ } finally { setCarregandoCat(false) }
+  }
+  useEffect(() => {
+    if (!conectado) return
+    carregar(); carregarCat(0)
+    api.shopeePromoTrava().then((r) => setTrava(new Set((r.ids || []).map(Number)))).catch(() => {})
+  }, [conectado])
+  const sincronizar = async () => { setSync(true); try { await carregar(true) } finally { setSync(false) } }
+
+  const precoDe = (it) => Number(it.price || it.preco || 0)
+  const selArr = Object.values(sel)
+  const toggle = (it) => { const id = it.item_id; if (trava.has(Number(id))) return; setSel((s) => { const n = { ...s }; n[id] ? delete n[id] : (n[id] = it); return n }) }
+  const criar = async () => {
+    if (!slotSel) { notify('Escolha um horário (slot) para a Flash Sale.', 'warn'); return }
+    if (selArr.length === 0) { notify('Escolha os produtos da oferta relâmpago.', 'warn'); return }
+    setCriando(true)
+    try {
+      const itens = selArr.filter((it) => precoDe(it) > 0).map((it) => ({ item_id: it.item_id, desconto_pct: descPct, preco_promo: +(precoDe(it) * (1 - descPct / 100)).toFixed(2), estoque: Number(it.stock || 0) }))
+      const r = await api.shopeeCriarFlash({ timeslot_id: slotSel, itens })
+      notify(`Flash Sale criada com ${r?.itens_adicionados ?? itens.length} produto(s).`, 'ok')
+      setSel({}); setSlotSel(null); carregar(true)
+    } catch (e) { notify(e.message, 'danger') } finally { setCriando(false) }
+  }
+  const encerrar = async (id) => { setEnc(id); try { await api.shopeeEncerrarFlash(id); notify('Flash Sale encerrada.', 'ok'); carregar(true) } catch (e) { notify(e.message, 'danger') } setEnc(null) }
+
+  if (!conectado) return <Vazio txt="Conecte a loja Shopee para gerenciar Flash Sales." />
+
+  const on = listas.ongoing, up = listas.upcoming, ex = listas.expired
+  const carregando = on === null
+  const nOn = (on || []).length, nUp = (up || []).length, nEx = (ex || []).length
+  const nSlots = (slots || []).length
+  const lista = tab === 'ongoing' ? on : tab === 'upcoming' ? up : ex
+  const catFiltrado = cat.filter((it) => !buscaCat || (it.item_name || it.nome || '').toLowerCase().includes(buscaCat.toLowerCase()))
+  const diaSemana = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb']
+  const fmtSlot = (s) => {
+    const ini = new Date((s.start_time || 0) * 1000), fim = new Date((s.end_time || 0) * 1000)
+    const hoje = new Date(agora)
+    const rot = ini.toDateString() === hoje.toDateString() ? 'HOJE' : diaSemana[ini.getDay()].toUpperCase()
+    return `${rot} ${String(ini.getHours()).padStart(2, '0')}h–${String(fim.getHours()).padStart(2, '0')}h`
+  }
+
   return (
     <div className="space-y-3">
-      <div className="flex justify-between items-center gap-2 flex-wrap">
-        <AbasStatus valor={stat} onChange={setStat} opcoes={[[2, 'Ativos'], [1, 'Agendados'], [3, 'Expirados']]} />
-        <button onClick={() => setForm(true)} className="rounded-lg px-3 py-1.5 text-sm font-medium text-white flex items-center gap-1.5" style={{ background: LARANJA }}><Flame size={14} /> Nova flash sale</button>
+      {/* COMMAND BAR */}
+      <div className="glass" style={{ padding: '15px 18px', border: '1px solid transparent', background: 'linear-gradient(var(--surface),var(--surface)) padding-box,linear-gradient(110deg,rgba(214,0,127,.55),rgba(238,77,45,.4),rgba(160,107,232,.3)) border-box' }}>
+        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 13, flexWrap: 'wrap' }}>
+          <div style={{ width: 44, height: 44, borderRadius: 12, background: 'linear-gradient(145deg,#d6007f,#a0005f)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none', boxShadow: '0 6px 20px rgba(214,0,127,.4)' }}><Zap size={22} color="#fff" /></div>
+          <div>
+            <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <b className="serif" style={{ fontSize: 20 }}>Flash Sale</b>
+              <PBadge c="#fff" bg={PROMO.SHOPEE}>SHOPEE</PBadge>
+              <PBadge c="#fff" bg="#d6007f">SLOTS OFICIAIS</PBadge>
+              <PBadge c={PROMO.OK} bg="rgba(47,217,141,.12)">GIRO RÁPIDO</PBadge>
+            </div>
+            <div style={{ fontSize: 10.5, color: 'var(--dim)' }}>Ofertas relâmpago nos horários que a Shopee libera para a loja — preço por variação, sempre abaixo do vigente</div>
+          </div>
+          <div style={{ flex: 1 }} />
+          <div style={{ textAlign: 'right' }}><div className="up" style={{ fontSize: 7, color: 'var(--faint)' }}>Ao vivo · agendadas</div><b className="num serif" style={{ fontSize: 19, color: '#d6007f' }}>{nOn} · {nUp}</b><div className="num" style={{ fontSize: 8, color: 'var(--faint)' }}>{nSlots} slots livres</div></div>
+          <div style={{ width: 1, height: 30, background: 'var(--glass-border)' }} />
+          <button onClick={sincronizar} disabled={sync} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 700, padding: '8px 12px', borderRadius: 9, cursor: 'pointer', color: 'var(--dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)' }}>{sync ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}Sincronizar</button>
+        </div>
       </div>
-      {lista === null ? <Carregando txt="carregando flash sales…" />
-        : arr.length === 0 ? <Vazio txt={stat === 2 ? 'Nenhuma flash sale ativa agora. A Shopee libera slots por elegibilidade da loja.' : stat === 1 ? 'Nenhuma flash sale agendada.' : 'Nenhuma flash sale expirada no histórico recente.'} />
-        : <div className="space-y-2.5">{arr.map((s) => (
-            <CampaignCard key={s.flash_sale_id} tipo="flash" id={s.flash_sale_id} nome={`Flash #${s.flash_sale_id}`}
-              inicio={s.start_time} fim={s.end_time}
-              flags={[{ icon: Zap, texto: 'oferta relâmpago', cor: '#F59E0B' }]}
-              podeEncerrar={stat !== 3} onEncerrar={encerrar} encerrando={enc === s.flash_sale_id} />
-          ))}</div>}
-      {form && <FlashForm onClose={() => setForm(false)} onSaved={() => { setForm(false); carregar() }} notify={notify} />}
+
+      {/* KPIs */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 9 }}>
+        <PKpi label="Ao vivo" value={nOn} sub="acontecendo" cor="#d6007f" borda="rgba(214,0,127,.4)" />
+        <PKpi label="Agendadas" value={nUp} sub="programadas" />
+        <PKpi label="Slots livres" value={nSlots} sub="para agendar" cor={PROMO.OK} />
+        <PKpi label="Na trava" value={trava.size} sub="itens em oferta" cor={PROMO.BLUE} />
+      </div>
+
+      {/* ESTÚDIO: SLOT + PRODUTOS */}
+      <div className="glass" style={{ padding: 0, overflow: 'hidden', border: '1px solid transparent', background: 'linear-gradient(var(--surface),var(--surface)) padding-box,linear-gradient(110deg,rgba(214,0,127,.45),rgba(238,77,45,.32)) border-box' }}>
+        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '13px 16px', borderBottom: '1px solid var(--glass-border)', flexWrap: 'wrap' }}>
+          <PSecao icon={Zap} cor="#d6007f" titulo="Criar Flash Sale" extra={<div style={{ flex: 1 }} />} />
+          <PBadge c="#fff" bg="#d6007f">SLOT + PRODUTOS + DESCONTO</PBadge>
+        </div>
+        {/* passo 1: slot */}
+        <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--glass-border)' }}>
+          <div className="up" style={{ fontSize: 7.5, color: 'var(--faint)', marginBottom: 9 }}>1 · Escolha o horário oficial</div>
+          {slots === null ? <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 12, color: 'var(--faint)', fontSize: 10.5 }}><Loader2 size={13} className="animate-spin" />buscando slots…</div>
+            : nSlots === 0 ? <div style={{ fontSize: 10.5, color: 'var(--faint)', padding: 12, textAlign: 'center' }}>A Shopee não liberou horários de Flash Sale para a loja nos próximos 7 dias. Assim que abrir, os slots aparecem aqui.</div>
+              : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 8 }}>
+                  {(slots || []).slice(0, 12).map((s) => {
+                    const on = slotSel === s.timeslot_id
+                    return (
+                      <div key={s.timeslot_id} onClick={() => setSlotSel(s.timeslot_id)} className="glass" style={{ padding: '9px 10px', borderRadius: 11, cursor: 'pointer', borderColor: on ? 'rgba(214,0,127,.5)' : 'var(--glass-border)', background: on ? 'rgba(214,0,127,.08)' : 'var(--glass)' }}>
+                        <div style={{ fontSize: 8, textTransform: 'uppercase', fontWeight: 800, color: on ? '#d6007f' : 'var(--faint)' }}>{fmtSlot(s)}</div>
+                        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 3 }}><span style={{ width: 12, height: 12, borderRadius: '50%', flex: 'none', border: `2px solid ${on ? '#d6007f' : 'var(--glass-border)'}`, background: on ? '#d6007f' : 'transparent' }} /><span style={{ fontSize: 9, fontWeight: 700, color: on ? '#d6007f' : PROMO.OK }}>{on ? 'escolhido' : 'livre'}</span></div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+        </div>
+        {/* passo 2: produtos + desconto */}
+        <div style={{ padding: 16 }}>
+          <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+            <span className="up" style={{ fontSize: 7.5, color: 'var(--faint)' }}>2 · Produtos e desconto</span>
+            <div style={{ flex: 1 }} />
+            <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(0,0,0,.2)', border: '1px solid var(--glass-border)', borderRadius: 9, padding: '5px 11px' }}><span style={{ fontSize: 8.5, color: 'var(--dim)' }}>desconto</span><input type="range" min={5} max={80} value={descPct} onChange={(e) => setDescPct(Number(e.target.value))} style={{ width: 90 }} /><b className="num" style={{ fontSize: 10, color: '#d6007f' }}>{descPct}%</b></div>
+            <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'rgba(0,0,0,.25)', border: '1px solid var(--glass-border)', borderRadius: 9, padding: '5px 10px' }}><Search size={11} style={{ color: 'var(--faint)' }} /><input value={buscaCat} onChange={(e) => setBuscaCat(e.target.value)} placeholder="buscar" style={{ background: 'transparent', border: 'none', outline: 'none', color: 'var(--text)', fontSize: 10, width: 90 }} /></div>
+            <PBadge c={PROMO.OK} bg="rgba(47,217,141,.1)">{selArr.length} SEL.</PBadge>
+          </div>
+          <div style={{ maxHeight: 230, overflowY: 'auto', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 7 }}>
+            {catFiltrado.map((it) => {
+              const id = it.item_id; const travado = trava.has(Number(id)); const on = !!sel[id]; const preco = precoDe(it)
+              return (
+                <div key={id} onClick={() => toggle(it)} className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 9px', borderRadius: 10, cursor: travado ? 'not-allowed' : 'pointer', background: on ? 'rgba(214,0,127,.1)' : 'rgba(0,0,0,.2)', border: `1px solid ${on ? 'rgba(214,0,127,.45)' : 'var(--glass-border)'}`, opacity: travado ? .5 : 1 }}>
+                  <span style={{ width: 15, height: 15, borderRadius: 4, flex: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: on ? '#d6007f' : 'transparent', border: on ? 'none' : `2px solid ${travado ? 'var(--faint)' : 'var(--glass-border)'}` }}>{on && <Check size={10} color="#fff" />}</span>
+                  <div style={{ width: 26, height: 26, borderRadius: 6, overflow: 'hidden', flex: 'none', background: 'linear-gradient(135deg,rgba(238,77,45,.25),rgba(214,0,127,.2))', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{it.image ? <img src={it.image} alt="" loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Package size={12} style={{ color: 'rgba(255,255,255,.6)' }} />}</div>
+                  <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 9.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.item_name || it.nome || `#${id}`}</div><div className="num" style={{ fontSize: 8, color: travado ? PROMO.BLUE : 'var(--faint)' }}>{travado ? '🔒 em campanha' : preco > 0 ? <>{fmtBRL(preco)} → <b style={{ color: PROMO.OK }}>{fmtBRL(+(preco * (1 - descPct / 100)).toFixed(2))}</b></> : ''}</div></div>
+                </div>
+              )
+            })}
+          </div>
+          {temMais && !buscaCat && <div style={{ textAlign: 'center', marginTop: 9 }}><button onClick={() => carregarCat(offset)} disabled={carregandoCat} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 9.5, padding: '5px 12px', borderRadius: 8, cursor: 'pointer', color: 'var(--dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)' }}>{carregandoCat ? <Loader2 size={10} className="animate-spin" /> : <ChevronRight size={10} />}carregar mais</button></div>}
+          {carregandoCat && cat.length === 0 && <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 18, justifyContent: 'center', color: 'var(--faint)', fontSize: 10.5 }}><Loader2 size={13} className="animate-spin" />carregando catálogo…</div>}
+          <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, paddingTop: 11, borderTop: '1px solid var(--glass-border)' }}>
+            <span style={{ fontSize: 8.5, color: 'var(--faint)', flex: 1 }}>{slotSel ? 'slot escolhido' : 'escolha um slot acima'} · o desconto é aplicado por variação, sempre abaixo do preço vigente · itens 🔒 ficam de fora</span>
+            <button onClick={criar} disabled={criando || !slotSel || selArr.length === 0} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, fontWeight: 800, padding: '9px 17px', borderRadius: 10, cursor: (slotSel && selArr.length) ? 'pointer' : 'default', color: '#fff', border: 'none', background: 'linear-gradient(135deg,#d6007f,#a0005f)', opacity: (criando || !slotSel || !selArr.length) ? .6 : 1 }}>{criando ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}Criar Flash Sale ({selArr.length})</button>
+          </div>
+        </div>
+      </div>
+
+      {/* LISTA */}
+      <div className="glass" style={{ padding: 16 }}>
+        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+          <PSecao icon={Zap} cor="#d6007f" titulo="Flash Sales da loja" extra={<div style={{ flex: 1 }} />} />
+          {[['ongoing', `Ao vivo (${nOn})`], ['upcoming', `Agendadas (${nUp})`], ['expired', `Encerradas (${nEx})`]].map(([v, l]) => <span key={v} onClick={() => setTab(v)} style={{ fontSize: 9.5, fontWeight: 700, padding: '5px 11px', borderRadius: 99, cursor: 'pointer', color: tab === v ? '#fff' : 'var(--dim)', background: tab === v ? 'linear-gradient(135deg,#d6007f,#a0005f)' : 'rgba(255,255,255,.04)', border: `1px solid ${tab === v ? 'transparent' : 'var(--glass-border)'}` }}>{l}</span>)}
+        </div>
+        {carregando ? <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 22, justifyContent: 'center', color: 'var(--faint)', fontSize: 11 }}><Loader2 size={14} className="animate-spin" />Carregando Flash Sales…</div>
+          : (!lista || lista.length === 0) ? <div style={{ fontSize: 11, color: 'var(--faint)', padding: 20, textAlign: 'center' }}>{tab === 'ongoing' ? 'Nenhuma Flash Sale acontecendo agora. Agende uma acima num slot livre.' : tab === 'upcoming' ? 'Nenhuma Flash Sale agendada.' : 'Nenhuma Flash Sale encerrada no histórico recente.'}</div>
+            : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 10 }}>
+                {lista.map((f) => {
+                  const ini = f.start_time || 0, fim = f.end_time || 0, dur = Math.max(1, fim - ini)
+                  const pct = tab === 'ongoing' ? Math.min(100, Math.max(0, (agora / 1000 - ini) / dur * 100)) : tab === 'upcoming' ? 0 : 100
+                  const rem = fim - agora / 1000; const iniD = new Date(ini * 1000)
+                  return (
+                    <div key={f.flash_sale_id} className="glass" style={{ padding: '13px 15px', borderRadius: 13, borderLeft: '3px solid #d6007f' }}>
+                      <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <Zap size={14} style={{ color: '#d6007f', flex: 'none' }} />
+                        <b style={{ fontSize: 11.5, flex: 1 }}>Flash · {iniD.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} {String(iniD.getHours()).padStart(2, '0')}h</b>
+                        {tab === 'ongoing' && <PBadge c="#fff" bg="#d6007f">AO VIVO</PBadge>}
+                        {f.item_count != null && <PBadge c="var(--faint)" bg="rgba(255,255,255,.05)">{f.item_count} itens</PBadge>}
+                      </div>
+                      <div className="prog" style={{ height: 5, borderRadius: 3, background: 'rgba(255,255,255,.07)', overflow: 'hidden', margin: '10px 0 9px' }}><div style={{ width: `${pct}%`, height: '100%', borderRadius: 3, background: 'linear-gradient(90deg,#d6007f,#a0005f)' }} /></div>
+                      <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span className="num" style={{ fontSize: 8, color: tab === 'ongoing' ? '#d6007f' : 'var(--faint)' }}>{tab === 'upcoming' ? `começa ${iniD.toLocaleDateString('pt-BR')} ${String(iniD.getHours()).padStart(2, '0')}h` : rem > 0 ? `${fmtDur(rem * 1000)} restante` : 'encerrada'}</span>
+                        <div style={{ flex: 1 }} />
+                        {tab !== 'expired' && <button onClick={() => encerrar(f.flash_sale_id)} disabled={enc === f.flash_sale_id} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9, fontWeight: 700, padding: '4px 10px', borderRadius: 8, cursor: 'pointer', color: PROMO.DANGER, background: 'rgba(255,122,122,.06)', border: '1px solid rgba(255,122,122,.3)' }}>{enc === f.flash_sale_id ? <Loader2 size={10} className="animate-spin" /> : 'Encerrar'}</button>}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+      </div>
     </div>
   )
 }
@@ -5940,7 +6786,7 @@ function PropostaCard({ p, teto, piso, on, toggle }) {
         <div style={{ flex: 1 }} />
         <b className="num" style={{ color: margemCor, fontWeight: 800 }}>margem {margem != null ? `${margem}%` : '—'}{margem != null && margem <= piso + 1 ? ' ⚠' : ''}</b>
       </div>
-      {p.preco_base != null && <div className="num" style={{ fontSize: 7.5, color: 'var(--faint)', marginTop: 3 }}>preço de lista da precificação · líquido-alvo preservado: {fmtBRL(p.preco_base)}</div>}
+      {p.preco_base != null && <div className="num" style={{ fontSize: 7.5, color: 'var(--faint)', marginTop: 3 }}>desconto sobre o preço do anúncio · líquido-alvo (Bling): {fmtBRL(p.preco_base)}</div>}
     </div>
   )
 }
