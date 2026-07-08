@@ -5227,7 +5227,6 @@ function Descontos({ conectado, notify }) {
 
   return (
     <div className="space-y-3">
-      <DiagShopee conectado={conectado} />
       {/* COMMAND BAR */}
       <div className="glass" style={{ padding: '15px 18px', border: '1px solid transparent', background: 'linear-gradient(var(--surface),var(--surface)) padding-box,linear-gradient(110deg,rgba(238,77,45,.55),rgba(214,0,127,.4),rgba(160,107,232,.3)) border-box' }}>
         <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 13, flexWrap: 'wrap' }}>
@@ -6772,6 +6771,7 @@ function DiagShopee({ conectado }) {
   const [cat, setCat] = useState([])
   const [sel, setSel] = useState('')
   const [dpct, setDpct] = useState(10)
+  const [tipo, setTipo] = useState('desconto')
   const [rodando, setRodando] = useState(false)
   const [res, setRes] = useState(null)
   const [copiado, setCopiado] = useState(false)
@@ -6786,7 +6786,7 @@ function DiagShopee({ conectado }) {
   const rodar = async () => {
     if (!sel) return
     setRodando(true); setRes(null); setCopiado(false)
-    try { setRes(await api.shopeePromoDiag({ item_id: Number(sel), desconto_pct: Number(dpct) })) }
+    try { setRes(await api.shopeePromoDiag({ item_id: Number(sel), desconto_pct: Number(dpct), tipo })) }
     catch (e) { setRes({ erro: e.message }) }
     setRodando(false)
   }
@@ -6805,6 +6805,11 @@ function DiagShopee({ conectado }) {
       </div>
       {aberto && (
         <div style={{ padding: '0 15px 15px' }}>
+          <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 8, color: 'var(--faint)', fontWeight: 700 }}>TIPO A TESTAR</span>
+            {[['desconto', 'Desconto'], ['bundle', 'Bundle · Leve+'], ['addon', 'Add-on']].map(([v, l]) => <span key={v} onClick={() => setTipo(v)} style={{ fontSize: 9.5, fontWeight: 700, padding: '5px 11px', borderRadius: 99, cursor: 'pointer', color: tipo === v ? '#1a1008' : 'var(--dim)', background: tipo === v ? PROMO.GOLD : 'rgba(255,255,255,.04)', border: `1px solid ${tipo === v ? 'transparent' : 'var(--glass-border)'}` }}>{l}</span>)}
+            <span style={{ fontSize: 8, color: 'var(--faint)' }}>{tipo === 'desconto' ? '(já confirmado que funciona — teste os outros)' : tipo === 'bundle' ? '(usa o produto + outro da loja; combo pede 2)' : '(principal = o produto; adicional = outro da loja)'}</span>
+          </div>
           <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap', marginBottom: 11 }}>
             <div style={{ flex: 1, minWidth: 200 }}>
               <div style={{ fontSize: 8, color: 'var(--faint)', marginBottom: 3 }}>Produto real da loja</div>
@@ -6828,7 +6833,7 @@ function DiagShopee({ conectado }) {
                 <button onClick={copiar} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 9.5, fontWeight: 700, padding: '5px 11px', borderRadius: 8, cursor: 'pointer', color: copiado ? PROMO.OK : 'var(--dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)' }}>{copiado ? <Check size={11} /> : <Plus size={11} style={{ transform: 'rotate(45deg)' }} />}{copiado ? 'copiado!' : 'copiar tudo'}</button>
               </div>
               <pre style={{ maxHeight: 340, overflow: 'auto', background: 'rgba(0,0,0,.35)', border: '1px solid var(--glass-border)', borderRadius: 10, padding: 12, fontSize: 9.5, lineHeight: 1.5, color: '#cfe', whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'Menlo,Consolas,monospace' }}>{json}</pre>
-              <div style={{ fontSize: 8.5, color: 'var(--faint)', marginTop: 6 }}>Procure o bloco <b style={{ color: PROMO.GOLD }}>resp_add_discount_item_CRUA</b> e o <b style={{ color: PROMO.GOLD }}>get_discount_apos</b> (item_count) — é o que revela se o item entrou e como a Shopee reporta. Copie tudo e me envie.</div>
+              <div style={{ fontSize: 8.5, color: 'var(--faint)', marginTop: 6 }}>Procure os blocos terminados em <b style={{ color: PROMO.GOLD }}>_CRUA</b> e os <b style={{ color: PROMO.GOLD }}>get_…</b> — é o que revela se o item entrou e como a Shopee reporta. Copie tudo e me envie.</div>
             </div>
           )}
         </div>
