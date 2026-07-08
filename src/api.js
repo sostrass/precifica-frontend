@@ -318,6 +318,7 @@ export const api = {
   shopeeFlashSlots: (dias = 3) => req(`/api/shopee/flash/slots?dias=${dias}`),
   shopeeFlash: (tipo = 1) => req(`/api/shopee/flash?tipo=${tipo}`),
   shopeeCriarFlash: (b) => req('/api/shopee/flash', { method: 'POST', body: b }),
+  shopeeFlashHabilitar: (id) => req(`/api/shopee/flash/${id}/habilitar`, { method: 'POST' }),
   shopeeEncerrarFlash: (id) => req(`/api/shopee/flash/${id}`, { method: 'DELETE' }),
   concorrenciaPrecos: (b) => req('/api/concorrencia/precos', { method: 'POST', body: b }),
   iaDescricao: (b) => req('/api/ia/descricao', { method: 'POST', body: b }),

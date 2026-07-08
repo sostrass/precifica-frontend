@@ -6153,6 +6153,10 @@ function FlashSale({ conectado, notify }) {
   const [listas, setListas] = useState({ ongoing: null, upcoming: null, expired: null })
   const [tab, setTab] = useState('ongoing')
   const [slots, setSlots] = useState(null)
+  const [slotsErro, setSlotsErro] = useState(null)
+  const [alcance, setAlcance] = useState(14)
+  const [diaSel, setDiaSel] = useState(null)
+  const [hab, setHab] = useState(null)
   const [sync, setSync] = useState(false)
   const [slotSel, setSlotSel] = useState(null)
   const [descPct, setDescPct] = useState(20)
@@ -6181,10 +6185,14 @@ function FlashSale({ conectado, notify }) {
       const pick = (r) => (r && r.response && (r.response.flash_sale_list || r.response.flash_list)) || []
       setListas({ ongoing: pick(o), upcoming: pick(u), expired: pick(e) })
     } catch (e) { notify(e.message, 'danger') }
-    api.shopeeFlashSlots(7).then((r) => {
+    buscarSlots(alcance)
+  }
+  const buscarSlots = (dias) => {
+    setSlots(null); setSlotsErro(null)
+    api.shopeeFlashSlots(dias).then((r) => {
       const resp = (r && r.response) || r || {}
       setSlots(resp.timeslot_list || resp.time_slot_list || (Array.isArray(resp) ? resp : []))
-    }).catch(() => setSlots([]))
+    }).catch((e) => { setSlots([]); setSlotsErro(e.message || 'falha ao buscar os horários na Shopee') })
   }
   const carregarCat = async (off) => {
     setCarregandoCat(true)
@@ -6220,6 +6228,16 @@ function FlashSale({ conectado, notify }) {
     } catch (e) { notify(e.message, 'danger') } finally { setCriando(false) }
   }
   const encerrar = async (id) => { setEnc(id); try { await api.shopeeEncerrarFlash(id); notify('Flash Sale encerrada.', 'ok'); carregar(true) } catch (e) { notify(e.message, 'danger') } setEnc(null) }
+  const habilitar = async (id) => {
+    setHab(id)
+    try {
+      const r = await api.shopeeFlashHabilitar(id)
+      notify(`Oferta ${r?.ativada ? 'ativada' : 'processada'} — ${r?.habilitados ?? 0} de ${r?.itens ?? '?'} item(ns) habilitado(s).`, (r?.habilitados || 0) > 0 ? 'ok' : 'warn')
+      if ((r?.falhas || []).length) notify(`${r.falhas.length} item(ns) não habilitados: ` + r.falhas.slice(0, 3).map((f) => `#${f.item_id} — ${f.motivo}`).join('; '), 'warn')
+      carregar(true)
+    } catch (e) { notify(e.message, 'danger') }
+    setHab(null)
+  }
 
   if (!conectado) return <Vazio txt="Conecte a loja Shopee para gerenciar Flash Sales." />
 
@@ -6249,6 +6267,7 @@ function FlashSale({ conectado, notify }) {
               <PBadge c="#fff" bg={PROMO.SHOPEE}>SHOPEE</PBadge>
               <PBadge c="#fff" bg="#d6007f">SLOTS OFICIAIS</PBadge>
               <PBadge c={PROMO.OK} bg="rgba(47,217,141,.12)">GIRO RÁPIDO</PBadge>
+              <PBadge c="#1a1008" bg={PROMO.GOLD}>MOTOR v2 · ATIVA SOZINHO</PBadge>
             </div>
             <div style={{ fontSize: 10.5, color: 'var(--dim)' }}>Ofertas relâmpago nos horários que a Shopee libera para a loja — preço por variação, sempre abaixo do vigente</div>
           </div>
@@ -6307,24 +6326,62 @@ function FlashSale({ conectado, notify }) {
           <PSecao icon={Zap} cor="#d6007f" titulo="Criar Flash Sale" extra={<div style={{ flex: 1 }} />} />
           <PBadge c="#fff" bg="#d6007f">SLOT + PRODUTOS + DESCONTO</PBadge>
         </div>
-        {/* passo 1: slot */}
+        {/* passo 1: aberturas por dia (estilo calendário oficial) */}
         <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--glass-border)' }}>
-          <div className="up" style={{ fontSize: 7.5, color: 'var(--faint)', marginBottom: 9 }}>1 · Escolha o horário oficial</div>
-          {slots === null ? <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 12, color: 'var(--faint)', fontSize: 10.5 }}><Loader2 size={13} className="animate-spin" />buscando slots…</div>
-            : nSlots === 0 ? <div style={{ fontSize: 10.5, color: 'var(--faint)', padding: 12, textAlign: 'center' }}>A Shopee não liberou horários de Flash Sale para a loja nos próximos 7 dias. Assim que abrir, os slots aparecem aqui.</div>
-              : (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 8 }}>
-                  {(slots || []).slice(0, 12).map((s) => {
-                    const on = slotSel === s.timeslot_id
-                    return (
-                      <div key={s.timeslot_id} onClick={() => setSlotSel(s.timeslot_id)} className="glass" style={{ padding: '9px 10px', borderRadius: 11, cursor: 'pointer', borderColor: on ? 'rgba(214,0,127,.5)' : 'var(--glass-border)', background: on ? 'rgba(214,0,127,.08)' : 'var(--glass)' }}>
-                        <div style={{ fontSize: 8, textTransform: 'uppercase', fontWeight: 800, color: on ? '#d6007f' : 'var(--faint)' }}>{fmtSlot(s)}</div>
-                        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 3 }}><span style={{ width: 12, height: 12, borderRadius: '50%', flex: 'none', border: `2px solid ${on ? '#d6007f' : 'var(--glass-border)'}`, background: on ? '#d6007f' : 'transparent' }} /><span style={{ fontSize: 9, fontWeight: 700, color: on ? '#d6007f' : PROMO.OK }}>{on ? 'escolhido' : 'livre'}</span></div>
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
+          <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+            <span className="up" style={{ fontSize: 7.5, color: 'var(--faint)' }}>1 · Escolha a abertura oficial</span>
+            {(() => { const prox = (slots || []).map((s) => (s.start_time || 0) * 1000).filter((t) => t > agora).sort((a, b) => a - b)[0]; return prox ? <PBadge c="#d6007f" bg="rgba(214,0,127,.12)">PRÓXIMA ABERTURA EM {fmtDur(prox - agora)}</PBadge> : null })()}
+            <div style={{ flex: 1 }} />
+            <div className="row" style={{ display: 'flex', gap: 4 }}>{[7, 14, 30].map((d) => <span key={d} onClick={() => { setAlcance(d); setDiaSel(null); setSlotSel(null); buscarSlots(d) }} style={{ fontSize: 9, fontWeight: 700, padding: '4px 10px', borderRadius: 99, cursor: 'pointer', color: alcance === d ? '#fff' : 'var(--dim)', background: alcance === d ? 'linear-gradient(135deg,#d6007f,#a0005f)' : 'rgba(255,255,255,.04)', border: `1px solid ${alcance === d ? 'transparent' : 'var(--glass-border)'}` }}>{d} dias</span>)}</div>
+          </div>
+          {slots === null ? <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 12, color: 'var(--faint)', fontSize: 10.5 }}><Loader2 size={13} className="animate-spin" />consultando as aberturas na Shopee…</div>
+            : slotsErro ? (
+              <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '11px 13px', borderRadius: 11, background: 'rgba(255,122,122,.07)', border: '1px solid rgba(255,122,122,.3)' }}>
+                <AlertTriangle size={14} style={{ color: PROMO.DANGER, flex: 'none' }} />
+                <div style={{ flex: 1, fontSize: 10, color: 'var(--dim)' }}><b style={{ color: PROMO.DANGER }}>A consulta de horários falhou:</b> {slotsErro}</div>
+                <button onClick={() => buscarSlots(alcance)} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 9.5, fontWeight: 700, padding: '6px 12px', borderRadius: 8, cursor: 'pointer', color: 'var(--dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)' }}><RotateCcw size={11} />tentar de novo</button>
+              </div>
+            ) : nSlots === 0 ? <div style={{ fontSize: 10.5, color: 'var(--faint)', padding: 12, textAlign: 'center' }}>A Shopee não liberou aberturas de Flash Sale para a loja nos próximos {alcance} dias. Tente um alcance maior acima — assim que abrir, aparecem aqui (no Seller Center: Central de Marketing → Ofertas Relâmpago da Loja).</div>
+              : (() => {
+                const porDia = {}
+                for (const s of slots || []) { const d = new Date((s.start_time || 0) * 1000); const k = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`; (porDia[k] = porDia[k] || { d, lista: [] }).lista.push(s) }
+                const dias = Object.values(porDia).sort((a, b) => a.d - b.d)
+                const diaAtivo = diaSel || (dias[0] && `${dias[0].d.getFullYear()}-${dias[0].d.getMonth()}-${dias[0].d.getDate()}`)
+                const listaDia = (porDia[diaAtivo] || { lista: [] }).lista.sort((a, b) => (a.start_time || 0) - (b.start_time || 0))
+                return (
+                  <div>
+                    <div style={{ display: 'flex', gap: 7, overflowX: 'auto', paddingBottom: 6 }}>
+                      {dias.map(({ d, lista }) => {
+                        const k = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
+                        const on = diaAtivo === k
+                        const hoje = new Date(agora).toDateString() === d.toDateString()
+                        return (
+                          <div key={k} onClick={() => { setDiaSel(k); setSlotSel(null) }} className="glass" style={{ minWidth: 76, padding: '8px 10px', borderRadius: 12, cursor: 'pointer', textAlign: 'center', flex: 'none', borderColor: on ? 'rgba(214,0,127,.55)' : 'var(--glass-border)', background: on ? 'linear-gradient(160deg,rgba(214,0,127,.16),rgba(214,0,127,.05))' : 'var(--glass)' }}>
+                            <div className="up" style={{ fontSize: 6.5, fontWeight: 800, color: on ? '#d6007f' : 'var(--faint)' }}>{hoje ? 'HOJE' : diaSemana[d.getDay()]}</div>
+                            <b className="num serif" style={{ fontSize: 17, color: on ? '#d6007f' : 'var(--text)' }}>{String(d.getDate()).padStart(2, '0')}</b>
+                            <div style={{ fontSize: 6.5, color: on ? '#d6007f' : PROMO.OK, fontWeight: 700 }}>{lista.length} abertura{lista.length > 1 ? 's' : ''}</div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8, marginTop: 9 }}>
+                      {listaDia.map((s) => {
+                        const on = slotSel === s.timeslot_id
+                        const ini = new Date((s.start_time || 0) * 1000), fim = new Date((s.end_time || 0) * 1000)
+                        return (
+                          <div key={s.timeslot_id} onClick={() => setSlotSel(s.timeslot_id)} className="glass" style={{ padding: '9px 11px', borderRadius: 11, cursor: 'pointer', borderColor: on ? 'rgba(214,0,127,.55)' : 'var(--glass-border)', background: on ? 'rgba(214,0,127,.1)' : 'var(--glass)' }}>
+                            <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <span style={{ width: 12, height: 12, borderRadius: '50%', flex: 'none', border: `2px solid ${on ? '#d6007f' : 'var(--glass-border)'}`, background: on ? '#d6007f' : 'transparent' }} />
+                              <b className="num" style={{ fontSize: 11.5, color: on ? '#d6007f' : 'var(--text)' }}>{String(ini.getHours()).padStart(2, '0')}:00 – {String(fim.getHours()).padStart(2, '0')}:00</b>
+                            </div>
+                            <div style={{ fontSize: 7.5, color: on ? '#d6007f' : 'var(--faint)', marginTop: 3, fontWeight: 700 }}>{on ? 'abertura escolhida' : 'livre para agendar'}</div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )
+              })()}
         </div>
         {/* passo 2: produtos + desconto */}
         <div style={{ padding: 16 }}>
@@ -6384,6 +6441,7 @@ function FlashSale({ conectado, notify }) {
                       <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         <span className="num" style={{ fontSize: 8, color: tab === 'ongoing' ? '#d6007f' : 'var(--faint)' }}>{tab === 'upcoming' ? `começa ${iniD.toLocaleDateString('pt-BR')} ${String(iniD.getHours()).padStart(2, '0')}h` : rem > 0 ? `${fmtDur(rem * 1000)} restante` : 'encerrada'}</span>
                         <div style={{ flex: 1 }} />
+                        {tab !== 'expired' && <button onClick={() => habilitar(f.flash_sale_id)} disabled={hab === f.flash_sale_id} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9, fontWeight: 700, padding: '4px 10px', borderRadius: 8, cursor: 'pointer', color: PROMO.OK, background: 'rgba(47,217,141,.08)', border: '1px solid rgba(47,217,141,.3)' }}>{hab === f.flash_sale_id ? <Loader2 size={10} className="animate-spin" /> : <Zap size={10} />}Habilitar itens</button>}
                         {tab !== 'expired' && <button onClick={() => encerrar(f.flash_sale_id)} disabled={enc === f.flash_sale_id} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9, fontWeight: 700, padding: '4px 10px', borderRadius: 8, cursor: 'pointer', color: PROMO.DANGER, background: 'rgba(255,122,122,.06)', border: '1px solid rgba(255,122,122,.3)' }}>{enc === f.flash_sale_id ? <Loader2 size={10} className="animate-spin" /> : 'Encerrar'}</button>}
                       </div>
                     </div>
