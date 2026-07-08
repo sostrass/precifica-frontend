@@ -4852,6 +4852,7 @@ function Cupons({ conectado, notify }) {
   const [codigo, setCodigo] = useState('')
   const [tipoDesc, setTipoDesc] = useState(2)     // 2=percentual, 1=valor fixo
   const [valor, setValor] = useState(10)
+  const [teto, setTeto] = useState(0)
   const [minc, setMinc] = useState(0)
   const [quota, setQuota] = useState(100)
   const [escopo, setEscopo] = useState(1)         // 1=loja, 2=produto
@@ -4885,8 +4886,8 @@ function Cupons({ conectado, notify }) {
     try {
       const inicio = Math.floor(Date.now() / 1000) + 600
       const fim = inicio + dias * 86400
-      await api.shopeeCriarCupom({ nome: nome.trim().slice(0, 40), codigo: cod, inicio, fim, tipo_desconto: tipoDesc, valor: Number(valor), compra_minima: Number(minc), quantidade: Number(quota), escopo })
-      notify(`Cupom ${cod} criado — começa em ~10 min.`, 'ok')
+      const r = await api.shopeeCriarCupom({ nome: nome.trim().slice(0, 40), codigo: cod, inicio, fim, tipo_desconto: tipoDesc, valor: Number(valor), compra_minima: Number(minc), quantidade: Number(quota), escopo, teto_desconto: tipoDesc === 2 ? Number(teto) : undefined })
+      notify(`Cupom ${cod} criado — começa em ~10 min.${tipoDesc === 2 && r?.teto_desconto ? ` Teto do desconto: ${fmtBRL(r.teto_desconto)}.` : ''}`, 'ok')
       setNome(''); setCodigo(''); carregar(true)
     } catch (e) { notify(e.message, 'danger') } finally { setCriando(false) }
   }
@@ -5005,6 +5006,13 @@ function Cupons({ conectado, notify }) {
                 {tipoDesc === 2
                   ? <input type="range" min={1} max={90} value={valor} onChange={(e) => setValor(Number(e.target.value))} style={{ width: '100%' }} />
                   : <input type="number" min={1} value={valor} onChange={(e) => setValor(Number(e.target.value))} style={{ width: '100%', padding: '6px 9px', fontSize: 11, color: 'var(--text)', background: 'rgba(0,0,0,.25)', border: '1px solid var(--glass-border)', borderRadius: 8 }} />}
+                {tipoDesc === 2 && (
+                  <div style={{ marginTop: 8 }}>
+                    <div className="row" style={{ display: 'flex', marginBottom: 3 }}><span style={{ fontSize: 8.5, color: 'var(--dim)' }}>Teto do desconto (R$) · exigência Shopee</span></div>
+                    <input type="number" min={0} step="0.5" value={teto} onChange={(e) => setTeto(Number(e.target.value))} placeholder="0 = calcular automático" style={{ width: '100%', padding: '6px 9px', fontSize: 11, color: 'var(--text)', background: 'rgba(0,0,0,.25)', border: '1px solid var(--glass-border)', borderRadius: 8 }} />
+                    <div style={{ fontSize: 7.5, color: 'var(--faint)', marginTop: 3 }}>o máximo em R$ que o cupom desconta por pedido — cupom percentual sem teto é recusado pela Shopee</div>
+                  </div>
+                )}
               </div>
               <div>
                 <div style={{ fontSize: 8.5, color: 'var(--dim)', marginBottom: 3 }}>Compra mínima (R$)</div>
@@ -5636,7 +5644,9 @@ function Bundles({ conectado, notify }) {
       const fim = inicio + dias * 86400
       const r = await api.shopeeCriarBundle({ nome: nome.trim().slice(0, 40), inicio, fim, rule_type: rule, valor: Number(valor), min_itens: Number(minItens), item_ids: selArr.map((x) => x.item_id) })
       const add = r?.itens_adicionados ?? selArr.length
-      notify(`Combo criado com ${add} produto(s).`, 'ok'); setNome(''); setSel({}); carregar(true)
+      notify(`Combo criado com ${add} produto(s) confirmados na Shopee.`, add > 0 ? 'ok' : 'warn')
+      if (r?.aviso) notify(r.aviso, 'warn')
+      setNome(''); setSel({}); carregar(true)
     } catch (e) { notify(e.message, 'danger') } finally { setCriando(false) }
   }
   const encerrar = async (id) => { setEnc(id); try { await api.shopeeEncerrarBundle(id); notify('Combo encerrado.', 'ok'); carregar(true) } catch (e) { notify(e.message, 'danger') } setEnc(null) }
@@ -5921,7 +5931,8 @@ function Addons({ conectado, notify }) {
       const fim = inicio + dias * 86400
       const adic = subArr.map((s) => ({ item_id: s.item.item_id, add_on_deal_price: promoType === 1 ? 0 : Number(s.preco) }))
       const r = await api.shopeeCriarAddon({ nome: nome.trim().slice(0, 40), inicio, fim, promotion_type: promoType, principais: mainArr.map((x) => x.item_id), adicionais: adic })
-      notify(`Add-on criado — ${r?.principais_ok ?? mainArr.length} principal(is) e ${r?.adicionais_ok ?? subArr.length} adicional(is).`, 'ok')
+      notify(`Add-on criado — ${r?.principais_ok ?? 0} principal(is) e ${r?.adicionais_ok ?? 0} adicional(is) confirmados.`, (r?.principais_ok && r?.adicionais_ok) ? 'ok' : 'warn')
+      if (r?.aviso) notify(r.aviso, 'warn')
       setNome(''); setPrincipais({}); setAdicionais({}); carregar(true)
     } catch (e) { notify(e.message, 'danger') } finally { setCriando(false) }
   }
@@ -6197,7 +6208,9 @@ function FlashSale({ conectado, notify }) {
     try {
       const itens = selArr.filter((it) => precoDe(it) > 0).map((it) => ({ item_id: it.item_id, desconto_pct: descPct, preco_promo: +(precoDe(it) * (1 - descPct / 100)).toFixed(2), estoque: Number(it.stock || 0) }))
       const r = await api.shopeeCriarFlash({ timeslot_id: slotSel, itens })
-      notify(`Flash Sale criada com ${r?.itens_adicionados ?? itens.length} produto(s).`, 'ok')
+      const addf = r?.itens_adicionados ?? 0
+      notify(`Flash Sale criada com ${addf} produto(s) confirmados.`, addf > 0 ? 'ok' : 'warn')
+      if (r?.aviso) notify(r.aviso, 'warn')
       setSel({}); setSlotSel(null); carregar(true)
     } catch (e) { notify(e.message, 'danger') } finally { setCriando(false) }
   }
