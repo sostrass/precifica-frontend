@@ -5624,6 +5624,7 @@ function Bundles({ conectado, notify }) {
       const lote = (r && r.response && (r.response.item || r.response.itens)) || []
       setCat((prev) => off === 0 ? lote : [...prev, ...lote])
       setTemMais(lote.length >= PAG); setOffset(off + lote.length)
+      if (lote.length >= PAG) setTimeout(() => carregarCat(off + lote.length), 250)  // carrega o catálogo INTEIRO em segundo plano
     } catch (e) { /* silencioso */ } finally { setCarregandoCat(false) }
   }
   useEffect(() => {
@@ -5763,7 +5764,7 @@ function Bundles({ conectado, notify }) {
                 )
               })}
             </div>
-            {temMais && !buscaCat && <div style={{ textAlign: 'center', marginTop: 9 }}><button onClick={() => carregarCat(offset)} disabled={carregandoCat} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 9.5, padding: '5px 12px', borderRadius: 8, cursor: 'pointer', color: 'var(--dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)' }}>{carregandoCat ? <Loader2 size={10} className="animate-spin" /> : <ChevronRight size={10} />}carregar mais</button></div>}
+            {temMais && <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'center', marginTop: 9, fontSize: 8.5, color: 'var(--faint)' }}><Loader2 size={10} className="animate-spin" />carregando o catálogo completo… {cat.length} produtos</div>}
             {carregandoCat && cat.length === 0 && <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 18, justifyContent: 'center', color: 'var(--faint)', fontSize: 10.5 }}><Loader2 size={13} className="animate-spin" />carregando catálogo…</div>}
             <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, paddingTop: 11, borderTop: '1px solid var(--glass-border)' }}>
               <span style={{ fontSize: 8.5, color: 'var(--faint)', flex: 1 }}>o combo começa em ~1h (exigência Shopee) · itens 🔒 já em campanha ficam de fora</span>
@@ -5899,6 +5900,7 @@ function Addons({ conectado, notify }) {
       const lote = (r && r.response && (r.response.item || r.response.itens)) || []
       setCat((prev) => off === 0 ? lote : [...prev, ...lote])
       setTemMais(lote.length >= PAG); setOffset(off + lote.length)
+      if (lote.length >= PAG) setTimeout(() => carregarCat(off + lote.length), 250)  // carrega o catálogo INTEIRO em segundo plano
     } catch (e) { /* silencioso */ } finally { setCarregandoCat(false) }
   }
   useEffect(() => {
@@ -6061,7 +6063,7 @@ function Addons({ conectado, notify }) {
                 )
               })}
             </div>
-            {temMais && !buscaCat && <div style={{ textAlign: 'center', marginTop: 9 }}><button onClick={() => carregarCat(offset)} disabled={carregandoCat} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 9.5, padding: '5px 12px', borderRadius: 8, cursor: 'pointer', color: 'var(--dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)' }}>{carregandoCat ? <Loader2 size={10} className="animate-spin" /> : <ChevronRight size={10} />}carregar mais</button></div>}
+            {temMais && <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'center', marginTop: 9, fontSize: 8.5, color: 'var(--faint)' }}><Loader2 size={10} className="animate-spin" />carregando o catálogo completo… {cat.length} produtos</div>}
             {carregandoCat && cat.length === 0 && <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 18, justifyContent: 'center', color: 'var(--faint)', fontSize: 10.5 }}><Loader2 size={13} className="animate-spin" />carregando catálogo…</div>}
             <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, paddingTop: 11, borderTop: '1px solid var(--glass-border)' }}>
               <span style={{ fontSize: 8.5, color: 'var(--faint)', flex: 1 }}>começa em ~1h (exigência Shopee) · itens 🔒 já em campanha ficam de fora</span>
@@ -6189,6 +6191,7 @@ function FlashSale({ conectado, notify }) {
       const lote = (r && r.response && (r.response.item || r.response.itens)) || []
       setCat((prev) => off === 0 ? lote : [...prev, ...lote])
       setTemMais(lote.length >= PAG); setOffset(off + lote.length)
+      if (lote.length >= PAG) setTimeout(() => carregarCat(off + lote.length), 250)  // carrega o catálogo INTEIRO em segundo plano
     } catch (e) { /* silencioso */ } finally { setCarregandoCat(false) }
   }
   useEffect(() => {
@@ -6209,7 +6212,7 @@ function FlashSale({ conectado, notify }) {
       const itens = selArr.filter((it) => precoDe(it) > 0).map((it) => ({ item_id: it.item_id, desconto_pct: descPct, preco_promo: +(precoDe(it) * (1 - descPct / 100)).toFixed(2), estoque: Number(it.stock || 0) }))
       const r = await api.shopeeCriarFlash({ timeslot_id: slotSel, itens })
       const addf = r?.itens_adicionados ?? 0
-      notify(`Flash Sale criada com ${addf} produto(s) confirmados.`, addf > 0 ? 'ok' : 'warn')
+      notify(`Flash Sale criada com ${addf} produto(s) confirmados${r?.ativada ? ' e ATIVADA' : ''}.`, addf > 0 && r?.ativada ? 'ok' : 'warn')
       if (r?.aviso) notify(r.aviso, 'warn')
       setSel({}); setSlotSel(null); carregar(true)
     } catch (e) { notify(e.message, 'danger') } finally { setCriando(false) }
@@ -6308,7 +6311,7 @@ function FlashSale({ conectado, notify }) {
               )
             })}
           </div>
-          {temMais && !buscaCat && <div style={{ textAlign: 'center', marginTop: 9 }}><button onClick={() => carregarCat(offset)} disabled={carregandoCat} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 9.5, padding: '5px 12px', borderRadius: 8, cursor: 'pointer', color: 'var(--dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)' }}>{carregandoCat ? <Loader2 size={10} className="animate-spin" /> : <ChevronRight size={10} />}carregar mais</button></div>}
+          {temMais && <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'center', marginTop: 9, fontSize: 8.5, color: 'var(--faint)' }}><Loader2 size={10} className="animate-spin" />carregando o catálogo completo… {cat.length} produtos</div>}
           {carregandoCat && cat.length === 0 && <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 18, justifyContent: 'center', color: 'var(--faint)', fontSize: 10.5 }}><Loader2 size={13} className="animate-spin" />carregando catálogo…</div>}
           <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, paddingTop: 11, borderTop: '1px solid var(--glass-border)' }}>
             <span style={{ fontSize: 8.5, color: 'var(--faint)', flex: 1 }}>{slotSel ? 'slot escolhido' : 'escolha um slot acima'} · o desconto é aplicado por variação, sempre abaixo do preço vigente · itens 🔒 ficam de fora</span>
