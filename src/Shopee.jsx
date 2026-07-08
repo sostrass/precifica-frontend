@@ -1,5 +1,5 @@
 import { Component, useEffect, useMemo, useRef, useState } from 'react'
-import {
+import { ShieldCheck,
   Lock,
   BarChart3,
   Rocket, Star, Activity, ShoppingBag, Tag, Megaphone, Package,
@@ -6156,6 +6156,8 @@ function FlashSale({ conectado, notify }) {
   const [sync, setSync] = useState(false)
   const [slotSel, setSlotSel] = useState(null)
   const [descPct, setDescPct] = useState(20)
+  const [estoqueCamp, setEstoqueCamp] = useState(10)
+  const [limiteCompra, setLimiteCompra] = useState(0)
   const [criando, setCriando] = useState(false)
   const [enc, setEnc] = useState(null)
   const [cat, setCat] = useState([])
@@ -6209,7 +6211,7 @@ function FlashSale({ conectado, notify }) {
     if (selArr.length === 0) { notify('Escolha os produtos da oferta relâmpago.', 'warn'); return }
     setCriando(true)
     try {
-      const itens = selArr.filter((it) => precoDe(it) > 0).map((it) => ({ item_id: it.item_id, desconto_pct: descPct, preco_promo: +(precoDe(it) * (1 - descPct / 100)).toFixed(2), estoque: Number(it.stock || 0) }))
+      const itens = selArr.filter((it) => precoDe(it) > 0).map((it) => ({ item_id: it.item_id, desconto_pct: descPct, preco_promo: +(precoDe(it) * (1 - descPct / 100)).toFixed(2), estoque: Math.max(1, Math.min(1000, Number(estoqueCamp) || 1)), purchase_limit: Number(limiteCompra) || 0 }))
       const r = await api.shopeeCriarFlash({ timeslot_id: slotSel, itens })
       const addf = r?.itens_adicionados ?? 0
       notify(`Flash Sale criada com ${addf} produto(s) confirmados${r?.ativada ? ' e ATIVADA' : ''}.`, addf > 0 && r?.ativada ? 'ok' : 'warn')
@@ -6265,6 +6267,40 @@ function FlashSale({ conectado, notify }) {
         <PKpi label="Na trava" value={trava.size} sub="itens em oferta" cor={PROMO.BLUE} />
       </div>
 
+      {/* CRITÉRIOS DA OFERTA RELÂMPAGO (iguais ao painel oficial da Shopee) */}
+      <div className="glass" style={{ padding: 0, overflow: 'hidden', border: '1px solid transparent', background: 'linear-gradient(var(--surface),var(--surface)) padding-box,linear-gradient(110deg,rgba(238,77,45,.4),rgba(214,0,127,.28)) border-box' }}>
+        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '12px 16px', borderBottom: '1px solid var(--glass-border)', flexWrap: 'wrap' }}>
+          <div style={{ width: 30, height: 30, borderRadius: 8, background: 'linear-gradient(145deg,var(--shopee),#a52c15)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}><ShieldCheck size={15} color="#fff" /></div>
+          <div style={{ flex: 1 }}>
+            <b className="serif" style={{ fontSize: 14 }}>Critérios da Oferta Relâmpago</b>
+            <div style={{ fontSize: 9, color: 'var(--dim)' }}>as regras que a Shopee aplica ao slot — o produto só é aceito e habilitado se estiver dentro delas</div>
+          </div>
+          <PBadge c="#fff" bg={PROMO.SHOPEE}>REGRAS DO SLOT</PBadge>
+        </div>
+        <div style={{ padding: '13px 16px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '9px 22px' }}>
+          {[
+            ['Estoque de campanha', '1 ~ 1000 por produto', true],
+            ['Limite de desconto', '1% ~ 99%', true],
+            ['Máx. de produtos', '20 por slot', true],
+            ['Classificação do produto', 'sem limite', false],
+            ['Curtidas', 'sem limite', false],
+            ['Pedidos nos últimos 30 dias', 'sem limite', false],
+            ['Encomendas', 'sem limite', false],
+            ['Prazo de postagem', 'sem limite', false],
+          ].map(([lab, val, forte]) => (
+            <div key={lab} className="row" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', flex: 'none', background: forte ? PROMO.SHOPEE : 'rgba(255,255,255,.25)' }} />
+              <span style={{ fontSize: 10, color: 'var(--dim)' }}>{lab}:</span>
+              <b style={{ fontSize: 10, color: forte ? PROMO.SHOPEE : 'var(--faint)' }}>{val}</b>
+            </div>
+          ))}
+        </div>
+        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '9px 16px', borderTop: '1px solid var(--glass-border)', background: 'rgba(47,217,141,.05)' }}>
+          <Bot size={12} style={{ color: PROMO.OK, flex: 'none' }} />
+          <span style={{ fontSize: 9, color: 'var(--dim)' }}>O motor já aplica estes critérios ao criar: trava o estoque de campanha em 1~1000, o desconto em 1~99%, e <b style={{ color: PROMO.OK }}>ativa a oferta automaticamente</b> (a Shopee cria desabilitada). Itens fora do critério são recusados com o motivo no log.</span>
+        </div>
+      </div>
+
       {/* ESTÚDIO: SLOT + PRODUTOS */}
       <div className="glass" style={{ padding: 0, overflow: 'hidden', border: '1px solid transparent', background: 'linear-gradient(var(--surface),var(--surface)) padding-box,linear-gradient(110deg,rgba(214,0,127,.45),rgba(238,77,45,.32)) border-box' }}>
         <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '13px 16px', borderBottom: '1px solid var(--glass-border)', flexWrap: 'wrap' }}>
@@ -6293,11 +6329,13 @@ function FlashSale({ conectado, notify }) {
         {/* passo 2: produtos + desconto */}
         <div style={{ padding: 16 }}>
           <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-            <span className="up" style={{ fontSize: 7.5, color: 'var(--faint)' }}>2 · Produtos e desconto</span>
+            <span className="up" style={{ fontSize: 7.5, color: 'var(--faint)' }}>2 · Produtos e regras (aplicadas a todos os selecionados)</span>
             <div style={{ flex: 1 }} />
-            <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(0,0,0,.2)', border: '1px solid var(--glass-border)', borderRadius: 9, padding: '5px 11px' }}><span style={{ fontSize: 8.5, color: 'var(--dim)' }}>desconto</span><input type="range" min={5} max={80} value={descPct} onChange={(e) => setDescPct(Number(e.target.value))} style={{ width: 90 }} /><b className="num" style={{ fontSize: 10, color: '#d6007f' }}>{descPct}%</b></div>
-            <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'rgba(0,0,0,.25)', border: '1px solid var(--glass-border)', borderRadius: 9, padding: '5px 10px' }}><Search size={11} style={{ color: 'var(--faint)' }} /><input value={buscaCat} onChange={(e) => setBuscaCat(e.target.value)} placeholder="buscar" style={{ background: 'transparent', border: 'none', outline: 'none', color: 'var(--text)', fontSize: 10, width: 90 }} /></div>
-            <PBadge c={PROMO.OK} bg="rgba(47,217,141,.1)">{selArr.length} SEL.</PBadge>
+            <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(0,0,0,.2)', border: '1px solid var(--glass-border)', borderRadius: 9, padding: '5px 11px' }}><span style={{ fontSize: 8.5, color: 'var(--dim)' }}>desconto</span><input type="range" min={1} max={99} value={descPct} onChange={(e) => setDescPct(Number(e.target.value))} style={{ width: 84 }} /><b className="num" style={{ fontSize: 10, color: '#d6007f' }}>{descPct}%</b></div>
+            <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'rgba(0,0,0,.2)', border: '1px solid var(--glass-border)', borderRadius: 9, padding: '4px 10px' }}><span style={{ fontSize: 8.5, color: 'var(--dim)' }}>estoque camp.</span><input type="number" min={1} max={1000} value={estoqueCamp} onChange={(e) => setEstoqueCamp(Number(e.target.value))} style={{ width: 44, background: 'transparent', border: 'none', outline: 'none', color: 'var(--text)', fontSize: 10, textAlign: 'center' }} /></div>
+            <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'rgba(0,0,0,.2)', border: '1px solid var(--glass-border)', borderRadius: 9, padding: '4px 10px' }}><span style={{ fontSize: 8.5, color: 'var(--dim)' }}>limite/compra</span><input type="number" min={0} value={limiteCompra} onChange={(e) => setLimiteCompra(Number(e.target.value))} placeholder="0" style={{ width: 36, background: 'transparent', border: 'none', outline: 'none', color: 'var(--text)', fontSize: 10, textAlign: 'center' }} /></div>
+            <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'rgba(0,0,0,.25)', border: '1px solid var(--glass-border)', borderRadius: 9, padding: '5px 10px' }}><Search size={11} style={{ color: 'var(--faint)' }} /><input value={buscaCat} onChange={(e) => setBuscaCat(e.target.value)} placeholder="buscar" style={{ background: 'transparent', border: 'none', outline: 'none', color: 'var(--text)', fontSize: 10, width: 78 }} /></div>
+            <PBadge c={PROMO.OK} bg="rgba(47,217,141,.1)">{selArr.length}/20 SEL.</PBadge>
           </div>
           <div style={{ maxHeight: 230, overflowY: 'auto', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 7 }}>
             {catFiltrado.map((it) => {
