@@ -280,6 +280,14 @@ function BoostCondicional({ conectado, notify }) {
   const [aplicando, setAplicando] = useState(false)
   const carregar = () => api.shopeeBoostCondGet().then(setD).catch(() => setD({ erro: true }))
   useEffect(() => { if (conectado) carregar() }, [conectado])
+  useEffect(() => {  // página viva: atualiza sozinha (45s + ao voltar para a aba), sem F5
+    if (!conectado) return
+    const tick = () => { if (document.visibilityState === 'visible') carregar(true) }
+    const t = setInterval(tick, 45000)
+    document.addEventListener('visibilitychange', tick)
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', tick) }
+  }, [conectado])
+
 
   const cfg = d?.config
   const setCfg = async (patch) => {
@@ -4875,6 +4883,14 @@ function Cupons({ conectado, notify }) {
     } catch (e) { notify(e.message, 'danger') }
   }
   useEffect(() => { if (conectado) carregar() }, [conectado])
+  useEffect(() => {  // página viva: atualiza sozinha (45s + ao voltar para a aba), sem F5
+    if (!conectado) return
+    const tick = () => { if (document.visibilityState === 'visible') carregar(true) }
+    const t = setInterval(tick, 45000)
+    document.addEventListener('visibilitychange', tick)
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', tick) }
+  }, [conectado])
+
   const sincronizar = async () => { setSync(true); try { await carregar(true) } finally { setSync(false) } }
 
   const gerarCodigo = () => setCodigo(('SOS' + Math.random().toString(36).slice(2, 7)).toUpperCase())
@@ -5173,6 +5189,14 @@ function Descontos({ conectado, notify }) {
     api.shopeePromoHistorico().then((r) => setHist(r.itens || [])).catch(() => {}); setDiarioSinal((s) => s + 1)
   }
   useEffect(() => { if (conectado) carregar() }, [conectado])
+  useEffect(() => {  // página viva: atualiza sozinha (45s + ao voltar para a aba), sem F5
+    if (!conectado) return
+    const tick = () => { if (document.visibilityState === 'visible') carregar(true) }
+    const t = setInterval(tick, 45000)
+    document.addEventListener('visibilitychange', tick)
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', tick) }
+  }, [conectado])
+
 
   const sincronizar = async () => { setSync(true); try { await carregar(true) } finally { setSync(false) } }
   const salvar = async (patch) => {
@@ -5632,6 +5656,14 @@ function Bundles({ conectado, notify }) {
     carregar(); carregarCat(0)
     api.shopeePromoTrava().then((r) => setTrava(new Set((r.ids || []).map(Number)))).catch(() => {})
   }, [conectado])
+  useEffect(() => {  // página viva: atualiza sozinha (45s + ao voltar para a aba), sem F5
+    if (!conectado) return
+    const tick = () => { if (document.visibilityState === 'visible') carregar(true) }
+    const t = setInterval(tick, 45000)
+    document.addEventListener('visibilitychange', tick)
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', tick) }
+  }, [conectado])
+
   const sincronizar = async () => { setSync(true); try { await carregar(true) } finally { setSync(false) } }
 
   const selArr = Object.values(sel)
@@ -5908,6 +5940,14 @@ function Addons({ conectado, notify }) {
     carregar(); carregarCat(0)
     api.shopeePromoTrava().then((r) => setTrava(new Set((r.ids || []).map(Number)))).catch(() => {})
   }, [conectado])
+  useEffect(() => {  // página viva: atualiza sozinha (45s + ao voltar para a aba), sem F5
+    if (!conectado) return
+    const tick = () => { if (document.visibilityState === 'visible') carregar(true) }
+    const t = setInterval(tick, 45000)
+    document.addEventListener('visibilitychange', tick)
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', tick) }
+  }, [conectado])
+
   const sincronizar = async () => { setSync(true); try { await carregar(true) } finally { setSync(false) } }
 
   const precoDe = (it) => Number(it.price || it.preco || 0)
@@ -6160,7 +6200,7 @@ function FlashSale({ conectado, notify }) {
   const [sync, setSync] = useState(false)
   const [slotSel, setSlotSel] = useState(null)
   const [descPct, setDescPct] = useState(20)
-  const [estoqueCamp, setEstoqueCamp] = useState(10)
+  const [estoqueCamp, setEstoqueCamp] = useState(1)
   const [limiteCompra, setLimiteCompra] = useState(0)
   const [criando, setCriando] = useState(false)
   const [enc, setEnc] = useState(null)
@@ -6209,6 +6249,14 @@ function FlashSale({ conectado, notify }) {
     carregar(); carregarCat(0)
     api.shopeePromoTrava().then((r) => setTrava(new Set((r.ids || []).map(Number)))).catch(() => {})
   }, [conectado])
+  useEffect(() => {  // página viva: atualiza sozinha (45s + ao voltar para a aba), sem F5
+    if (!conectado) return
+    const tick = () => { if (document.visibilityState === 'visible') carregar(true) }
+    const t = setInterval(tick, 45000)
+    document.addEventListener('visibilitychange', tick)
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', tick) }
+  }, [conectado])
+
   const sincronizar = async () => { setSync(true); try { await carregar(true) } finally { setSync(false) } }
 
   const precoDe = (it) => Number(it.price || it.preco || 0)
@@ -6848,7 +6896,64 @@ function EstudioMotor({ cfg, salvar, motorTipo, setMotorTipo }) {
       </>} />
       <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '8px 11px', borderRadius: 10, background: 'rgba(160,107,232,.06)', border: '1px solid rgba(160,107,232,.22)', marginBottom: 13 }}>
         <Bot size={13} style={{ color: PROMO.PURPLE, flex: 'none' }} />
-        <div style={{ fontSize: 8.5, color: 'var(--dim)', lineHeight: 1.5, flex: 1 }}>O motor <b style={{ color: PROMO.PURPLE }}>seleciona produtos e cria sozinho</b> apenas <b>Desconto</b> e <b>Relâmpago</b> (por giro/margem, com piso protegido). <b>Cupom</b>, <b>Leve+</b>, <b>Add-on</b> e <b>Seguidor</b> são <b style={{ color: 'var(--dim)' }}>curados por você</b> — cada um tem seu estúdio próprio nas abas acima (exigem escolhas humanas: código, kit, brinde).</div>
+        <div style={{ fontSize: 8.5, color: 'var(--dim)', lineHeight: 1.5, flex: 1 }}>O motor <b style={{ color: PROMO.PURPLE }}>seleciona produtos e cria sozinho</b> <b>Desconto</b> e <b>Relâmpago</b> (por giro/margem, com piso protegido). <b>Cupom</b>, <b>Leve+</b> e <b>Add-on</b> agora têm <b style={{ color: PROMO.OK }}>agentes por vendas</b> (abaixo): estudam os pedidos reais e criam no máximo 1 campanha por semana cada.</div>
+      </div>
+      {(cfg.tipo === 'flash' || cfg.tipo === 'ambos') && (
+        <div className="glass" style={{ padding: '11px 13px', borderRadius: 12, marginBottom: 13, border: '1px solid rgba(214,0,127,.3)' }}>
+          <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 9 }}><Zap size={12} style={{ color: '#d6007f' }} /><b style={{ fontSize: 10.5 }}>Relâmpago · latências do automático</b><PBadge c="#fff" bg="#d6007f">SLOT + DESCONTO + ESTOQUE</PBadge></div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 11 }}>
+            <div>
+              <div style={{ fontSize: 8, color: 'var(--faint)', marginBottom: 4 }}>Procurar aberturas até</div>
+              <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6 }}><input type="range" min={1} max={14} value={(cfg.extras || {}).flash_dias ?? 7} onChange={(e) => salvar({ extras: { flash_dias: Number(e.target.value) } })} style={{ flex: 1 }} /><b className="num" style={{ fontSize: 10, color: '#d6007f' }}>{(cfg.extras || {}).flash_dias ?? 7}d</b></div>
+            </div>
+            <div>
+              <div style={{ fontSize: 8, color: 'var(--faint)', marginBottom: 4 }}>Horário preferido</div>
+              <div className="row" style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>{[['qualquer', 'Qualquer'], ['manha', 'Manhã'], ['tarde', 'Tarde'], ['noite', 'Noite']].map(([v, l]) => <span key={v} onClick={() => salvar({ extras: { flash_horario: v } })} style={{ fontSize: 8.5, fontWeight: 700, padding: '4px 9px', borderRadius: 99, cursor: 'pointer', color: ((cfg.extras || {}).flash_horario || 'qualquer') === v ? '#fff' : 'var(--dim)', background: ((cfg.extras || {}).flash_horario || 'qualquer') === v ? 'linear-gradient(135deg,#d6007f,#a0005f)' : 'rgba(255,255,255,.04)', border: `1px solid ${((cfg.extras || {}).flash_horario || 'qualquer') === v ? 'transparent' : 'var(--glass-border)'}` }}>{l}</span>)}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 8, color: 'var(--faint)', marginBottom: 4 }}>Desconto do relâmpago</div>
+              <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6 }}><input type="range" min={1} max={99} value={(cfg.extras || {}).flash_desconto ?? 20} onChange={(e) => salvar({ extras: { flash_desconto: Number(e.target.value) } })} style={{ flex: 1 }} /><b className="num" style={{ fontSize: 10, color: '#d6007f' }}>{(cfg.extras || {}).flash_desconto ?? 20}%</b></div>
+            </div>
+            <div>
+              <div style={{ fontSize: 8, color: 'var(--faint)', marginBottom: 4 }}>Estoque de campanha (un/produto)</div>
+              <input type="number" min={1} max={1000} value={(cfg.extras || {}).flash_estoque ?? 1} onChange={(e) => salvar({ extras: { flash_estoque: Number(e.target.value) } })} style={{ width: '100%', padding: '6px 9px', fontSize: 11, color: 'var(--text)', background: 'rgba(0,0,0,.25)', border: '1px solid var(--glass-border)', borderRadius: 8 }} />
+            </div>
+          </div>
+          <div style={{ fontSize: 7.5, color: 'var(--faint)', marginTop: 7 }}>o motor escolhe a primeira abertura oficial dentro da janela e do horário preferido; itens nascem habilitados e a oferta é ativada sozinha</div>
+        </div>
+      )}
+      <div className="glass" style={{ padding: '11px 13px', borderRadius: 12, marginBottom: 13, border: '1px solid rgba(47,217,141,.3)' }}>
+        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 9 }}><Bot size={12} style={{ color: PROMO.OK }} /><b style={{ fontSize: 10.5 }}>Agentes por vendas · Cupom, Leve+ e Add-on</b><PBadge c={PROMO.OK} bg="rgba(47,217,141,.12)">ESTUDAM OS PEDIDOS REAIS</PBadge><div style={{ flex: 1 }} /><span style={{ fontSize: 7.5, color: 'var(--faint)' }}>máx. 1 campanha/semana por agente · amostra mínima de vendas</span></div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 11 }}>
+          {[
+            ['cupom_auto', 'Cupom automático', 'cria 1 cupom % por semana quando as vendas justificam', 'cupom_desconto', 'desconto', 1, 50, 'cupom_quota', 'quota', 10, 1000],
+            ['bundle_auto', 'Leve+ automático', 'monta o combo com o PAR mais comprado junto', 'bundle_desconto', 'desconto', 1, 50, null, null, 0, 0],
+            ['addon_auto', 'Add-on automático', 'principal = mais vendido; adicionais = o que os clientes levam junto', 'addon_desconto', 'desconto', 1, 70, null, null, 0, 0],
+          ].map(([chave, titulo, sub, kd, ld, mn, mx, kq, lq, qn, qx]) => {
+            const ex = cfg.extras || {}
+            const on = !!ex[chave]
+            return (
+              <div key={chave} className="glass" style={{ padding: '9px 11px', borderRadius: 11, border: `1px solid ${on ? 'rgba(47,217,141,.4)' : 'var(--glass-border)'}`, background: on ? 'rgba(47,217,141,.05)' : 'var(--glass)' }}>
+                <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                  <div onClick={() => salvar({ extras: { [chave]: !on } })} style={{ width: 30, height: 16, borderRadius: 99, background: on ? PROMO.OK : 'rgba(255,255,255,.12)', position: 'relative', cursor: 'pointer', flex: 'none' }}><span style={{ position: 'absolute', top: 2, left: on ? 16 : 2, width: 12, height: 12, borderRadius: '50%', background: '#fff', transition: '.15s' }} /></div>
+                  <div style={{ flex: 1 }}><b style={{ fontSize: 10 }}>{titulo}</b><div style={{ fontSize: 7.5, color: 'var(--faint)', lineHeight: 1.4 }}>{sub}</div></div>
+                </div>
+                {on && (
+                  <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 8 }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 7, color: 'var(--faint)' }}>{ld}</div>
+                      <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 5 }}><input type="range" min={mn} max={mx} value={ex[kd] ?? 10} onChange={(e) => salvar({ extras: { [kd]: Number(e.target.value) } })} style={{ flex: 1 }} /><b className="num" style={{ fontSize: 9.5, color: PROMO.OK }}>{ex[kd] ?? 10}%</b></div>
+                    </div>
+                    {kq && <div style={{ width: 74 }}>
+                      <div style={{ fontSize: 7, color: 'var(--faint)' }}>{lq}</div>
+                      <input type="number" min={qn} max={qx} value={ex[kq] ?? 100} onChange={(e) => salvar({ extras: { [kq]: Number(e.target.value) } })} style={{ width: '100%', padding: '4px 7px', fontSize: 9.5, color: 'var(--text)', background: 'rgba(0,0,0,.25)', border: '1px solid var(--glass-border)', borderRadius: 7 }} />
+                    </div>}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
         <div>
