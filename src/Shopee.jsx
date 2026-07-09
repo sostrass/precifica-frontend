@@ -283,7 +283,7 @@ function BoostCondicional({ conectado, notify }) {
   useEffect(() => {  // página viva: atualiza sozinha (45s + ao voltar para a aba), sem F5
     if (!conectado) return
     const tick = () => { if (document.visibilityState === 'visible') carregar(true) }
-    const t = setInterval(tick, 45000)
+    const t = setInterval(tick, 60000)
     document.addEventListener('visibilitychange', tick)
     return () => { clearInterval(t); document.removeEventListener('visibilitychange', tick) }
   }, [conectado])
@@ -4039,7 +4039,7 @@ function CentralPromo({ notify, irCriar, irParaMotor }) {
           <button onClick={sincronizar} disabled={sync} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10.5, fontWeight: 700, padding: '8px 13px', borderRadius: 9, cursor: 'pointer', color: 'var(--dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)' }}>{sync ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}Sincronizar</button>
           <button onClick={() => irCriar('descontos')} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10.5, fontWeight: 800, padding: '8px 14px', borderRadius: 9, cursor: 'pointer', color: '#fff', border: 'none', background: `linear-gradient(135deg,${PROMO.SHOPEE},#c0341c)` }}><Plus size={13} />Nova campanha</button>
           <button onClick={() => irParaMotor && irParaMotor()} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10.5, fontWeight: 800, padding: '8px 14px', borderRadius: 9, cursor: 'pointer', color: '#fff', border: 'none', background: 'linear-gradient(135deg,#7b2a8c,#d6007f)' }}><Sparkles size={13} />Agente de Ofertas</button>
-          <span className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}><span style={{ fontSize: 9.5, fontWeight: 800, color: motoresOn ? PROMO.OK : 'var(--faint)' }}>{motoresOn ? 'MOTOR LIGADO' : 'DESLIGADO'}</span><span onClick={async () => { const novo = !motoresOn; setP((pp) => pp ? { ...pp, config: { ...pp.config, ativo: novo } } : pp); try { await api.shopeePromoConfigSalvar({ ...(p?.config || {}), ativo: novo }); notify(novo ? 'Motor de ofertas ligado.' : 'Motor de ofertas desligado.', 'ok') } catch (e) { notify(e.message, 'danger'); carregar(true) } }} style={{ width: 36, height: 20, borderRadius: 99, position: 'relative', cursor: 'pointer', flex: 'none', background: motoresOn ? 'linear-gradient(90deg,#2FD98D,#1fae6e)' : 'rgba(255,255,255,.1)' }}><span style={{ position: 'absolute', top: 2, width: 16, height: 16, borderRadius: '50%', background: '#fff', left: motoresOn ? 18 : 2, transition: 'left .2s' }} /></span></span>
+          <span className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}><span style={{ fontSize: 9.5, fontWeight: 800, color: motoresOn ? PROMO.OK : 'var(--faint)' }}>{motoresOn ? 'MOTOR LIGADO' : 'DESLIGADO'}</span><span onClick={async () => { const novo = !motoresOn; setP((pp) => pp ? { ...pp, config: { ...pp.config, ativo: novo, ...(novo ? { modo: 'auto' } : {}) } } : pp); try { await api.shopeePromoConfigSalvar({ ...(p?.config || {}), ativo: novo, ...(novo ? { modo: 'auto' } : {}) }); notify(novo ? 'Motor ligado no automático — cria sozinho no intervalo configurado.' : 'Motor de ofertas desligado.', 'ok') } catch (e) { notify(e.message, 'danger'); carregar(true) } }} style={{ width: 36, height: 20, borderRadius: 99, position: 'relative', cursor: 'pointer', flex: 'none', background: motoresOn ? 'linear-gradient(90deg,#2FD98D,#1fae6e)' : 'rgba(255,255,255,.1)' }}><span style={{ position: 'absolute', top: 2, width: 16, height: 16, borderRadius: '50%', background: '#fff', left: motoresOn ? 18 : 2, transition: 'left .2s' }} /></span></span>
         </div>
         {p && (
           <div className="row" style={{ display: 'flex', gap: 15, marginTop: 10, fontSize: 9.5, color: 'var(--faint)', flexWrap: 'wrap' }}>
@@ -4886,7 +4886,7 @@ function Cupons({ conectado, notify }) {
   useEffect(() => {  // página viva: atualiza sozinha (45s + ao voltar para a aba), sem F5
     if (!conectado) return
     const tick = () => { if (document.visibilityState === 'visible') carregar(true) }
-    const t = setInterval(tick, 45000)
+    const t = setInterval(tick, 60000)
     document.addEventListener('visibilitychange', tick)
     return () => { clearInterval(t); document.removeEventListener('visibilitychange', tick) }
   }, [conectado])
@@ -5185,14 +5185,20 @@ function Descontos({ conectado, notify }) {
 
   const carregar = async (forcar) => {
     if (!forcar) setCarregando(true)
-    try { const r = await api.shopeePromoPainel(forcar); setP(r) } catch (e) { notify(e.message, 'danger') } finally { setCarregando(false) }
-    api.shopeePromoHistorico().then((r) => setHist(r.itens || [])).catch(() => {}); setDiarioSinal((s) => s + 1)
+    try {
+      const r = await api.shopeePromoPainel(forcar)
+      // no refresh silencioso (poll) preservamos a CONFIG que você está editando — só os dados vivos são atualizados
+      setP((pp) => (forcar && pp) ? { ...r, config: pp.config } : r)
+    } catch (e) { if (!forcar) notify(e.message, 'danger') } finally { setCarregando(false) }
+    if (!forcar) {  // diário/histórico só no carregamento explícito — evita a tela "piscar" no poll
+      api.shopeePromoHistorico().then((r) => setHist(r.itens || [])).catch(() => {}); setDiarioSinal((s) => s + 1)
+    }
   }
   useEffect(() => { if (conectado) carregar() }, [conectado])
   useEffect(() => {  // página viva: atualiza sozinha (45s + ao voltar para a aba), sem F5
     if (!conectado) return
     const tick = () => { if (document.visibilityState === 'visible') carregar(true) }
-    const t = setInterval(tick, 45000)
+    const t = setInterval(tick, 60000)
     document.addEventListener('visibilitychange', tick)
     return () => { clearInterval(t); document.removeEventListener('visibilitychange', tick) }
   }, [conectado])
@@ -5278,7 +5284,7 @@ function Descontos({ conectado, notify }) {
           <div style={{ width: 1, height: 30, background: 'var(--glass-border)' }} />
           <button onClick={sincronizar} disabled={sync} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 700, padding: '8px 12px', borderRadius: 9, cursor: 'pointer', color: 'var(--dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)' }}>{sync ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}Sincronizar</button>
           <button onClick={() => { setModoManual(true); setSeletor(true) }} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10.5, fontWeight: 800, padding: '8px 14px', borderRadius: 9, cursor: 'pointer', color: '#fff', border: 'none', background: `linear-gradient(135deg,${PROMO.SHOPEE},#c0341c)` }}><Plus size={13} />Novo desconto</button>
-          <span className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}><span style={{ fontSize: 9.5, fontWeight: 800, color: motoresOn ? PROMO.OK : 'var(--faint)' }}>{motoresOn ? 'MOTOR LIGADO' : 'DESLIGADO'}</span><span onClick={() => salvar({ ativo: !motoresOn })} style={{ width: 36, height: 20, borderRadius: 99, position: 'relative', cursor: 'pointer', flex: 'none', background: motoresOn ? 'linear-gradient(90deg,#2FD98D,#1fae6e)' : 'rgba(255,255,255,.1)' }}><span style={{ position: 'absolute', top: 2, width: 16, height: 16, borderRadius: '50%', background: '#fff', left: motoresOn ? 18 : 2, transition: 'left .2s' }} /></span></span>
+          <span className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}><span style={{ fontSize: 9.5, fontWeight: 800, color: motoresOn ? PROMO.OK : 'var(--faint)' }}>{motoresOn ? 'MOTOR LIGADO' : 'DESLIGADO'}</span><span onClick={() => salvar(!motoresOn ? { ativo: true, modo: 'auto' } : { ativo: false })} style={{ width: 36, height: 20, borderRadius: 99, position: 'relative', cursor: 'pointer', flex: 'none', background: motoresOn ? 'linear-gradient(90deg,#2FD98D,#1fae6e)' : 'rgba(255,255,255,.1)' }}><span style={{ position: 'absolute', top: 2, width: 16, height: 16, borderRadius: '50%', background: '#fff', left: motoresOn ? 18 : 2, transition: 'left .2s' }} /></span></span>
         </div>
         <div className="row" style={{ display: 'flex', gap: 15, marginTop: 10, fontSize: 9.5, color: 'var(--faint)', flexWrap: 'wrap' }}>
           <span>motor: <b style={{ color: motoresOn ? PROMO.OK : 'var(--faint)' }}>{motoresOn ? 'cria descontos sozinho' : 'desligado'}</b></span>
@@ -5368,7 +5374,7 @@ function Descontos({ conectado, notify }) {
           <button onClick={gerar} disabled={gerando} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 800, padding: '8px 13px', borderRadius: 9, cursor: 'pointer', color: '#fff', border: 'none', background: 'linear-gradient(135deg,#7b2a8c,#d6007f)', opacity: gerando ? .7 : 1 }}>{gerando ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}Gerar propostas agora</button>
           <button onClick={rodar} disabled={rodando} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 700, padding: '8px 12px', borderRadius: 9, cursor: 'pointer', color: 'var(--dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)' }}>{rodando ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}Rodar 1 ciclo</button>
         </div>
-        <EstudioMotor cfg={cfg} salvar={salvar} motorTipo={motorTipo} setMotorTipo={setMotorTipo} />
+        <EstudioMotor cfg={cfg} salvar={salvar} motorTipo={motorTipo} setMotorTipo={setMotorTipo} hist={typeof hist !== 'undefined' ? hist : []} />
         <div style={{ marginTop: 14, paddingTop: 13, borderTop: '1px solid var(--glass-border)' }}>
           <PSecao icon={Sparkles} cor={PROMO.PURPLE} titulo="Propostas desta rodada · margem item a item" extra={<>
             <PBadge c="#cfaef5" bg="rgba(160,107,232,.15)">MAIOR DESCONTO SEM FURAR O PISO</PBadge>
@@ -5659,7 +5665,7 @@ function Bundles({ conectado, notify }) {
   useEffect(() => {  // página viva: atualiza sozinha (45s + ao voltar para a aba), sem F5
     if (!conectado) return
     const tick = () => { if (document.visibilityState === 'visible') carregar(true) }
-    const t = setInterval(tick, 45000)
+    const t = setInterval(tick, 60000)
     document.addEventListener('visibilitychange', tick)
     return () => { clearInterval(t); document.removeEventListener('visibilitychange', tick) }
   }, [conectado])
@@ -5943,7 +5949,7 @@ function Addons({ conectado, notify }) {
   useEffect(() => {  // página viva: atualiza sozinha (45s + ao voltar para a aba), sem F5
     if (!conectado) return
     const tick = () => { if (document.visibilityState === 'visible') carregar(true) }
-    const t = setInterval(tick, 45000)
+    const t = setInterval(tick, 60000)
     document.addEventListener('visibilitychange', tick)
     return () => { clearInterval(t); document.removeEventListener('visibilitychange', tick) }
   }, [conectado])
@@ -6252,7 +6258,7 @@ function FlashSale({ conectado, notify }) {
   useEffect(() => {  // página viva: atualiza sozinha (45s + ao voltar para a aba), sem F5
     if (!conectado) return
     const tick = () => { if (document.visibilityState === 'visible') carregar(true) }
-    const t = setInterval(tick, 45000)
+    const t = setInterval(tick, 60000)
     document.addEventListener('visibilitychange', tick)
     return () => { clearInterval(t); document.removeEventListener('visibilitychange', tick) }
   }, [conectado])
@@ -6748,7 +6754,7 @@ function AgenteOfertas({ conectado, notify }) {
           <div style={{ flex: 1 }} />
           <button onClick={gerar} disabled={gerando} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 800, padding: '9px 15px', borderRadius: 10, cursor: 'pointer', color: '#fff', border: 'none', background: 'linear-gradient(135deg,#7b2a8c,#d6007f)', opacity: gerando ? .7 : 1 }}>{gerando ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}Gerar propostas agora</button>
           <button onClick={rodarCiclo} disabled={rodando} className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, padding: '9px 13px', borderRadius: 10, cursor: 'pointer', color: 'var(--dim)', background: 'var(--glass)', border: '1px solid var(--glass-border)' }}>{rodando ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}Rodar 1 ciclo</button>
-          <span className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}><span style={{ fontSize: 10, fontWeight: 800, color: ativo ? PROMO.OK : 'var(--faint)' }}>{ativo ? 'AGENTE LIGADO' : 'DESLIGADO'}</span><span onClick={() => salvar({ ativo: !ativo })} style={{ width: 36, height: 20, borderRadius: 99, position: 'relative', cursor: 'pointer', flex: 'none', background: ativo ? 'linear-gradient(90deg,#2FD98D,#1fae6e)' : 'rgba(255,255,255,.1)' }}><span style={{ position: 'absolute', top: 2, width: 16, height: 16, borderRadius: '50%', background: '#fff', left: ativo ? 18 : 2, transition: 'left .2s' }} /></span></span>
+          <span className="row" style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}><span style={{ fontSize: 10, fontWeight: 800, color: ativo ? PROMO.OK : 'var(--faint)' }}>{ativo ? 'AGENTE LIGADO' : 'DESLIGADO'}</span><span onClick={() => salvar(!ativo ? { ativo: true, modo: 'auto' } : { ativo: false })} style={{ width: 36, height: 20, borderRadius: 99, position: 'relative', cursor: 'pointer', flex: 'none', background: ativo ? 'linear-gradient(90deg,#2FD98D,#1fae6e)' : 'rgba(255,255,255,.1)' }}><span style={{ position: 'absolute', top: 2, width: 16, height: 16, borderRadius: '50%', background: '#fff', left: ativo ? 18 : 2, transition: 'left .2s' }} /></span></span>
         </div>
         <div className="row" style={{ display: 'flex', gap: 15, marginTop: 10, fontSize: 9.5, color: 'var(--faint)', flexWrap: 'wrap' }}>
           <span>modo: <b style={{ color: 'var(--text)' }}>{cfg?.modo === 'auto' ? 'automático (cria sozinho)' : 'sugerir (só com sua aprovação)'}</b></span>
@@ -6780,7 +6786,7 @@ function AgenteOfertas({ conectado, notify }) {
       </div>
 
       {/* ESTÚDIO DO MOTOR */}
-      <EstudioMotor cfg={cfg} salvar={salvar} motorTipo={motorTipo} setMotorTipo={setMotorTipo} />
+      <EstudioMotor cfg={cfg} salvar={salvar} motorTipo={motorTipo} setMotorTipo={setMotorTipo} hist={typeof hist !== 'undefined' ? hist : []} />
 
       {/* PROPOSTAS */}
       <div className="glass" style={{ padding: 16, border: '1px solid transparent', background: 'linear-gradient(var(--surface),var(--surface)) padding-box,linear-gradient(110deg,rgba(160,107,232,.4),rgba(242,194,0,.3),rgba(238,77,45,.3)) border-box' }}>
@@ -6878,7 +6884,163 @@ function RadarQueda({ queda, limiar }) {
 }
 
 /* -------- Estúdio do motor (config) -------- */
-function EstudioMotor({ cfg, salvar, motorTipo, setMotorTipo }) {
+/* -------- Sala de Comando das Automações (mockup aprovado) -------- */
+function SalaDeComando({ cfg, salvar, hist }) {
+  const [agoraTs, setAgoraTs] = useState(() => Date.now())
+  useEffect(() => { const t = setInterval(() => setAgoraTs(Date.now()), 30000); return () => clearInterval(t) }, [])
+  const ex = cfg.extras || {}
+  const ativo = !!cfg.ativo
+  const tipo = cfg.tipo || 'desconto'
+  const descOn = ativo && (tipo === 'desconto' || tipo === 'ambos')
+  const flashOn = ativo && (tipo === 'flash' || tipo === 'ambos')
+  const intervalo = cfg.intervalo_dias ?? 7
+  const DIA = 86400000
+
+  const ultDo = (t, motivo) => {
+    const l = (hist || []).find((h) => h.tipo === t && (!motivo || (h.motivo || '') === motivo))
+    return l && l.criado_em ? new Date(l.criado_em).getTime() : null
+  }
+  const proxMotor = (() => {
+    const u = cfg.ultimo_ciclo ? new Date(cfg.ultimo_ciclo).getTime() : null
+    if (!ativo || cfg.modo !== 'auto') return null
+    if (!u) return 0
+    return Math.max(0, u + intervalo * DIA - agoraTs)
+  })()
+  const fmtRest = (ms) => {
+    if (ms === null) return '—'
+    if (ms <= 0) return 'no próximo tique'
+    const h = Math.floor(ms / 3600000), d = Math.floor(h / 24)
+    if (d >= 1) return `${d}d ${h % 24}h`
+    const m = Math.floor((ms % 3600000) / 60000)
+    return `${h}h ${m.toString().padStart(2, '0')}m`
+  }
+  const tipoToggle = (qual) => {
+    // liga/desliga Desconto ou Relâmpago mantendo pelo menos um ativo
+    const d = qual === 'desconto' ? !descOn : descOn
+    const f = qual === 'flash' ? !flashOn : flashOn
+    if (!d && !f) return notifyGuard('O motor precisa de pelo menos um tipo ligado (Desconto ou Relâmpago).')
+    salvar({ ativo: true, modo: 'auto', tipo: d && f ? 'ambos' : d ? 'desconto' : 'flash' })
+  }
+  const notifyGuard = (m) => { try { window.__notify && window.__notify(m, 'warn') } catch (_) {} }
+
+  const AGENTES = [
+    { id: 'desconto', nome: 'Desconto', cor: '#d6007f', on: descOn,
+      ritmo: `a cada ${intervalo}d`, dura: `dura ${cfg.duracao_dias ?? 3}d`,
+      extra: `até ${cfg.max_produtos ?? 40} itens · teto ${cfg.desconto_max ?? 25}%`,
+      ult: ultDo('desconto'), freqMs: intervalo * DIA, toggle: () => tipoToggle('desconto') },
+    { id: 'flash', nome: 'Relâmpago', cor: '#EE4D2D', on: flashOn,
+      ritmo: `aberturas ${({ qualquer: 'a qualquer hora', manha: 'de manhã', tarde: 'à tarde', noite: 'à noite' })[ex.flash_horario || 'qualquer']}`,
+      dura: 'slot oficial', extra: `desconto ${ex.flash_desconto ?? 20}% · estoque camp. ${ex.flash_estoque ?? 1}`,
+      ult: ultDo('flash'), freqMs: intervalo * DIA, toggle: () => tipoToggle('flash') },
+    { id: 'cupom', nome: 'Cupom', cor: '#F2C200', on: !!ex.cupom_auto,
+      ritmo: `cria a cada ${ex.cupom_freq ?? 7}d`, dura: `dura ${ex.cupom_duracao ?? 7}d`,
+      extra: `${ex.cupom_desconto ?? 10}% · quota ${ex.cupom_quota ?? 100}`,
+      ult: ultDo('cupom', 'vendas'), freqMs: (ex.cupom_freq ?? 7) * DIA, toggle: () => salvar({ extras: { cupom_auto: !ex.cupom_auto } }) },
+    { id: 'bundle', nome: 'Leve+', cor: '#a06be8', on: !!ex.bundle_auto,
+      ritmo: `cria a cada ${ex.bundle_freq ?? 7}d`, dura: `dura ${ex.bundle_duracao ?? 14}d`,
+      extra: 'par mais comprado junto', ult: ultDo('bundle', 'vendas'), freqMs: (ex.bundle_freq ?? 7) * DIA, toggle: () => salvar({ extras: { bundle_auto: !ex.bundle_auto } }) },
+    { id: 'addon', nome: 'Add-on', cor: '#2FC9D9', on: !!ex.addon_auto,
+      ritmo: `cria a cada ${ex.addon_freq ?? 7}d`, dura: `dura ${ex.addon_duracao ?? 14}d`,
+      extra: 'comportamento de compra', ult: ultDo('addon', 'vendas'), freqMs: (ex.addon_freq ?? 7) * DIA, toggle: () => salvar({ extras: { addon_auto: !ex.addon_auto } }) },
+  ]
+
+  // agenda da semana (marcos previstos pelo ritmo)
+  const marcos = []
+  const push = (ts, cor, rot, y) => { const off = (ts - agoraTs) / (7 * DIA); if (off >= 0 && off <= 1) marcos.push({ x: off, y, cor, rot }) }
+  if (ativo && cfg.modo === 'auto') {
+    const base = proxMotor === null ? null : agoraTs + (proxMotor || 0)
+    if (base !== null) for (let k = 0; k < 4; k++) {
+      if (descOn) push(base + k * intervalo * DIA, '#d6007f', 'Desconto · rodada', 0.32)
+      if (flashOn) push(base + k * intervalo * DIA + 3600000, '#EE4D2D', 'Relâmpago', 0.62)
+    }
+  }
+  AGENTES.slice(2).forEach((a) => {
+    if (!a.on || !ativo) return
+    const prox = a.ult ? a.ult + a.freqMs : agoraTs + 3600000
+    push(Math.max(prox, agoraTs), a.cor, a.nome, a.id === 'cupom' ? 0.32 : a.id === 'bundle' ? 0.62 : 0.47)
+  })
+  const previsao = (() => {
+    const c = { desc: descOn ? Math.max(1, Math.ceil(7 / intervalo)) : 0, fl: flashOn ? Math.max(1, Math.ceil(7 / intervalo)) : 0, cu: ex.cupom_auto ? Math.max(1, Math.floor(7 / (ex.cupom_freq ?? 7))) : 0, bu: ex.bundle_auto ? Math.max(1, Math.floor(7 / (ex.bundle_freq ?? 7))) : 0, ad: ex.addon_auto ? Math.max(1, Math.floor(7 / (ex.addon_freq ?? 7))) : 0 }
+    return { ...c, total: c.desc + c.fl + c.cu + c.bu + c.ad }
+  })()
+  const DIAS_SEMANA = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb']
+
+  return (
+    <div style={{ marginBottom: 13 }}>
+      {/* COMANDO GLOBAL */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 9, marginBottom: 10 }}>
+        <div className="glass" style={{ padding: '9px 12px', borderRadius: 12 }}>
+          <div className="row" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span style={{ fontSize: 6.5, color: 'var(--faint)', fontWeight: 800, textTransform: 'uppercase' }}>Radar dos agentes · vendas a cada</span><b className="num" style={{ fontSize: 11, color: PROMO.OK }}>{ex.verificacao_horas ?? 6}h</b></div>
+          <input type="range" min={1} max={24} value={ex.verificacao_horas ?? 6} onChange={(e) => salvar({ extras: { verificacao_horas: Number(e.target.value) } })} style={{ width: '100%' }} />
+        </div>
+        <div className="glass" style={{ padding: '9px 12px', borderRadius: 12 }}>
+          <div className="row" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span style={{ fontSize: 6.5, color: 'var(--faint)', fontWeight: 800, textTransform: 'uppercase' }}>Motor · nova rodada a cada</span><b className="num" style={{ fontSize: 11, color: PROMO.PINK || '#d6007f' }}>{intervalo}d</b></div>
+          <input type="range" min={1} max={30} value={intervalo} onChange={(e) => salvar({ intervalo_dias: Number(e.target.value) })} style={{ width: '100%' }} />
+        </div>
+        <div className="glass" style={{ padding: '9px 12px', borderRadius: 12 }}>
+          <div className="row" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span style={{ fontSize: 6.5, color: 'var(--faint)', fontWeight: 800, textTransform: 'uppercase' }}>Guardião · piso de margem</span><b className="num" style={{ fontSize: 11, color: PROMO.GOLD }}>{cfg.piso_margem ?? 12}%</b></div>
+          <input type="range" min={0} max={60} value={cfg.piso_margem ?? 12} onChange={(e) => salvar({ piso_margem: Number(e.target.value) })} style={{ width: '100%' }} />
+        </div>
+        <div className="glass row" style={{ padding: '9px 12px', borderRadius: 12, display: 'flex', alignItems: 'center', gap: 9 }}>
+          <div style={{ flex: 1 }}><div style={{ fontSize: 6.5, color: 'var(--faint)', fontWeight: 800, textTransform: 'uppercase' }}>Próxima rodada do motor</div><b className="num serif" style={{ fontSize: 15, color: '#d6007f' }}>{cfg.modo === 'auto' && ativo ? fmtRest(proxMotor) : 'motor em modo sugerir'}</b></div>
+          <Clock size={15} style={{ color: 'var(--faint)' }} />
+        </div>
+      </div>
+
+      {/* 5 AGENTES */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 9, marginBottom: 10 }}>
+        {AGENTES.map((a) => {
+          const pct = a.ult ? Math.min(1, (agoraTs - a.ult) / a.freqMs) : 0
+          return (
+            <div key={a.id} className="glass" style={{ padding: '11px 12px', borderRadius: 14, position: 'relative', overflow: 'hidden', border: `1px solid ${a.on ? a.cor + '55' : 'var(--glass-border)'}`, background: a.on ? `linear-gradient(165deg, ${a.cor}12, rgba(255,255,255,.03))` : 'var(--glass)' }}>
+              <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 7 }}>
+                <div style={{ width: 26, height: 26, borderRadius: 8, background: a.cor + '22', border: `1px solid ${a.cor}55`, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}><Zap size={12} style={{ color: a.cor }} /></div>
+                <div style={{ flex: 1, minWidth: 0 }}><b style={{ fontSize: 10.5 }}>{a.nome}</b><div style={{ fontSize: 6.5, fontWeight: 800, textTransform: 'uppercase', color: a.on ? PROMO.OK : 'var(--faint)' }}>{a.on ? 'ligado · no ritmo' : 'desligado'}</div></div>
+                <span onClick={a.toggle} style={{ width: 26, height: 15, borderRadius: 99, position: 'relative', cursor: 'pointer', flex: 'none', background: a.on ? 'linear-gradient(90deg,#2FD98D,#1fae6e)' : 'rgba(255,255,255,.1)' }}><span style={{ position: 'absolute', top: 2, width: 11, height: 11, borderRadius: '50%', background: '#fff', left: a.on ? 13 : 2, transition: 'left .15s' }} /></span>
+              </div>
+              <div className="row" style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 6 }}>
+                <PBadge c={a.cor} bg={a.cor + '18'}>{a.ritmo}</PBadge>
+                <PBadge c="var(--dim)" bg="rgba(255,255,255,.06)">{a.dura}</PBadge>
+              </div>
+              <div style={{ fontSize: 7.5, color: 'var(--faint)', marginBottom: 7, minHeight: 20 }}>{a.extra}</div>
+              <div style={{ fontSize: 6, color: 'var(--faint)', textTransform: 'uppercase', fontWeight: 800, marginBottom: 3 }}>próxima criação</div>
+              <div style={{ height: 5, borderRadius: 4, background: 'rgba(255,255,255,.07)', overflow: 'hidden' }}><div style={{ height: '100%', width: `${Math.round(pct * 100)}%`, borderRadius: 4, background: `linear-gradient(90deg, ${a.cor}, ${a.cor}44)` }} /></div>
+              <div className="row" style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6 }}>
+                <span style={{ fontSize: 6.5, color: 'var(--faint)' }}>última: <b className="num" style={{ color: 'var(--dim)' }}>{a.ult ? tempoRelBR(new Date(a.ult).toISOString()) : '—'}</b></span>
+                <span style={{ fontSize: 6.5, color: a.on ? a.cor : 'var(--faint)' }}>{a.on ? (pct >= 1 ? 'no próximo radar' : `${Math.round(pct * 100)}% do ciclo`) : 'ligue para agendar'}</span>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* AGENDA DA SEMANA + SIMULADOR */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1.35fr 1fr', gap: 9 }}>
+        <div className="glass" style={{ padding: '11px 13px', borderRadius: 13 }}>
+          <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 8 }}><Calendar size={12} style={{ color: PROMO.PURPLE }} /><b style={{ fontSize: 10.5 }}>Agenda da semana</b><PBadge c="#e9dbfb" bg="rgba(160,107,232,.2)">PREVISÃO PELO RITMO</PBadge><div style={{ flex: 1 }} /><span className="num" style={{ fontSize: 8, color: 'var(--faint)' }}>~{previsao.total} campanha{previsao.total === 1 ? '' : 's'} em 7 dias</span></div>
+          <div style={{ position: 'relative', height: 64, background: 'rgba(0,0,0,.22)', border: '1px solid var(--glass-border)', borderRadius: 11 }}>
+            {[0, 1, 2, 3, 4, 5, 6].map((i) => { const d = new Date(agoraTs + i * DIA); return <div key={i} style={{ position: 'absolute', top: 0, bottom: 0, left: `${i / 7 * 100}%`, borderLeft: i ? '1px dashed rgba(255,255,255,.07)' : 'none' }}><span style={{ position: 'absolute', top: 4, left: 5, fontSize: 6.5, color: 'var(--faint)', textTransform: 'uppercase', fontWeight: 800 }}>{i === 0 ? 'hoje' : DIAS_SEMANA[d.getDay()] + ' ' + d.getDate()}</span></div> })}
+            {marcos.slice(0, 14).map((m, i) => <span key={i} title={m.rot} style={{ position: 'absolute', left: `${Math.min(97, m.x * 100)}%`, top: `${m.y * 100}%`, width: 11, height: 11, borderRadius: '50%', background: m.cor, border: '2px solid var(--bg)', transform: 'translate(-50%,-50%)' }} />)}
+            {marcos.length === 0 && <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8.5, color: 'var(--faint)' }}>ligue o motor e os agentes para ver a agenda prevista</div>}
+          </div>
+          <div className="row" style={{ display: 'flex', gap: 10, marginTop: 6, flexWrap: 'wrap' }}>{AGENTES.map((a) => <span key={a.id} style={{ fontSize: 7, color: 'var(--faint)', display: 'inline-flex', alignItems: 'center', gap: 4 }}><i style={{ width: 8, height: 8, borderRadius: '50%', background: a.cor, display: 'inline-block', opacity: a.on ? 1 : 0.3 }} />{a.nome}</span>)}</div>
+        </div>
+        <div className="glass" style={{ padding: '11px 13px', borderRadius: 13 }}>
+          <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 8 }}><Sparkles size={12} style={{ color: PROMO.GOLD }} /><b style={{ fontSize: 10.5 }}>Simulador de ritmo</b><PBadge c="#1a1008" bg={PROMO.GOLD}>AO MEXER, RECALCULA</PBadge></div>
+          <div style={{ fontSize: 9.5, color: 'var(--dim)', lineHeight: 1.65 }}>
+            Nos próximos 7 dias: <b style={{ color: '#d6007f' }}>{previsao.desc} rodada{previsao.desc === 1 ? '' : 's'} de desconto</b>, <b style={{ color: '#EE4D2D' }}>{previsao.fl} relâmpago{previsao.fl === 1 ? '' : 's'}</b>, <b style={{ color: PROMO.GOLD }}>{previsao.cu} cupom{previsao.cu === 1 ? '' : 's'}</b>, <b style={{ color: PROMO.PURPLE }}>{previsao.bu} leve+</b> e <b style={{ color: PROMO.TEAL }}>{previsao.ad} add-on</b> — sempre com margem ≥ <b style={{ color: PROMO.GOLD }}>{cfg.piso_margem ?? 12}%</b> e sem duplicar item em campanha.
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7, marginTop: 9 }}>
+            <div style={{ background: 'rgba(0,0,0,.22)', border: '1px solid var(--glass-border)', borderRadius: 9, padding: '6px 9px' }}><div style={{ fontSize: 6, color: 'var(--faint)', textTransform: 'uppercase', fontWeight: 800 }}>campanhas/semana</div><b className="num serif" style={{ fontSize: 15 }}>{previsao.total}</b></div>
+            <div style={{ background: 'rgba(0,0,0,.22)', border: '1px solid var(--glass-border)', borderRadius: 9, padding: '6px 9px' }}><div style={{ fontSize: 6, color: 'var(--faint)', textTransform: 'uppercase', fontWeight: 800 }}>margem protegida</div><b className="num serif" style={{ fontSize: 15, color: PROMO.GOLD }}>≥ {cfg.piso_margem ?? 12}%</b></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function EstudioMotor({ cfg, salvar, motorTipo, setMotorTipo, hist }) {
   if (!cfg) return null
   const Slm = ({ label, campo, min, max, sufixo, cor }) => (
     <div style={{ marginBottom: 11 }}>
@@ -6894,6 +7056,7 @@ function EstudioMotor({ cfg, salvar, motorTipo, setMotorTipo }) {
         <div style={{ flex: 1 }} />
         <div className="row" style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>{TIPOS_MOTOR.map(([v, l]) => <span key={v} onClick={() => { setMotorTipo(v); salvar({ tipo: v }) }} style={{ fontSize: 9.5, fontWeight: 700, padding: '5px 10px', borderRadius: 99, cursor: 'pointer', color: (cfg.tipo || 'desconto') === v ? '#fff' : 'var(--dim)', background: (cfg.tipo || 'desconto') === v ? 'linear-gradient(135deg,#7b2a8c,#d6007f)' : 'rgba(255,255,255,.04)', border: `1px solid ${(cfg.tipo || 'desconto') === v ? 'transparent' : 'var(--glass-border)'}` }}>{l}</span>)}</div>
       </>} />
+      <SalaDeComando cfg={cfg} salvar={salvar} hist={hist || []} />
       <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '8px 11px', borderRadius: 10, background: 'rgba(160,107,232,.06)', border: '1px solid rgba(160,107,232,.22)', marginBottom: 13 }}>
         <Bot size={13} style={{ color: PROMO.PURPLE, flex: 'none' }} />
         <div style={{ fontSize: 8.5, color: 'var(--dim)', lineHeight: 1.5, flex: 1 }}>O motor <b style={{ color: PROMO.PURPLE }}>seleciona produtos e cria sozinho</b> <b>Desconto</b> e <b>Relâmpago</b> (por giro/margem, com piso protegido). <b>Cupom</b>, <b>Leve+</b> e <b>Add-on</b> agora têm <b style={{ color: PROMO.OK }}>agentes por vendas</b> (abaixo): estudam os pedidos reais e criam no máximo 1 campanha por semana cada.</div>
@@ -6923,7 +7086,7 @@ function EstudioMotor({ cfg, salvar, motorTipo, setMotorTipo }) {
         </div>
       )}
       <div className="glass" style={{ padding: '11px 13px', borderRadius: 12, marginBottom: 13, border: '1px solid rgba(47,217,141,.3)' }}>
-        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 9 }}><Bot size={12} style={{ color: PROMO.OK }} /><b style={{ fontSize: 10.5 }}>Agentes por vendas · Cupom, Leve+ e Add-on</b><PBadge c={PROMO.OK} bg="rgba(47,217,141,.12)">ESTUDAM OS PEDIDOS REAIS</PBadge><div style={{ flex: 1 }} /><span style={{ fontSize: 7.5, color: 'var(--faint)' }}>máx. 1 campanha/semana por agente · amostra mínima de vendas</span></div>
+        <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 9 }}><Bot size={12} style={{ color: PROMO.OK }} /><b style={{ fontSize: 10.5 }}>Agentes por vendas · Cupom, Leve+ e Add-on</b><PBadge c={PROMO.OK} bg="rgba(47,217,141,.12)">ESTUDAM OS PEDIDOS REAIS</PBadge><div style={{ flex: 1 }} /><div className="row" style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ fontSize: 7.5, color: 'var(--faint)' }}>radar: verificar vendas a cada</span><input type="range" min={1} max={24} value={(cfg.extras || {}).verificacao_horas ?? 6} onChange={(e) => salvar({ extras: { verificacao_horas: Number(e.target.value) } })} style={{ width: 70 }} /><b className="num" style={{ fontSize: 9.5, color: PROMO.OK }}>{(cfg.extras || {}).verificacao_horas ?? 6}h</b></div></div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 11 }}>
           {[
             ['cupom_auto', 'Cupom automático', 'cria 1 cupom % por semana quando as vendas justificam', 'cupom_desconto', 'desconto', 1, 50, 'cupom_quota', 'quota', 10, 1000],
@@ -6938,18 +7101,35 @@ function EstudioMotor({ cfg, salvar, motorTipo, setMotorTipo }) {
                   <div onClick={() => salvar({ extras: { [chave]: !on } })} style={{ width: 30, height: 16, borderRadius: 99, background: on ? PROMO.OK : 'rgba(255,255,255,.12)', position: 'relative', cursor: 'pointer', flex: 'none' }}><span style={{ position: 'absolute', top: 2, left: on ? 16 : 2, width: 12, height: 12, borderRadius: '50%', background: '#fff', transition: '.15s' }} /></div>
                   <div style={{ flex: 1 }}><b style={{ fontSize: 10 }}>{titulo}</b><div style={{ fontSize: 7.5, color: 'var(--faint)', lineHeight: 1.4 }}>{sub}</div></div>
                 </div>
-                {on && (
-                  <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 8 }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 7, color: 'var(--faint)' }}>{ld}</div>
-                      <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 5 }}><input type="range" min={mn} max={mx} value={ex[kd] ?? 10} onChange={(e) => salvar({ extras: { [kd]: Number(e.target.value) } })} style={{ flex: 1 }} /><b className="num" style={{ fontSize: 9.5, color: PROMO.OK }}>{ex[kd] ?? 10}%</b></div>
+                {on && (() => {
+                  const base = chave.replace('_auto', '')
+                  const kDur = base + '_duracao', kFq = base + '_freq'
+                  const durDef = base === 'cupom' ? 7 : 14
+                  return (
+                    <div style={{ marginTop: 8 }}>
+                      <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 7, color: 'var(--faint)' }}>{ld}</div>
+                          <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 5 }}><input type="range" min={mn} max={mx} value={ex[kd] ?? 10} onChange={(e) => salvar({ extras: { [kd]: Number(e.target.value) } })} style={{ flex: 1 }} /><b className="num" style={{ fontSize: 9.5, color: PROMO.OK }}>{ex[kd] ?? 10}%</b></div>
+                        </div>
+                        {kq && <div style={{ width: 74 }}>
+                          <div style={{ fontSize: 7, color: 'var(--faint)' }}>{lq}</div>
+                          <input type="number" min={qn} max={qx} value={ex[kq] ?? 100} onChange={(e) => salvar({ extras: { [kq]: Number(e.target.value) } })} style={{ width: '100%', padding: '4px 7px', fontSize: 9.5, color: 'var(--text)', background: 'rgba(0,0,0,.25)', border: '1px solid var(--glass-border)', borderRadius: 7 }} />
+                        </div>}
+                      </div>
+                      <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 6 }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 7, color: 'var(--faint)' }}>campanha dura</div>
+                          <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 5 }}><input type="range" min={base === 'cupom' ? 3 : 7} max={base === 'cupom' ? 30 : 90} value={ex[kDur] ?? durDef} onChange={(e) => salvar({ extras: { [kDur]: Number(e.target.value) } })} style={{ flex: 1 }} /><b className="num" style={{ fontSize: 9.5 }}>{ex[kDur] ?? durDef}d</b></div>
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 7, color: 'var(--faint)' }}>criar a cada</div>
+                          <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 5 }}><input type="range" min={1} max={30} value={ex[kFq] ?? 7} onChange={(e) => salvar({ extras: { [kFq]: Number(e.target.value) } })} style={{ flex: 1 }} /><b className="num" style={{ fontSize: 9.5 }}>{ex[kFq] ?? 7}d</b></div>
+                        </div>
+                      </div>
                     </div>
-                    {kq && <div style={{ width: 74 }}>
-                      <div style={{ fontSize: 7, color: 'var(--faint)' }}>{lq}</div>
-                      <input type="number" min={qn} max={qx} value={ex[kq] ?? 100} onChange={(e) => salvar({ extras: { [kq]: Number(e.target.value) } })} style={{ width: '100%', padding: '4px 7px', fontSize: 9.5, color: 'var(--text)', background: 'rgba(0,0,0,.25)', border: '1px solid var(--glass-border)', borderRadius: 7 }} />
-                    </div>}
-                  </div>
-                )}
+                  )
+                })()}
               </div>
             )
           })}
@@ -6972,6 +7152,11 @@ function EstudioMotor({ cfg, salvar, motorTipo, setMotorTipo }) {
         </div>
         <div>
           <div style={{ fontSize: 8.5, textTransform: 'uppercase', fontWeight: 800, color: 'var(--faint)', marginBottom: 8 }}>Comportamento</div>
+          <div className="glass" style={{ padding: '9px 11px', borderRadius: 10, marginBottom: 6 }}>
+            <div style={{ fontSize: 8, color: 'var(--faint)', marginBottom: 4 }}>Criar nova rodada a cada</div>
+            <div className="row" style={{ display: 'flex', alignItems: 'center', gap: 7 }}><input type="range" min={1} max={30} value={cfg.intervalo_dias ?? 7} onChange={(e) => salvar({ intervalo_dias: Number(e.target.value) })} style={{ flex: 1 }} /><b className="num" style={{ fontSize: 10.5, color: PROMO.PURPLE }}>{cfg.intervalo_dias ?? 7} dia{(cfg.intervalo_dias ?? 7) > 1 ? 's' : ''}</b></div>
+            <div style={{ fontSize: 7, color: 'var(--faint)', marginTop: 3 }}>o motor respeita este ritmo sozinho — sem precisar clicar em nada</div>
+          </div>
           <div className="glass row" style={{ display: 'flex', alignItems: 'center', padding: '9px 11px', borderRadius: 10, gap: 8, marginBottom: 6 }}><span style={{ fontSize: 9.5, color: 'var(--dim)', flex: 1 }}>Modo automático (cria sozinho)</span><span onClick={() => salvar({ modo: cfg.modo === 'auto' ? 'sugerir' : 'auto' })} style={{ width: 32, height: 18, borderRadius: 99, position: 'relative', cursor: 'pointer', flex: 'none', background: cfg.modo === 'auto' ? 'linear-gradient(90deg,#2FD98D,#1fae6e)' : 'rgba(255,255,255,.1)' }}><span style={{ position: 'absolute', top: 2, width: 14, height: 14, borderRadius: '50%', background: '#fff', left: cfg.modo === 'auto' ? 16 : 2 }} /></span></div>
           <div className="glass row" style={{ display: 'flex', alignItems: 'center', padding: '9px 11px', borderRadius: 10, gap: 8, marginBottom: 6 }}><span style={{ fontSize: 9.5, color: 'var(--dim)', flex: 1 }}>🔒 Trava anti-duplicação</span><span style={{ width: 32, height: 18, borderRadius: 99, position: 'relative', flex: 'none', background: 'linear-gradient(90deg,#2FD98D,#1fae6e)', opacity: .6 }} title="sempre ativa"><span style={{ position: 'absolute', top: 2, width: 14, height: 14, borderRadius: '50%', background: '#fff', left: 16 }} /></span></div>
           <div className="glass row" style={{ display: 'flex', alignItems: 'center', padding: '9px 11px', borderRadius: 10, gap: 8, marginBottom: 6 }}><span style={{ fontSize: 9.5, color: 'var(--dim)', flex: 1 }}>⚡ Radar pode disparar relâmpago</span><span onClick={() => salvar({ gatilho: cfg.gatilho === 'queda' ? 'agendado' : 'queda' })} style={{ width: 32, height: 18, borderRadius: 99, position: 'relative', cursor: 'pointer', flex: 'none', background: cfg.gatilho === 'queda' ? 'linear-gradient(90deg,#2FD98D,#1fae6e)' : 'rgba(255,255,255,.1)' }}><span style={{ position: 'absolute', top: 2, width: 14, height: 14, borderRadius: '50%', background: '#fff', left: cfg.gatilho === 'queda' ? 16 : 2 }} /></span></div>
