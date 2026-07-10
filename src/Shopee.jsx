@@ -79,9 +79,10 @@ const GRUPOS = [
 ]
 const TAB_META = Object.fromEntries(TABS.map((t) => [t.id, t]))
 
-export default function Shopee() {
+export default function Shopee({ abaInicial } = {}) {
   const notify = useToast()
-  const [aba, setAba] = useState('diagnostico')
+  const [aba, setAba] = useState(abaInicial || 'diagnostico')
+  useEffect(() => { if (abaInicial) setAba(abaInicial) }, [abaInicial])
   const [status, setStatus] = useState(null)
   const [carregando, setCarregando] = useState(true)
 
@@ -4169,7 +4170,7 @@ function Quebra({ label, v, neg, forte, cor }) {
 /* ----------------------------- PROMOÇÕES --------------------------------- */
 const toEpoch = (s) => (s ? Math.floor(new Date(s).getTime() / 1000) : 0)
 
-function Promocoes({ conectado, notify, irParaMotor }) {
+export function Promocoes({ conectado, notify, irParaMotor }) {
   const [sub, setSub] = useState('central')
   if (!conectado) return <Vazio txt="Conecte a loja Shopee para gerenciar promoções." />
   return (
@@ -6936,7 +6937,7 @@ function Diagnostico({ status }) {
 }
 
 /* ============================ AGENTE DE OFERTAS (MAX · N3) ============================ */
-function AgenteOfertas({ conectado, notify }) {
+export function AgenteOfertas({ conectado, notify }) {
   const [cfg, setCfg] = useState(null)
   const [prop, setProp] = useState(null)
   const [sel, setSel] = useState(() => new Set())

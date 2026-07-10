@@ -18,7 +18,7 @@ const Configuracoes = lazy(() => import('./Configuracoes.jsx'))
 const Shopee = lazy(() => import('./Shopee.jsx'))
 const Atendimento = lazy(() => import('./Atendimento.jsx'))
 const Pedidos = lazy(() => import('./PedidosHub.jsx'))
-const Promocoes = lazy(() => import('./Promocoes.jsx'))
+const Promocoes = lazy(() => import('./CampanhasHub.jsx'))
 const Produtos = lazy(() => import('./Produtos.jsx'))
 const MercadoAds = lazy(() => import('./MercadoAds.jsx'))
 
@@ -47,7 +47,7 @@ const DESCRICOES = {
   shopee: 'Boost, promoções, avaliações e saúde da loja',
   atendimento: 'Perguntas dos compradores, multicanal, com IA',
   pedidos: 'Central unificada ML e Shopee · despacho, tarifa, margem e inteligência de vendas',
-  promocoes: 'Campanhas, cupons e ofertas do Mercado Livre',
+  promocoes: 'Campanhas unificadas ML e Shopee · descontos, cupons, relâmpago e agentes',
   mlprodutos: 'Criar, publicar e sincronizar anúncios do Mercado Livre',
   mlads: 'Product Ads — campanhas patrocinadas, ROAS e ACOS',
   precificacao: 'Preço ideal por canal a partir do custo e das taxas',
@@ -69,6 +69,7 @@ export default function App() {
   const [colapsado, setColapsado] = useState(() => localStorage.getItem('blingai_menu_colapsado') === '1')
   const [paleta, setPaleta] = useState(false)
   const [badges, setBadges] = useState({})
+  const [shopeeAba, setShopeeAba] = useState(null)
 
   useEffect(() => { localStorage.setItem('blingai_menu_colapsado', colapsado ? '1' : '0') }, [colapsado])
 
@@ -145,6 +146,7 @@ export default function App() {
         blingOk={blingOk} shopeeOk={!!shopee?.ok} badges={badges}
         theme={theme} setTheme={setTheme} sair={sair} conectarBling={conectarBling}
         abrirPaleta={() => setPaleta(true)}
+        irShopee={(aba) => { setShopeeAba(aba); setView('shopee') }}
       />
       {/* Main */}
       <div className="flex-1 flex flex-col min-w-0 p-3 gap-3">
@@ -174,7 +176,7 @@ export default function App() {
             {view === 'conselho' && <Conselho />}
             {view === 'estudio' && <Estudio />}
             {view === 'agentes' && <Agentes />}
-            {view === 'shopee' && <Shopee />}
+            {view === 'shopee' && <Shopee abaInicial={shopeeAba} />}
             {view === 'atendimento' && <Atendimento />}
             {view === 'pedidos' && <Pedidos />}
             {view === 'promocoes' && <Promocoes />}
@@ -213,7 +215,14 @@ const GRUPOS_MENU = [
     { view: 'mlprodutos', label: 'Produtos ML', icon: Globe },
   ] },
   { titulo: 'Canais', itens: [
-    { view: 'shopee', label: 'Shopee', icon: ShoppingBag, canal: 'sp' },
+    { view: 'shopee', label: 'Shopee', icon: ShoppingBag, canal: 'sp', shopeeLinks: [
+      { label: 'Boost', aba: 'boost' },
+      { label: 'Shopee Ads', aba: 'ads' },
+      { label: 'Avaliações', aba: 'avaliacoes' },
+      { label: 'Perguntas', aba: 'qa' },
+      { label: 'Saúde da loja', aba: 'saude' },
+      { label: 'Devoluções', aba: 'devolucoes' },
+    ] },
     { view: 'atendimento', label: 'Atendimento', icon: Inbox, badgeKey: 'atend' },
   ] },
   { titulo: 'Inteligência', itens: [
@@ -226,7 +235,7 @@ const GRUPOS_MENU = [
 ]
 const TODOS_ITENS = GRUPOS_MENU.flatMap((g) => g.itens)
 
-function MenuLateral({ view, setView, colapsado, setColapsado, blingOk, shopeeOk, badges, theme, setTheme, sair, conectarBling, abrirPaleta }) {
+function MenuLateral({ view, setView, colapsado, setColapsado, blingOk, shopeeOk, badges, theme, setTheme, sair, conectarBling, abrirPaleta, irShopee }) {
   if (colapsado) {
     return (
       <aside className="glass m-3 mr-0 w-[62px] rounded-2xl flex flex-col items-center py-3 px-2 shrink-0 gap-1.5">
@@ -267,7 +276,7 @@ function MenuLateral({ view, setView, colapsado, setColapsado, blingOk, shopeeOk
       <nav className="flex-1 overflow-auto -mx-1 px-1 mt-1 space-y-0.5">
         {GRUPOS_MENU.map((g) => (
           <GrupoMenu key={g.titulo} titulo={g.titulo}>
-            {g.itens.map((it) => <ItemMenu key={it.view} it={it} on={view === it.view} onClick={() => setView(it.view)} badges={badges} shopeeOk={shopeeOk} view={view} setView={setView} />)}
+            {g.itens.map((it) => <ItemMenu key={it.view} it={it} on={view === it.view} onClick={() => setView(it.view)} badges={badges} shopeeOk={shopeeOk} view={view} setView={setView} irShopee={irShopee} />)}
           </GrupoMenu>
         ))}
       </nav>
@@ -342,7 +351,7 @@ function GrupoMenu({ titulo, children }) {
   )
 }
 
-function ItemMenu({ it, on, onClick, badges, shopeeOk, view, setView }) {
+function ItemMenu({ it, on, onClick, badges, shopeeOk, view, setView, irShopee }) {
   const n = it.badgeKey ? badges[it.badgeKey] : 0
   return (
     <div>
@@ -361,6 +370,16 @@ function ItemMenu({ it, on, onClick, badges, shopeeOk, view, setView }) {
               {s.badgeKey && badges[s.badgeKey] > 0 && <span className="num text-[8.5px] text-faint">{badges[s.badgeKey]}</span>}
               {s.chip && <span className="text-[6px] font-bold px-1.5 py-0.5 rounded-full" style={{ color: '#fff', background: 'var(--accent)' }}>{s.chip}</span>}
             </div>
+          ))}
+        </div>
+      )}
+      {on && it.shopeeLinks && (
+        <div className="ml-[26px] mt-0.5 mb-1 space-y-0.5 pl-2" style={{ borderLeft: '1px solid rgba(238,77,45,.3)' }}>
+          {it.shopeeLinks.map((s) => (
+            <button key={s.aba} onClick={() => irShopee && irShopee(s.aba)} className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-[10.5px] text-dim hover:text-fg text-left" style={{ transition: 'color .12s' }}>
+              <span className="w-1 h-1 rounded-full" style={{ background: '#EE4D2D' }} />
+              <span className="flex-1 truncate">{s.label}</span>
+            </button>
           ))}
         </div>
       )}
