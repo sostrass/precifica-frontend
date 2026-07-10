@@ -14,9 +14,10 @@ const DANGER = 'var(--danger)'
 const brl = (v) => (v == null ? '—' : Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }))
 const UF_RE = /\b(AC|AL|AP|AM|BA|CE|DF|ES|GO|MA|MT|MS|MG|PA|PB|PR|PE|PI|RJ|RN|RS|RO|RR|SC|SP|SE|TO)\b/
 const CH = {
-  ml: { nome: 'Mercado Livre', cor: '#F2C200', txt: '#1a1008', freteRot: 'Frete ML', brand: 'linear-gradient(135deg,#F2C200,#b8940a)' },
-  shopee: { nome: 'Shopee', cor: '#EE4D2D', txt: '#fff', freteRot: 'Frete', brand: 'linear-gradient(135deg,#EE4D2D,#a52c15)' },
+  ml: { nome: 'Mercado Livre', cor: '#F2C200', cor2: '#FFE066', txt: '#1a1008', freteRot: 'Frete ML', brand: 'linear-gradient(135deg,#F2C200,#b8940a)' },
+  shopee: { nome: 'Shopee', cor: '#FF7A50', cor2: '#FFB020', txt: '#1a1008', freteRot: 'Frete', brand: 'linear-gradient(135deg,#FFB020,#FF6B4A)' },
 }
+const hexA = (hex, a) => { const h = hex.replace('#', ''); const n = parseInt(h, 16); return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})` }
 
 // ————— adaptadores: normalizam ML e Shopee para o layout ÚNICO do mockup —————
 function adaptaML(p) {
@@ -36,20 +37,30 @@ function adaptaML(p) {
   }
 }
 function adaptaShopee(p) {
-  const fin = p.financeiro || {}
   const cr = p.criado || p.create_time
+  const its = p.itens || []
+  const soma = (f) => { let s = 0, tem = false; for (const it of its) { if (it[f] != null) { s += it[f] * (it.qtd || 1); tem = true } } return tem ? s : null }
+  const taxas = soma('taxas_mkt')
+  const liquido = soma('liquido')
+  const receita = p.total_pago ?? soma('preco_pago')
+  const lucro = p.lucro_real
+  const margem = (lucro != null && receita > 0) ? (lucro / receita * 100)
+    : (() => { const ms = its.map((i) => i.margem_real).filter((v) => v != null); return ms.length ? ms.reduce((a, b) => a + b, 0) / ms.length : null })()
+  const nfSelo = p.selo_nf || p.nf_selo || (typeof p.nf === 'string' ? p.nf : null)
   return {
     id: String(p.order_sn || ''), canal: 'shopee',
-    titulo: (p.itens?.[0]?.nome || 'Pedido Shopee'),
-    qtd: (p.itens || []).reduce((s, i) => s + (i.qtd || 1), 0),
-    itens: (p.itens || []).map((i) => ({ nome: i.nome, sku: i.sku, qtd: i.qtd || 1, imagem: i.imagem, bin: i.bin })),
+    titulo: (its[0]?.nome || 'Pedido Shopee'),
+    qtd: its.reduce((s, i) => s + (i.qtd || 1), 0),
+    itens: its.map((i) => ({ nome: i.nome, sku: i.sku, qtd: i.qtd || 1, imagem: i.imagem, bin: i.bin, variacao: i.variacao, preco: i.preco_pago })),
     comprador: p.comprador || p.buyer_username || '—', compras: p.recorrencia || 0,
+    clienteReal: p.cliente || p.endereco?.nome, cidade: p.cidade || p.endereco?.cidade, cep: p.endereco?.cep,
     status: p.status || '', criado: cr ? new Date(cr * 1000).toISOString() : null,
     pago: p.pay_time ? new Date(p.pay_time * 1000).toISOString() : (cr ? new Date(cr * 1000).toISOString() : null),
-    receita: fin.receita ?? p.total ?? p.valor_pago, taxas: fin.taxas, frete: fin.frete, liquido: fin.liquido, margem: fin.margem,
+    receita, taxas, frete: null, liquido, lucro, margem, alvo: null,
+    abaixoMeta: !!p.abaixo_meta, prejuizo: !!p.prejuizo, notaComprador: p.nota_comprador,
     rastreio: p.rastreio || p.tracking_number, shipBy: p.ship_by,
-    uf: (p.uf || '').toUpperCase() || ((p.endereco || '').match(UF_RE) || [])[0],
-    nf: !!(p.nf || p.selo_nf === 'com_nota'), seloNf: p.selo_nf,
+    uf: (p.uf || p.endereco?.uf || '').toUpperCase().slice(0, 2) || null,
+    nf: nfSelo ? nfSelo === 'com_nota' : !!p.nf, seloNf: nfSelo, nfDesconhecida: !nfSelo && typeof p.nf !== 'boolean',
     cancelado: /cancel/i.test(String(p.status || '')), devolucao: /return|refund|devolu/i.test(String(p.status || '')), bruto: p,
   }
 }
@@ -62,7 +73,7 @@ function classifica(p) {
   if (p.cancelado) return 'cancel'
   if (/deliver|entreg|complet|finaliz/i.test(p.status)) return 'fim'
   if (/shipped|enviado|transit|transito/i.test(p.status)) return 'transito'
-  if (!p.nf && p.canal === 'shopee') return 'nf'
+  if (!p.nf && !p.nfDesconhecida && p.canal === 'shopee') return 'nf'
   const sb = p.shipBy ? p.shipBy * 1000 : null
   if (sb && sb - Date.now() > 36 * 3600000) return 'proximos'
   return 'hoje'
@@ -102,9 +113,9 @@ export default function CentralPedidosUltra() {
     if (!silencioso) { setPedidos(null); setErro(null); setSel(new Set()); setAberto(null); setPagina(1); setFundo(null); setNovos(0) }
     try {
       if (canal === 'ml') {
-        const ate = new Date(); const desde = new Date(Date.now() - dias * 86400000)
-        const iso = (dt, fim) => `${dt.toISOString().slice(0, 10)}T${fim ? '23:59:59' : '00:00:00'}.000-03:00`
-        const d1 = await api.mlPedidosEnriquecido('', 0, 60, iso(desde), iso(ate, true))
+        const dd = new Date(); dd.setDate(dd.getDate() - dias); dd.setHours(0, 0, 0, 0)
+        const iso = (x) => x, desdeIso = dd.toISOString(), ateIso = ''
+        const d1 = await api.mlPedidosEnriquecido('', 0, 25, desdeIso, ateIso)
         if (g !== geracao.current) return
         let acumulado = (d1.pedidos || []).map(adaptaML)
         if (silencioso) {
@@ -116,8 +127,8 @@ export default function CentralPedidosUltra() {
         const total = d1.paging?.total ?? acumulado.length
         if (!silencioso && total > acumulado.length) {
           setFundo({ carregados: acumulado.length, total: Math.min(total, 240) })
-          for (let off = acumulado.length; off < Math.min(total, 240); off += 90) {
-            const dx = await api.mlPedidosEnriquecido('', off, 90, iso(desde), iso(ate, true))
+          for (let off = acumulado.length; off < Math.min(total, 240); off += 60) {
+            const dx = await api.mlPedidosEnriquecido('', off, 60, desdeIso, ateIso)
             if (g !== geracao.current) return
             acumulado = acumulado.concat((dx.pedidos || []).map(adaptaML))
             acumulado.forEach((p) => idsRef.current.add(p.id))
@@ -166,7 +177,7 @@ export default function CentralPedidosUltra() {
   const projecao = fracaoDia > 0.05 ? receitaHoje / fracaoDia : receitaHoje
   const aDespachar = contagem.hoje || 0
   const pesoEstim = ((lista.filter((p) => classifica(p) === 'hoje').reduce((s, p) => s + p.qtd, 0)) * 0.32).toFixed(1)
-  const semNf = lista.filter((p) => !p.nf && !p.cancelado).length
+  const semNf = lista.filter((p) => !p.nf && !p.nfDesconhecida && !p.cancelado).length
   const naoLidas = 0
 
   const serie = useMemo(() => { const m = {}; for (const p of lista) { if (!p.criado) continue; const dt = new Date(p.criado); const k = `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}`; m[k] = (m[k] || 0) + (p.receita || 0) } return Object.entries(m).slice(-12) }, [pedidos])
@@ -270,7 +281,7 @@ export default function CentralPedidosUltra() {
   }, [pedidos, contagem])
 
   return (
-    <div className="pcuv2" style={{ '--ch': d.cor, '--chd': d.txt }}>
+    <div className="pcuv2" style={{ '--ch': d.cor, '--chd': d.txt, '--chA': hexA(d.cor, .78), '--chB': hexA(d.cor, .10), '--ch2': d.cor2 }}>
       {/* HEADER — DOM do mockup */}
       <div className="glass" style={{ padding: '16px 18px', marginBottom: 12, border: '1px solid transparent', background: `linear-gradient(var(--surface),var(--surface)) padding-box, linear-gradient(110deg, ${d.cor}88, rgba(214,0,127,.4), ${d.cor}44) border-box` }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 13, flexWrap: 'wrap' }}>
@@ -396,7 +407,7 @@ export default function CentralPedidosUltra() {
         <div className="glass" style={{ padding: '14px 15px' }}>
           <div className="up" style={{ fontSize: 8.5, color: 'var(--faint)', fontWeight: 800, marginBottom: 11, display: 'flex', alignItems: 'center', gap: 6 }}><Clock size={12} style={{ color: d.cor }} />Horários de compra · hoje ajuda a prever</div>
           <div className="heat">
-            {heat.map((v, h) => <div key={h} title={`${h}h · ${v} pedido(s)`} style={{ height: 26, borderRadius: 5, background: v ? `rgba(214,0,127,${0.15 + v / maxH * 0.7})` : 'rgba(255,255,255,.04)' }} />)}
+            {heat.map((v, h) => <div key={h} title={`${h}h · ${v} pedido(s)`} style={{ height: 26, borderRadius: 5, background: v ? hexA(d.cor, 0.18 + v / maxH * 0.62) : 'rgba(255,255,255,.04)' }} />)}
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}><span style={{ fontSize: 6.5, color: 'var(--faint)' }}>0h</span><span style={{ fontSize: 6.5, color: 'var(--faint)' }}>12h</span><span style={{ fontSize: 6.5, color: 'var(--faint)' }}>23h</span></div>
         </div>
@@ -570,7 +581,9 @@ function UltraCard({ p, d, canal, exp, densidade, onToggle, sel, onSel, baixarEt
               <b style={{ fontSize: 12.5 }}>{p.titulo}</b>
               <span className="chip" style={{ fontSize: 7.5, color: 'var(--faint)', background: 'rgba(255,255,255,.05)' }}>{p.qtd} un</span>
               {(p.compras || 0) > 1 && chip(`${p.compras}ª COMPRA`, '#1a1008', 'var(--gold, #F2C200)')}
-              {!p.nf && !p.cancelado && chip('SEM NF-E', '#fff', 'var(--danger)')}
+              {!p.nf && !p.nfDesconhecida && !p.cancelado && chip('SEM NF-E', '#fff', 'var(--danger)')}
+              {p.prejuizo && chip('PREJUÍZO', '#fff', 'var(--danger)')}
+              {!p.prejuizo && p.abaixoMeta && chip('ABAIXO DA META', '#1a1008', 'var(--warn)')}
             </div>
             <div style={{ fontSize: 9, color: 'var(--faint)', marginTop: 3 }}>#{p.id} · {p.criado ? new Date(p.criado).toLocaleDateString('pt-BR') : '—'} · {p.comprador} · <span style={{ color: 'var(--dim)' }}>{p.itens[0]?.sku || ''}</span></div>
           </div>
@@ -668,7 +681,10 @@ function UltraExpand({ p, d, canal, baixarEtiqueta, notify, agoraTs }) {
             {canal === 'shopee'
               ? <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: 9, borderRadius: 9, background: 'rgba(224,162,60,.06)', border: '1px solid rgba(224,162,60,.25)' }}>
                 <Lock size={13} style={{ color: 'var(--warn)', flex: 'none' }} />
-                <div style={{ fontSize: 9, color: 'var(--dim)', lineHeight: 1.5 }}><b style={{ color: 'var(--warn)' }}>Dados do comprador mascarados pela Shopee.</b> Nome e endereço completos saem apenas na <b>waybill oficial da SPX</b>, gerada no envio.{p.rastreio ? <> Rastreio: <span className="num">{p.rastreio}</span></> : null}</div>
+                <div style={{ fontSize: 9, color: 'var(--dim)', lineHeight: 1.5 }}>
+                  {(p.clienteReal || p.cidade) && <div style={{ fontSize: 10, color: 'var(--fg)', marginBottom: 3 }}><b>{p.clienteReal || p.comprador}</b>{p.cidade ? ` · ${p.cidade}` : ''}{p.uf ? `/${p.uf}` : ''}{p.cep ? ` · ${p.cep}` : ''}</div>}
+                  <b style={{ color: 'var(--warn)' }}>Endereço completo mascarado pela Shopee.</b> A rua e o número saem apenas na <b>waybill oficial da SPX</b>, gerada no envio.{p.rastreio ? <> Rastreio: <span className="num">{p.rastreio}</span></> : null}
+                </div>
               </div>
               : <div style={{ fontSize: 10, lineHeight: 1.65 }}>
                 <b>{p.comprador}</b>{p.uf ? ` · ${p.uf}` : ''}<br />

@@ -67,3 +67,8 @@
   .pcuv2 .risk{display:inline-flex;align-items:center;gap:6px}
   .pcuv2 .scanbox{display:flex;align-items:center;gap:10px;background:rgba(0,0,0,.3);border:2px solid var(--ch);border-radius:13px;padding:13px 16px}
 
+/* overrides por canal — paleta refinada */
+.pcuv2 .b{background:linear-gradient(180deg,var(--chA),var(--chB))}
+.pcuv2 .b.peak{background:linear-gradient(180deg,var(--ch2),var(--chA));box-shadow:0 0 18px var(--chB)}
+.pcuv2 .tab.on{background:linear-gradient(100deg,var(--ch),var(--ch2));color:#1a1008;border-color:transparent}
+.pcuv2 .tab.on .pill{background:rgba(0,0,0,.25);color:#1a1008}
