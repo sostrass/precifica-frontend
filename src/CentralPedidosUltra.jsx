@@ -27,24 +27,25 @@ function adaptaML(p) {
     qtd: (p.itens || []).reduce((s, i) => s + (i.qtd || i.quantidade || 1), 0),
     itens: (p.itens || []).map((i) => ({ nome: i.titulo || i.nome, sku: i.sku, qtd: i.qtd || i.quantidade || 1, imagem: i.imagem })),
     comprador: p.buyer?.nickname || '—', compras: p.buyer?.compras || 0,
-    status: p.status || '', criado: p.date_created, pago: p.date_paid || p.date_created,
-    receita: r.receita ?? p.valor, taxas: r.taxas, frete: r.tarifa ?? r.frete, liquido: r.liquido, margem: r.margem,
-    rastreio: p.rastreio || p.tracking, shipId: p.shipment_id || p.envio_id, uf: (p.uf || '').toUpperCase() || ((p.endereco || '').match(UF_RE) || [])[0],
+    status: p.status || '', criado: p.date_created, pago: p.date_paid || p.aprovado_em || p.date_created,
+    receita: r.receita ?? p.valor, taxas: r.taxas ?? r.taxas_mkt, frete: r.tarifa ?? r.frete, liquido: r.liquido, margem: r.margem,
+    rastreio: p.rastreio || p.tracking, shipId: p.shipment_id || p.envio_id || p.envio?.id, uf: (p.uf || p.envio?.uf || '').toUpperCase() || ((p.endereco || '').match(UF_RE) || [])[0],
     nf: p.nfe || p.nf, cancelado: /cancel/i.test(String(p.status || '')), devolucao: /return|devolu|claim|mediac/i.test(String(p.status || '')) || !!p.claim_id,
     packId: p.pack_id, buyerId: p.buyer?.id, bruto: p,
   }
 }
 function adaptaShopee(p) {
   const fin = p.financeiro || {}
+  const criadoEpoch = p.criado || p.create_time
   return {
     id: String(p.order_sn || ''), canal: 'shopee',
     titulo: (p.itens?.[0]?.nome || 'Pedido Shopee'),
     qtd: (p.itens || []).reduce((s, i) => s + (i.qtd || 1), 0),
     itens: (p.itens || []).map((i) => ({ nome: i.nome, sku: i.sku, qtd: i.qtd || 1, imagem: i.imagem, bin: i.bin })),
     comprador: p.comprador || p.buyer_username || '—', compras: p.recorrencia || 0,
-    status: p.status || '', criado: p.create_time ? new Date(p.create_time * 1000).toISOString() : null,
-    pago: p.pay_time ? new Date(p.pay_time * 1000).toISOString() : null,
-    receita: fin.receita ?? p.total, taxas: fin.taxas, frete: fin.frete, liquido: fin.liquido, margem: fin.margem,
+    status: p.status || '', criado: criadoEpoch ? new Date(criadoEpoch * 1000).toISOString() : null,
+    pago: p.pay_time ? new Date(p.pay_time * 1000).toISOString() : (criadoEpoch ? new Date(criadoEpoch * 1000).toISOString() : null),
+    receita: fin.receita ?? p.total ?? p.valor_pago, taxas: fin.taxas, frete: fin.frete, liquido: fin.liquido, margem: fin.margem,
     rastreio: p.rastreio || p.tracking_number, shipBy: p.ship_by, uf: (p.uf || '').toUpperCase() || ((p.endereco || '').match(UF_RE) || [])[0],
     nf: p.nf || (p.selo_nf === 'com_nota'), seloNf: p.selo_nf,
     cancelado: /cancel/i.test(String(p.status || '')), devolucao: /return|refund|devolu/i.test(String(p.status || '')),
@@ -74,17 +75,51 @@ export default function CentralPedidosUltra() {
   useEffect(() => { const t = setInterval(() => setAgoraTs(Date.now()), 30000); return () => clearInterval(t) }, [])
   useEffect(() => { localStorage.setItem('pcu_regras', JSON.stringify(regras)) }, [regras])
 
+  const [fundo, setFundo] = useState(null) // {carregados, total} durante a sincronização em fundo
+  const geracao = useRef(0)
+
   const carregar = async (silencioso) => {
-    if (!silencioso) { setPedidos(null); setErro(null); setSel(new Set()); setAberto(null); setPagina(1) }
+    const g = ++geracao.current
+    if (!silencioso) { setPedidos(null); setErro(null); setSel(new Set()); setAberto(null); setPagina(1); setFundo(null) }
     try {
       if (canal === 'ml') {
-        const d = await api.mlPedidos('paid', 0)
-        setPedidos((d.pedidos || []).map(adaptaML))
+        const ate = new Date(); const desde = new Date(Date.now() - 15 * 86400000)
+        const iso = (d, fim) => `${d.toISOString().slice(0, 10)}T${fim ? '23:59:59' : '00:00:00'}.000-03:00`
+        // fase 1: primeira leva (rápida, 60) — a tela abre já com dados
+        const d1 = await api.mlPedidosEnriquecido('', 0, 60, iso(desde), iso(ate, true))
+        if (g !== geracao.current) return
+        let acumulado = (d1.pedidos || []).map(adaptaML)
+        if (silencioso) {
+          // merge: atualiza os recentes e preserva os antigos já carregados (não encolhe a lista)
+          setPedidos((prev) => {
+            if (!prev) return acumulado
+            const ids = new Set(acumulado.map((p) => p.id))
+            return acumulado.concat(prev.filter((p) => !ids.has(p.id)))
+          })
+        } else setPedidos(acumulado)
+        const total = d1.paging?.total ?? acumulado.length
+        // fase 2: completa em fundo até 240 (sem travar a tela); no poll silencioso, fica só na 1ª leva
+        if (!silencioso && total > acumulado.length) {
+          setFundo({ carregados: acumulado.length, total: Math.min(total, 240) })
+          for (let off = acumulado.length; off < Math.min(total, 240); off += 90) {
+            const dx = await api.mlPedidosEnriquecido('', off, 90, iso(desde), iso(ate, true))
+            if (g !== geracao.current) return
+            acumulado = acumulado.concat((dx.pedidos || []).map(adaptaML))
+            setPedidos(acumulado.slice())
+            setFundo({ carregados: acumulado.length, total: Math.min(total, 240) })
+            if (!(dx.pedidos || []).length) break
+          }
+          setFundo(null)
+        }
       } else {
-        const d = await api.shopeePedidos(15)
+        // Shopee: rota PAGINADA do painel (server-side, rápida) — não a rota que detalha tudo
+        let d
+        try { d = await api.shopeePedidosPainel('TODOS', 15, { page: 1, page_size: 50 }) }
+        catch (_) { d = await api.shopeePedidosPainel('A_ENVIAR', 15, { page: 1, page_size: 50 }) }
+        if (g !== geracao.current) return
         setPedidos((d.pedidos || []).map(adaptaShopee))
       }
-    } catch (e) { if (!silencioso) { setErro(e.message || 'falha ao carregar'); setPedidos([]) } }
+    } catch (e) { if (!silencioso && g === geracao.current) { setErro(e.message || 'falha ao carregar'); setPedidos([]) } }
   }
   useEffect(() => { carregar() }, [canal])
   useEffect(() => {
@@ -204,6 +239,14 @@ export default function CentralPedidosUltra() {
         ))}
         <button onClick={() => carregar()} className="glass rounded-xl p-2 text-dim hover:text-fg" title="Sincronizar"><RefreshCw size={13} /></button>
       </div>
+
+      {fundo && (
+        <div className="glass rounded-xl px-3 py-2 flex items-center gap-2.5">
+          <Loader2 size={12} className="animate-spin" style={{ color: cor }} />
+          <span className="text-[9.5px] text-dim">Sincronizando em segundo plano — <b className="num">{fundo.carregados}</b> de <b className="num">{fundo.total}</b> pedidos. Você já pode trabalhar; os números se completam sozinhos.</span>
+          <div className="flex-1 h-1 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,.07)', maxWidth: 160 }}><div className="h-full rounded-full" style={{ width: `${Math.round(fundo.carregados / Math.max(1, fundo.total) * 100)}%`, background: cor }} /></div>
+        </div>
+      )}
 
       {/* ══ fila operacional ══ */}
       <div className="flex items-center gap-2 flex-wrap">
