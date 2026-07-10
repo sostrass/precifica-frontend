@@ -1,24 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Package, ShoppingBag, Globe, Truck, Clock, AlertTriangle, Box, Search, ChevronDown, ChevronRight,
-  ChevronLeft, Zap, Layers, MapPin, FileText, Printer, Tag, Check, CheckCheck, X, ScanLine, Barcode,
-  ShieldCheck, Wallet, Send, Sparkles, Settings, TrendingUp, RefreshCw, Loader2, User, Repeat, PlusCircle,
+  Package, ShoppingBag, Globe, Truck, Clock, AlertTriangle, Box, Search, ChevronRight, ChevronLeft,
+  Zap, Layers, MapPin, FileText, Printer, Tag, Check, CheckCheck, X, ScanLine, Barcode, ShieldCheck,
+  DollarSign, Send, Sparkles, Settings, RefreshCw, Loader2, User, Repeat, Star, CreditCard, Eye, Lock, CalendarDays,
 } from 'lucide-react'
 import { api } from './api.js'
 import { useToast } from './toast.jsx'
+import './central-ultra.css'
 
-const ML = '#F2C200'
-const SP = '#EE4D2D'
-const OK = '#2FD98D'
-const WARN = '#E0A23C'
-const DANGER = '#FF7A7A'
-const PURPLE = '#a06be8'
-const TEAL = '#2FC9D9'
+const OK = 'var(--ok)'
+const WARN = 'var(--warn)'
+const DANGER = 'var(--danger)'
 const brl = (v) => (v == null ? '—' : Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }))
 const UF_RE = /\b(AC|AL|AP|AM|BA|CE|DF|ES|GO|MA|MT|MS|MG|PA|PB|PR|PE|PI|RJ|RN|RS|RO|RR|SC|SP|SE|TO)\b/
+const CH = {
+  ml: { nome: 'Mercado Livre', cor: '#F2C200', txt: '#1a1008', freteRot: 'Frete ML', brand: 'linear-gradient(135deg,#F2C200,#b8940a)' },
+  shopee: { nome: 'Shopee', cor: '#EE4D2D', txt: '#fff', freteRot: 'Frete', brand: 'linear-gradient(135deg,#EE4D2D,#a52c15)' },
+}
 
-// ————————————————————————————— adaptadores de canal —————————————————————————————
-// Normalizam ML e Shopee para o MESMO formato do layout (o mockup é um só).
+// ————— adaptadores: normalizam ML e Shopee para o layout ÚNICO do mockup —————
 function adaptaML(p) {
   const r = p.resumo || {}
   return {
@@ -26,85 +26,101 @@ function adaptaML(p) {
     titulo: (p.itens?.[0]?.titulo || p.itens?.[0]?.nome || 'Pedido ML'),
     qtd: (p.itens || []).reduce((s, i) => s + (i.qtd || i.quantidade || 1), 0),
     itens: (p.itens || []).map((i) => ({ nome: i.titulo || i.nome, sku: i.sku, qtd: i.qtd || i.quantidade || 1, imagem: i.imagem })),
-    comprador: p.buyer?.nickname || '—', compras: p.buyer?.compras || 0,
+    comprador: p.buyer?.nickname || '—', compras: p.buyer?.compras || 0, buyerId: p.buyer?.id, packId: p.pack_id,
     status: p.status || '', criado: p.date_created, pago: p.date_paid || p.aprovado_em || p.date_created,
-    receita: r.receita ?? p.valor, taxas: r.taxas ?? r.taxas_mkt, frete: r.tarifa ?? r.frete, liquido: r.liquido, margem: r.margem,
-    rastreio: p.rastreio || p.tracking, shipId: p.shipment_id || p.envio_id || p.envio?.id, uf: (p.uf || p.envio?.uf || '').toUpperCase() || ((p.endereco || '').match(UF_RE) || [])[0],
-    nf: p.nfe || p.nf, cancelado: /cancel/i.test(String(p.status || '')), devolucao: /return|devolu|claim|mediac/i.test(String(p.status || '')) || !!p.claim_id,
-    packId: p.pack_id, buyerId: p.buyer?.id, bruto: p,
+    receita: r.receita ?? p.valor, taxas: r.taxas ?? r.taxas_mkt, frete: r.tarifa ?? r.frete, liquido: r.liquido, margem: r.margem, alvo: p.preco_bling,
+    rastreio: p.rastreio || p.tracking, shipId: p.shipment_id || p.envio_id || p.envio?.id,
+    uf: (p.uf || p.envio?.uf || '').toUpperCase() || ((p.endereco || '').match(UF_RE) || [])[0],
+    nf: !!(p.nfe || p.nf), cancelado: /cancel/i.test(String(p.status || '')),
+    devolucao: /return|devolu|claim|mediac/i.test(String(p.status || '')) || !!p.claim_id, bruto: p,
   }
 }
 function adaptaShopee(p) {
   const fin = p.financeiro || {}
-  const criadoEpoch = p.criado || p.create_time
+  const cr = p.criado || p.create_time
   return {
     id: String(p.order_sn || ''), canal: 'shopee',
     titulo: (p.itens?.[0]?.nome || 'Pedido Shopee'),
     qtd: (p.itens || []).reduce((s, i) => s + (i.qtd || 1), 0),
     itens: (p.itens || []).map((i) => ({ nome: i.nome, sku: i.sku, qtd: i.qtd || 1, imagem: i.imagem, bin: i.bin })),
     comprador: p.comprador || p.buyer_username || '—', compras: p.recorrencia || 0,
-    status: p.status || '', criado: criadoEpoch ? new Date(criadoEpoch * 1000).toISOString() : null,
-    pago: p.pay_time ? new Date(p.pay_time * 1000).toISOString() : (criadoEpoch ? new Date(criadoEpoch * 1000).toISOString() : null),
+    status: p.status || '', criado: cr ? new Date(cr * 1000).toISOString() : null,
+    pago: p.pay_time ? new Date(p.pay_time * 1000).toISOString() : (cr ? new Date(cr * 1000).toISOString() : null),
     receita: fin.receita ?? p.total ?? p.valor_pago, taxas: fin.taxas, frete: fin.frete, liquido: fin.liquido, margem: fin.margem,
-    rastreio: p.rastreio || p.tracking_number, shipBy: p.ship_by, uf: (p.uf || '').toUpperCase() || ((p.endereco || '').match(UF_RE) || [])[0],
-    nf: p.nf || (p.selo_nf === 'com_nota'), seloNf: p.selo_nf,
-    cancelado: /cancel/i.test(String(p.status || '')), devolucao: /return|refund|devolu/i.test(String(p.status || '')),
-    bruto: p,
+    rastreio: p.rastreio || p.tracking_number, shipBy: p.ship_by,
+    uf: (p.uf || '').toUpperCase() || ((p.endereco || '').match(UF_RE) || [])[0],
+    nf: !!(p.nf || p.selo_nf === 'com_nota'), seloNf: p.selo_nf,
+    cancelado: /cancel/i.test(String(p.status || '')), devolucao: /return|refund|devolu/i.test(String(p.status || '')), bruto: p,
   }
 }
 
-// ————————————————————————————— componente principal —————————————————————————————
+const ABAS_DEF = [
+  ['todos', 'Todos', Layers], ['hoje', 'A despachar hoje', Zap], ['proximos', 'Próximos dias', CalendarDays],
+  ['nf', 'Aguardando NF-e', FileText], ['transito', 'Em trânsito', Truck], ['fim', 'Finalizados', Check], ['cancel', 'Cancelados', X],
+]
+function classifica(p) {
+  if (p.cancelado) return 'cancel'
+  if (/deliver|entreg|complet|finaliz/i.test(p.status)) return 'fim'
+  if (/shipped|enviado|transit|transito/i.test(p.status)) return 'transito'
+  if (!p.nf && p.canal === 'shopee') return 'nf'
+  const sb = p.shipBy ? p.shipBy * 1000 : null
+  if (sb && sb - Date.now() > 36 * 3600000) return 'proximos'
+  return 'hoje'
+}
+
 export default function CentralPedidosUltra() {
   const notify = useToast()
   const [canal, setCanal] = useState('ml')
+  const [dias, setDias] = useState(15)
   const [pedidos, setPedidos] = useState(null)
   const [erro, setErro] = useState(null)
+  const [fundo, setFundo] = useState(null)
+  const [aba, setAba] = useState('todos')
+  const [pgto, setPgto] = useState('todos')
+  const [densidade, setDensidade] = useState('conf')
   const [busca, setBusca] = useState('')
   const [ordem, setOrdem] = useState('recentes')
   const [pagina, setPagina] = useState(1)
   const [aberto, setAberto] = useState(null)
   const [sel, setSel] = useState(() => new Set())
-  const [mesa, setMesa] = useState(false)
+  const [modal, setModal] = useState(null) // 'sep' | 'imp' | 'etq' | 'mesa'
   const [mesaIdx, setMesaIdx] = useState(0)
   const [mesaConf, setMesaConf] = useState({})
+  const [novos, setNovos] = useState(0)
   const [regras, setRegras] = useState(() => { try { return JSON.parse(localStorage.getItem('pcu_regras') || '{"nf_imprime":true,"risco_segura":true,"presente_selo":false}') } catch (_) { return { nf_imprime: true, risco_segura: true, presente_selo: false } } })
   const [agoraTs, setAgoraTs] = useState(Date.now())
+  const geracao = useRef(0)
+  const idsRef = useRef(new Set())
   const POR_PAG = 10
-  const cor = canal === 'ml' ? ML : SP
+  const d = CH[canal]
 
   useEffect(() => { const t = setInterval(() => setAgoraTs(Date.now()), 30000); return () => clearInterval(t) }, [])
   useEffect(() => { localStorage.setItem('pcu_regras', JSON.stringify(regras)) }, [regras])
 
-  const [fundo, setFundo] = useState(null) // {carregados, total} durante a sincronização em fundo
-  const geracao = useRef(0)
-
   const carregar = async (silencioso) => {
     const g = ++geracao.current
-    if (!silencioso) { setPedidos(null); setErro(null); setSel(new Set()); setAberto(null); setPagina(1); setFundo(null) }
+    if (!silencioso) { setPedidos(null); setErro(null); setSel(new Set()); setAberto(null); setPagina(1); setFundo(null); setNovos(0) }
     try {
       if (canal === 'ml') {
-        const ate = new Date(); const desde = new Date(Date.now() - 15 * 86400000)
-        const iso = (d, fim) => `${d.toISOString().slice(0, 10)}T${fim ? '23:59:59' : '00:00:00'}.000-03:00`
-        // fase 1: primeira leva (rápida, 60) — a tela abre já com dados
+        const ate = new Date(); const desde = new Date(Date.now() - dias * 86400000)
+        const iso = (dt, fim) => `${dt.toISOString().slice(0, 10)}T${fim ? '23:59:59' : '00:00:00'}.000-03:00`
         const d1 = await api.mlPedidosEnriquecido('', 0, 60, iso(desde), iso(ate, true))
         if (g !== geracao.current) return
         let acumulado = (d1.pedidos || []).map(adaptaML)
         if (silencioso) {
-          // merge: atualiza os recentes e preserva os antigos já carregados (não encolhe a lista)
-          setPedidos((prev) => {
-            if (!prev) return acumulado
-            const ids = new Set(acumulado.map((p) => p.id))
-            return acumulado.concat(prev.filter((p) => !ids.has(p.id)))
-          })
+          const chegaram = acumulado.filter((p) => !idsRef.current.has(p.id)).length
+          if (chegaram > 0) setNovos((n) => n + chegaram)
+          setPedidos((prev) => { if (!prev) return acumulado; const ids = new Set(acumulado.map((p) => p.id)); return acumulado.concat(prev.filter((p) => !ids.has(p.id))) })
         } else setPedidos(acumulado)
+        acumulado.forEach((p) => idsRef.current.add(p.id))
         const total = d1.paging?.total ?? acumulado.length
-        // fase 2: completa em fundo até 240 (sem travar a tela); no poll silencioso, fica só na 1ª leva
         if (!silencioso && total > acumulado.length) {
           setFundo({ carregados: acumulado.length, total: Math.min(total, 240) })
           for (let off = acumulado.length; off < Math.min(total, 240); off += 90) {
             const dx = await api.mlPedidosEnriquecido('', off, 90, iso(desde), iso(ate, true))
             if (g !== geracao.current) return
             acumulado = acumulado.concat((dx.pedidos || []).map(adaptaML))
+            acumulado.forEach((p) => idsRef.current.add(p.id))
             setPedidos(acumulado.slice())
             setFundo({ carregados: acumulado.length, total: Math.min(total, 240) })
             if (!(dx.pedidos || []).length) break
@@ -112,402 +128,658 @@ export default function CentralPedidosUltra() {
           setFundo(null)
         }
       } else {
-        // Shopee: rota PAGINADA do painel (server-side, rápida) — não a rota que detalha tudo
-        let d
-        try { d = await api.shopeePedidosPainel('TODOS', 15, { page: 1, page_size: 50 }) }
-        catch (_) { d = await api.shopeePedidosPainel('A_ENVIAR', 15, { page: 1, page_size: 50 }) }
+        let r
+        try { r = await api.shopeePedidosPainel('TODOS', dias, { page: 1, page_size: 50 }) }
+        catch (_) { r = await api.shopeePedidosPainel('A_ENVIAR', dias, { page: 1, page_size: 50 }) }
         if (g !== geracao.current) return
-        setPedidos((d.pedidos || []).map(adaptaShopee))
+        const arr = (r.pedidos || []).map(adaptaShopee)
+        if (silencioso) {
+          const chegaram = arr.filter((p) => !idsRef.current.has(p.id)).length
+          if (chegaram > 0) setNovos((n) => n + chegaram)
+        }
+        arr.forEach((p) => idsRef.current.add(p.id))
+        setPedidos(arr)
       }
     } catch (e) { if (!silencioso && g === geracao.current) { setErro(e.message || 'falha ao carregar'); setPedidos([]) } }
   }
-  useEffect(() => { carregar() }, [canal])
+  useEffect(() => { idsRef.current = new Set(); carregar() }, [canal, dias])
   useEffect(() => {
     const tick = () => { if (document.visibilityState === 'visible') carregar(true) }
     const t = setInterval(tick, 60000)
-    document.addEventListener('visibilitychange', tick)
-    return () => { clearInterval(t); document.removeEventListener('visibilitychange', tick) }
-  }, [canal])
+    return () => clearInterval(t)
+  }, [canal, dias])
 
-  // ————————— derivados (KPIs, projeção, ABC, UFs, coorte) —————————
+  // ————— derivados —————
   const lista = pedidos || []
-  const aDespachar = lista.filter((p) => !p.cancelado && !/deliver|entreg|shipped|enviado|complet|finaliz/i.test(p.status))
+  const contagem = useMemo(() => { const c = { todos: lista.length }; for (const a of ABAS_DEF) if (a[0] !== 'todos') c[a[0]] = 0; for (const p of lista) c[classifica(p)] = (c[classifica(p)] || 0) + 1; return c }, [pedidos])
   const receitaTot = lista.reduce((s, p) => s + (p.receita || 0), 0)
   const liquidoTot = lista.reduce((s, p) => s + (p.liquido || 0), 0)
   const taxasTot = lista.reduce((s, p) => s + (p.taxas || 0), 0)
+  const freteTot = lista.reduce((s, p) => s + (p.frete || 0), 0)
+  const unidades = lista.reduce((s, p) => s + p.qtd, 0)
   const ticket = lista.length ? receitaTot / lista.length : 0
   const margemMedia = receitaTot > 0 ? Math.round(liquidoTot / receitaTot * 100) : 0
-  const pesoEstimado = (aDespachar.reduce((s, p) => s + p.qtd, 0) * 0.32).toFixed(1)
-
-  const hoje = new Date(); hoje.setHours(0, 0, 0, 0)
-  const pedidosHoje = lista.filter((p) => p.criado && new Date(p.criado) >= hoje)
+  const hoje0 = new Date(); hoje0.setHours(0, 0, 0, 0)
+  const pedidosHoje = lista.filter((p) => p.criado && new Date(p.criado) >= hoje0)
   const receitaHoje = pedidosHoje.reduce((s, p) => s + (p.receita || 0), 0)
-  const fracaoDia = Math.min(1, (Date.now() - hoje.getTime()) / 86400000)
+  const fracaoDia = Math.min(1, (agoraTs - hoje0.getTime()) / 86400000)
   const projecao = fracaoDia > 0.05 ? receitaHoje / fracaoDia : receitaHoje
+  const aDespachar = contagem.hoje || 0
+  const pesoEstim = ((lista.filter((p) => classifica(p) === 'hoje').reduce((s, p) => s + p.qtd, 0)) * 0.32).toFixed(1)
+  const semNf = lista.filter((p) => !p.nf && !p.cancelado).length
+  const naoLidas = 0
 
-  const porDia = useMemo(() => {
-    const m = {}
-    for (const p of lista) { if (!p.criado) continue; const d = new Date(p.criado); const k = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`; m[k] = (m[k] || 0) + (p.receita || 0) }
-    return Object.entries(m).slice(-12)
-  }, [pedidos])
-
+  const serie = useMemo(() => { const m = {}; for (const p of lista) { if (!p.criado) continue; const dt = new Date(p.criado); const k = `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}`; m[k] = (m[k] || 0) + (p.receita || 0) } return Object.entries(m).slice(-12) }, [pedidos])
+  const maxS = Math.max(1, ...serie.map(([, v]) => v))
+  const peakIdx = serie.reduce((bi, [, v], i, a) => (v > a[bi][1] ? i : bi), 0)
+  const heat = useMemo(() => { const h = Array(24).fill(0); for (const p of lista) if (p.criado) h[new Date(p.criado).getHours()]++; return h }, [pedidos])
+  const maxH = Math.max(1, ...heat)
   const abc = useMemo(() => {
     const porSku = {}
     for (const p of lista) for (const it of p.itens) { const k = it.sku || it.nome; porSku[k] = (porSku[k] || 0) + ((p.receita || 0) / Math.max(1, p.itens.length)) }
-    const ord = Object.values(porSku).sort((a, b) => b - a)
-    const tot = ord.reduce((s, v) => s + v, 0) || 1
+    const ord = Object.values(porSku).sort((a, b) => b - a); const tot = ord.reduce((s, v) => s + v, 0) || 1
     let acc = 0, nA = 0, nB = 0
     for (const v of ord) { acc += v; if (acc / tot <= 0.65) nA++; else if (acc / tot <= 0.9) nB++ }
-    const somaA = ord.slice(0, nA).reduce((s, v) => s + v, 0), somaB = ord.slice(nA, nA + nB).reduce((s, v) => s + v, 0)
-    return { a: { n: nA, pct: Math.round(somaA / tot * 100) }, b: { n: nB, pct: Math.round(somaB / tot * 100) }, c: { n: Math.max(0, ord.length - nA - nB), pct: Math.max(0, 100 - Math.round(somaA / tot * 100) - Math.round(somaB / tot * 100)) } }
+    const sA = ord.slice(0, nA).reduce((s, v) => s + v, 0), sB = ord.slice(nA, nA + nB).reduce((s, v) => s + v, 0)
+    const pA = Math.round(sA / tot * 100), pB = Math.round(sB / tot * 100)
+    return [['A', `${nA} SKU(s) carregam`, pA, 'var(--ok)'], ['B', `${nB} SKU(s) somam`, pB, 'var(--warn)'], ['C', `${Math.max(0, ord.length - nA - nB)} SKU(s) restantes`, Math.max(0, 100 - pA - pB), 'var(--faint)']]
   }, [pedidos])
+  const ufs = useMemo(() => { const m = {}; let tot = 0; for (const p of lista) if (p.uf) { m[p.uf] = (m[p.uf] || 0) + 1; tot++ } return { top: Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([uf, n]) => [uf, Math.round(n / tot * 100)]), tot } }, [pedidos])
+  const coorte = useMemo(() => { const n = lista.filter((p) => (p.compras || 0) > 1).length; return lista.length ? Math.round(n / lista.length * 100) : 0 }, [pedidos])
 
-  const ufs = useMemo(() => {
-    const m = {}; let tot = 0
-    for (const p of lista) if (p.uf) { m[p.uf] = (m[p.uf] || 0) + 1; tot++ }
-    return { top: Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([uf, n]) => [uf, Math.round(n / tot * 100)]), tot }
-  }, [pedidos])
-
-  const coorte = useMemo(() => {
-    const n = lista.filter((p) => (p.compras || 0) > 1).length
-    return lista.length ? Math.round(n / lista.length * 100) : 0
-  }, [pedidos])
-
-  // corte da coleta: 15h padrão (ajustável no futuro via config)
   const corteMs = (() => { const alvo = new Date(); alvo.setHours(15, 0, 0, 0); return alvo - agoraTs })()
-  const corteTxt = corteMs <= 0 ? 'coleta de hoje encerrada' : `em ${Math.floor(corteMs / 3600000)}h ${String(Math.floor((corteMs % 3600000) / 60000)).padStart(2, '0')}m`
-  const corteCor = corteMs <= 0 ? 'var(--faint)' : corteMs < 3600000 ? DANGER : corteMs < 3 * 3600000 ? WARN : OK
+  const corteTxt = corteMs <= 0 ? 'ENCERRADO HOJE' : `CORTE EM ${Math.floor(corteMs / 3600000)}H ${String(Math.floor((corteMs % 3600000) / 60000)).padStart(2, '0')}M`
+  const corteCor = corteMs <= 0 ? 'var(--faint)' : corteMs < 3600000 ? 'var(--danger)' : 'var(--warn)'
 
-  // ————————— busca / ordenação / paginação —————————
   const filtrados = useMemo(() => {
     const q = busca.trim().toLowerCase()
     let arr = lista
+    if (aba !== 'todos') arr = arr.filter((p) => classifica(p) === aba)
+    if (pgto === 'pagos') arr = arr.filter((p) => p.pago)
+    if (pgto === 'aguard') arr = arr.filter((p) => !p.pago)
     if (q) arr = arr.filter((p) => [p.id, p.titulo, p.comprador, p.rastreio, ...(p.itens.map((i) => i.sku))].join(' ').toLowerCase().includes(q))
-    arr = arr.slice().sort((a, b) => {
+    return arr.slice().sort((a, b) => {
       if (ordem === 'antigos') return new Date(a.criado || 0) - new Date(b.criado || 0)
-      if (ordem === 'prioridade') return (b.devolucao - a.devolucao) || (b.cancelado - a.cancelado) || new Date(a.criado || 0) - new Date(b.criado || 0)
+      if (ordem === 'prioridade') return (b.devolucao - a.devolucao) || (b.cancelado - a.cancelado) || ((a.shipBy || 9e12) - (b.shipBy || 9e12))
       return new Date(b.criado || 0) - new Date(a.criado || 0)
     })
-    return arr
-  }, [pedidos, busca, ordem])
+  }, [pedidos, aba, pgto, busca, ordem])
   const nPag = Math.max(1, Math.ceil(filtrados.length / POR_PAG))
   const pageItems = filtrados.slice((pagina - 1) * POR_PAG, pagina * POR_PAG)
-  useEffect(() => { setPagina(1) }, [busca, ordem])
+  useEffect(() => { setPagina(1) }, [busca, ordem, aba, pgto])
 
   const toggleSel = (id) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
-
-  // atalhos: J/K/E/esc/B/M
   useEffect(() => {
     const onKey = (e) => {
       const tag = (e.target && e.target.tagName) || ''
       if (tag === 'INPUT' || tag === 'TEXTAREA') { if (e.key === 'Escape') e.target.blur(); return }
-      const ids = pageItems.map((p) => p.id)
-      const idx = ids.indexOf(aberto)
+      const ids = pageItems.map((p) => p.id); const idx = ids.indexOf(aberto)
       if (e.key === 'j' || e.key === 'ArrowDown') { e.preventDefault(); setAberto(ids[Math.min(ids.length - 1, idx < 0 ? 0 : idx + 1)] || null) }
       else if (e.key === 'k' || e.key === 'ArrowUp') { e.preventDefault(); setAberto(ids[Math.max(0, idx < 0 ? 0 : idx - 1)] || null) }
       else if (e.key === 'e') { e.preventDefault(); setAberto(null) }
-      else if (e.key === 'm') { e.preventDefault(); setMesaIdx(0); setMesa(true) }
+      else if (e.key === 'm') { e.preventDefault(); setMesaIdx(0); setModal('mesa') }
       else if (e.key === 'b') { e.preventDefault(); document.querySelector('[data-pcu-busca]')?.focus() }
-      else if (e.key === 'Escape') { setAberto(null); setMesa(false); setSel(new Set()) }
+      else if (e.key === 'Escape') { setAberto(null); setModal(null); setSel(new Set()) }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [pageItems, aberto])
 
-  // ações reais
-  const baixarEtiquetas = async () => {
+  const baixarEtiquetas = async (soUm) => {
     try {
+      const alvo = soUm ? [soUm] : [...sel]
       if (canal === 'ml') {
-        const ids = [...sel].map((id) => (lista.find((p) => p.id === id) || {}).shipId).filter(Boolean)
-        if (!ids.length) return notify('Nenhum envio com etiqueta disponível na seleção.', 'warn')
+        const ids = alvo.map((id) => (lista.find((p) => p.id === id) || {}).shipId).filter(Boolean)
+        if (!ids.length) return notify('Nenhum envio com etiqueta disponível.', 'warn')
         await api.mlEtiqueta(ids.join(','))
-      } else {
-        await api.shopeeEtiquetaOficial([...sel], 'auto')
-      }
+      } else await api.shopeeEtiquetaOficial(alvo, 'auto')
       notify('Etiqueta(s) geradas.', 'ok')
     } catch (e) { notify(e.message || 'Falha na etiqueta', 'danger') }
   }
 
-  return (
-    <div className="space-y-3 pb-10">
-      {/* ══ seletor de canal (o layout é UM só — o mockup) ══ */}
-      <div className="glass rounded-2xl p-1.5 flex items-center gap-1.5" style={{ border: '1px solid transparent', background: 'linear-gradient(var(--surface),var(--surface)) padding-box, linear-gradient(110deg, rgba(242,194,0,.35), rgba(238,77,45,.35)) border-box' }}>
-        <div className="flex items-center gap-1.5 px-2"><Package size={15} style={{ color: 'var(--accent)' }} /><span className="text-[11px] font-semibold hidden sm:inline">Central de Pedidos</span><span className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded-full" style={{ color: '#1a1008', background: 'linear-gradient(90deg,#F2C200,#EE4D2D)' }}>ULTRA · ML ⇄ SHOPEE</span></div>
-        <div className="flex-1" />
-        {[['ml', 'Mercado Livre', Globe, ML], ['shopee', 'Shopee', ShoppingBag, SP]].map(([id, label, Icon, c]) => (
-          <button key={id} onClick={() => setCanal(id)} className="flex items-center gap-2 px-4 py-2 rounded-xl text-[12px] font-semibold" style={canal === id ? { background: c, color: id === 'ml' ? '#1a1008' : '#fff', boxShadow: `0 6px 16px ${c}44` } : { color: 'var(--dim)' }}><Icon size={14} />{label}</button>
-        ))}
-        <button onClick={() => carregar()} className="glass rounded-xl p-2 text-dim hover:text-fg" title="Sincronizar"><RefreshCw size={13} /></button>
-      </div>
-
-      {fundo && (
-        <div className="glass rounded-xl px-3 py-2 flex items-center gap-2.5">
-          <Loader2 size={12} className="animate-spin" style={{ color: cor }} />
-          <span className="text-[9.5px] text-dim">Sincronizando em segundo plano — <b className="num">{fundo.carregados}</b> de <b className="num">{fundo.total}</b> pedidos. Você já pode trabalhar; os números se completam sozinhos.</span>
-          <div className="flex-1 h-1 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,.07)', maxWidth: 160 }}><div className="h-full rounded-full" style={{ width: `${Math.round(fundo.carregados / Math.max(1, fundo.total) * 100)}%`, background: cor }} /></div>
-        </div>
-      )}
-
-      {/* ══ fila operacional ══ */}
-      <div className="flex items-center gap-2 flex-wrap">
-        {[
-          [Package, 'A despachar hoje', aDespachar.length, cor],
-          [Clock, canal === 'ml' ? 'Etiqueta libera depois' : 'Drop-off disponível', canal === 'ml' ? lista.filter((p) => !p.rastreio && !p.cancelado).length : 'sim', WARN],
-          [AlertTriangle, 'Atenção (devolução/cancelado)', lista.filter((p) => p.devolucao || p.cancelado).length, DANGER],
-          [Box, 'Volumes · peso estimado', `${aDespachar.reduce((s, p) => s + p.qtd, 0)} · ${pesoEstimado}kg`, '#5B8DEF'],
-        ].map(([Icon, lab, val, c], i) => (
-          <div key={i} className="glass rounded-xl px-3 py-2 flex items-center gap-2.5">
-            <Icon size={13} style={{ color: c }} />
-            <span className="text-[9.5px] text-faint">{lab}</span>
-            <b className="num text-[12px]" style={{ color: c }}>{val}</b>
-          </div>
-        ))}
-      </div>
-
-      {/* ══ faixa de coleta com corte dinâmico ══ */}
-      <div className="glass rounded-2xl px-4 py-3 flex items-center gap-4 flex-wrap" style={{ borderLeft: `3px solid ${corteCor}`, background: `linear-gradient(110deg, ${corteCor}12, transparent)` }}>
-        <span className="text-[8px] font-bold uppercase px-2 py-1 rounded-full flex items-center gap-1" style={{ color: '#1a1008', background: corteCor === 'var(--faint)' ? WARN : corteCor }}><Clock size={9} /> corte {corteTxt}</span>
-        <span className="text-[11px] text-dim flex items-center gap-1.5"><Truck size={13} style={{ color: cor }} /> <b>Coleta de hoje</b> · janela da transportadora à tarde · o alerta muda de cor a 1h do corte</span>
-        <div className="flex-1" />
-        <button onClick={() => { setMesaIdx(0); setMesa(true) }} className="glass rounded-xl px-3 py-1.5 text-[10.5px] font-semibold text-dim hover:text-fg flex items-center gap-1.5"><ScanLine size={12} /> Mesa de Despacho</button>
-      </div>
-
-      {/* ══ KPIs ══ */}
-      <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(6,1fr)' }}>
-        {[
-          ['Pedidos · período', lista.length, `${lista.reduce((s, p) => s + p.qtd, 0)} un.`, 'var(--fg)'],
-          ['Receita', brl(receitaTot), 'no período', 'var(--fg)'],
-          ['Ticket médio', brl(ticket), 'por pedido', 'var(--fg)'],
-          ['Custos do canal', taxasTot ? `-${brl(taxasTot)}` : '—', receitaTot ? `${Math.round(taxasTot / receitaTot * 100)}% da receita` : '', WARN],
-          ['Líquido', brl(liquidoTot), `margem ${margemMedia}%`, OK],
-          ['Hoje', brl(receitaHoje), `${pedidosHoje.length} pedido(s)`, cor],
-        ].map(([lab, val, sub, c], i) => (
-          <div key={i} className="glass rounded-xl px-3 py-2.5">
-            <div className="text-[7px] font-bold uppercase tracking-wider text-faint">{lab}</div>
-            <b className="num text-[15px]" style={{ color: c }}>{val}</b>
-            <div className="text-[8px] text-faint">{sub}</div>
-          </div>
-        ))}
-      </div>
-
-      <UltraAnalytics porDia={porDia} projecao={projecao} receitaHoje={receitaHoje} fracaoDia={fracaoDia} abc={abc} ufs={ufs} coorte={coorte} cor={cor} />
-      <UltraRegras regras={regras} setRegras={setRegras} cor={cor} />
-
-      {/* ══ busca + ordenar + paginação ══ */}
-      <div className="glass rounded-2xl px-3 py-2 flex items-center gap-2 flex-wrap">
-        <Search size={13} className="text-faint" />
-        <input data-pcu-busca value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar por pedido, comprador, produto, SKU, rastreio…" className="flex-1 bg-transparent text-[12px] outline-none min-w-[180px]" />
-        <div className="flex items-center gap-1">
-          {[['recentes', 'Recentes'], ['antigos', 'Antigos'], ['prioridade', 'Prioridade']].map(([id, l]) => (
-            <button key={id} onClick={() => setOrdem(id)} className="text-[9.5px] font-bold px-2.5 py-1 rounded-full" style={ordem === id ? { background: 'var(--accent)', color: '#fff' } : { color: 'var(--faint)' }}>{l}</button>
-          ))}
-        </div>
-        <div className="flex items-center gap-1.5 text-[10px] text-faint">
-          <button onClick={() => setPagina((p) => Math.max(1, p - 1))} disabled={pagina <= 1} className="glass rounded-lg p-1 disabled:opacity-30"><ChevronLeft size={12} /></button>
-          <span className="num">pág. {pagina} de {nPag} · {filtrados.length}</span>
-          <button onClick={() => setPagina((p) => Math.min(nPag, p + 1))} disabled={pagina >= nPag} className="glass rounded-lg p-1 disabled:opacity-30"><ChevronRight size={12} /></button>
-        </div>
-      </div>
-
-      {/* ══ lista com expansão inline ══ */}
-      {erro && <div className="glass rounded-2xl p-4 text-[11px] text-dim flex items-center gap-2"><AlertTriangle size={14} style={{ color: DANGER }} /> {erro} <button onClick={() => carregar()} className="underline">tentar de novo</button></div>}
-      {pedidos === null ? <div className="glass rounded-2xl p-6 flex items-center gap-2 text-dim text-[12px]"><Loader2 size={15} className="animate-spin" /> carregando os pedidos…</div>
-        : pageItems.length === 0 ? <div className="glass rounded-2xl p-6 text-center text-[11px] text-faint">Nenhum pedido {busca ? 'para esta busca' : 'no período'}.</div>
-          : <div className="space-y-2">{pageItems.map((p) => (
-            <UltraCard key={p.id} p={p} cor={cor} aberto={aberto === p.id} onToggle={() => setAberto(aberto === p.id ? null : p.id)}
-              sel={sel.has(p.id)} onSel={() => toggleSel(p.id)} canal={canal} notify={notify} agoraTs={agoraTs} />
-          ))}</div>}
-
-      {/* ══ seleção em massa flutuante ══ */}
-      {sel.size > 0 && (
-        <div className="fixed left-1/2 z-40 flex items-center gap-2 rounded-2xl px-4 py-2.5" style={{ bottom: 46, transform: 'translateX(-50%)', background: 'rgba(28,16,24,.97)', border: '1px solid rgba(214,0,127,.5)', boxShadow: '0 16px 48px rgba(0,0,0,.55)' }}>
-          <span className="text-[8px] font-bold uppercase px-2 py-1 rounded-full text-white" style={{ background: 'var(--accent)' }}>{sel.size} selecionado{sel.size > 1 ? 's' : ''}</span>
-          <button onClick={baixarEtiquetas} className="flex items-center gap-1.5 text-[10px] font-bold px-3 py-1.5 rounded-lg" style={{ background: cor, color: canal === 'ml' ? '#1a1008' : '#fff' }}><Tag size={11} /> Etiquetas</button>
-          <button onClick={() => { setMesaIdx(0); setMesa(true) }} className="glass flex items-center gap-1.5 text-[10px] px-3 py-1.5 rounded-lg text-dim hover:text-fg"><ScanLine size={11} /> Mesa</button>
-          <button onClick={() => setSel(new Set())} className="text-[8.5px] text-faint">esc limpa</button>
-        </div>
-      )}
-
-      {/* ══ barra de atalhos ══ */}
-      <div className="fixed left-0 right-0 bottom-0 z-30 flex items-center justify-center gap-4 py-1.5 text-[8.5px] text-faint" style={{ background: 'rgba(18,9,16,.95)', borderTop: '1px solid var(--glass-border)' }}>
-        <span><Kbd>J</Kbd>/<Kbd>K</Kbd> navega</span><span><Kbd>E</Kbd> recolhe</span><span><Kbd>M</Kbd> mesa</span><span><Kbd>B</Kbd> busca</span><span><Kbd>esc</Kbd> limpa</span>
-      </div>
-
-      {mesa && <UltraMesa fila={aDespachar} idx={mesaIdx} setIdx={setMesaIdx} conf={mesaConf} setConf={setMesaConf} onFechar={() => setMesa(false)} cor={cor} />}
+  const filaChip = (Icon, lab, val, c) => (
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '6px 11px', borderRadius: 10, background: 'rgba(0,0,0,.2)', border: '1px solid var(--glass-border)' }}>
+      <Icon size={12} style={{ color: c }} /><span style={{ fontSize: 9, color: 'var(--dim)' }}>{lab}</span><b className="num" style={{ fontSize: 11, color: c }}>{val}</b>
     </div>
   )
-}
+  const chip = (txt, c, bg, Icon) => <span className="chip" style={{ color: c, background: bg }}>{Icon && <Icon size={9} style={{ color: c }} />}{txt}</span>
 
-function Kbd({ children }) { return <span className="font-mono text-[8px] px-1.5 rounded" style={{ border: '1px solid var(--glass-border)', background: 'rgba(255,255,255,.04)' }}>{children}</span> }
-
-// ————————————————————————————— analytics · projeção · ABC · UFs —————————————————————————————
-function UltraAnalytics({ porDia, projecao, receitaHoje, fracaoDia, abc, ufs, coorte, cor }) {
-  const max = Math.max(1, ...porDia.map(([, v]) => v))
-  return (
-    <div className="grid gap-2" style={{ gridTemplateColumns: '1.4fr 1fr 1fr 1.15fr' }}>
-      <div className="glass rounded-2xl p-3">
-        <div className="text-[8px] font-bold uppercase tracking-wider text-faint mb-2 flex items-center gap-1.5"><TrendingUp size={11} style={{ color: cor }} /> Receita por dia</div>
-        <div className="flex items-end gap-1" style={{ height: 74 }}>
-          {porDia.length === 0 && <div className="text-[9px] text-faint m-auto">sem dados no período</div>}
-          {porDia.map(([k, v]) => (
-            <div key={k} className="flex-1 flex flex-col items-center gap-1" title={`${k} · ${brl(v)}`}>
-              <div className="w-full rounded-t" style={{ height: `${Math.max(4, v / max * 60)}px`, background: `linear-gradient(180deg, ${cor}, ${cor}33)` }} />
-              <span className="text-[6px] text-faint num">{k.slice(0, 5)}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-      <div className="glass rounded-2xl p-3">
-        <div className="text-[8px] font-bold uppercase tracking-wider text-faint mb-2 flex items-center gap-1.5"><Zap size={11} style={{ color: cor }} /> Projeção do dia</div>
-        <b className="num text-[17px]" style={{ color: OK }}>{brl(projecao)}</b>
-        <div className="text-[8px] text-faint">no ritmo de hoje ({brl(receitaHoje)} · {Math.round(fracaoDia * 100)}% do dia)</div>
-        <div className="mt-2 h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,.07)' }}><div className="h-full rounded-full" style={{ width: `${Math.round(fracaoDia * 100)}%`, background: `linear-gradient(90deg, ${OK}, ${OK}55)` }} /></div>
-      </div>
-      <div className="glass rounded-2xl p-3">
-        <div className="text-[8px] font-bold uppercase tracking-wider text-faint mb-2 flex items-center gap-1.5"><Layers size={11} style={{ color: cor }} /> Curva ABC · receita</div>
-        {[['A', abc.a, OK], ['B', abc.b, WARN], ['C', abc.c, 'var(--faint)']].map(([l, d, c]) => (
-          <div key={l} className="flex items-center gap-2 mb-1.5">
-            <b className="text-[11px] w-3" style={{ color: c }}>{l}</b>
-            <div className="flex-1">
-              <div className="text-[7px] text-dim">{d.n} SKU(s) · <b className="num" style={{ color: c }}>{d.pct}%</b></div>
-              <div className="h-1.5 rounded-full overflow-hidden mt-0.5" style={{ background: 'rgba(255,255,255,.06)' }}><div className="h-full rounded-full" style={{ width: `${d.pct}%`, background: c }} /></div>
-            </div>
-          </div>
-        ))}
-      </div>
-      <div className="glass rounded-2xl p-3">
-        <div className="text-[8px] font-bold uppercase tracking-wider text-faint mb-2 flex items-center gap-1.5"><MapPin size={11} style={{ color: cor }} /> Para onde você vende</div>
-        {ufs.top.length === 0 && <div className="text-[9px] text-faint">endereços chegam com o detalhe dos pedidos</div>}
-        {ufs.top.map(([uf, pct]) => (
-          <div key={uf} className="flex items-center gap-2 mb-1">
-            <b className="num text-[9px] w-6">{uf}</b>
-            <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,.06)' }}><div className="h-full rounded-full" style={{ width: `${pct * 2}%`, background: `linear-gradient(90deg, ${cor}, ${cor}44)` }} /></div>
-            <span className="num text-[8.5px] text-dim w-7 text-right">{pct}%</span>
-          </div>
-        ))}
-        <div className="flex justify-between mt-1.5 pt-1.5" style={{ borderTop: '1px solid var(--glass-border)' }}><span className="text-[7.5px] text-faint">coorte de recompra</span><b className="num text-[8.5px]" style={{ color: 'var(--accent)' }}>{coorte}% voltam</b></div>
-      </div>
-    </div>
-  )
-}
-
-// ————————————————————————————— regras do operador —————————————————————————————
-function UltraRegras({ regras, setRegras, cor }) {
-  const DEF = [
-    ['nf_imprime', 'NF-e emitida → imprimir etiqueta sozinho', 'elimina 1 clique por pedido'],
-    ['risco_segura', 'Risco de fraude → segurar e avisar', 'nunca despacha pedido sinalizado'],
-    ['presente_selo', 'Mensagem contém “presente” → selo PRESENTE', 'embrulho certo na separação'],
+  const kpis = [
+    { lab: 'Pedidos · período', val: lista.length, ic: Package },
+    { lab: 'Unidades', val: unidades, ic: Box },
+    { lab: 'Receita', val: brl(receitaTot), ic: DollarSign },
+    { lab: 'Ticket médio', val: brl(ticket), ic: Tag },
+    { lab: 'Custos do canal', val: taxasTot ? `-${brl(taxasTot)}` : '—', ic: CreditCard, warn: true },
+    { lab: d.freteRot, val: freteTot ? `-${brl(freteTot)}` : '—', ic: Truck, warn: true },
+    { lab: 'Líquido', val: brl(liquidoTot), ic: CheckCheck, hero: true },
+    { lab: 'Hoje', val: brl(receitaHoje), ic: Zap },
   ]
+  const micro = [
+    ['margem média', `${margemMedia}%`, OK], ['cancelados', contagem.cancel || 0, DANGER],
+    ['devoluções', lista.filter((p) => p.devolucao).length, WARN], ['sem NF-e', semNf, semNf ? DANGER : 'var(--dim)'],
+    ['recompra', `${coorte}%`, 'var(--accent)'], ['em trânsito', contagem.transito || 0, 'var(--blue)'],
+    ['pico do dia', serie.length ? brl(serie[peakIdx][1]) : '—', d.cor], ['projeção hoje', brl(projecao), OK],
+  ]
+  const donut = useMemo(() => {
+    const cores = { hoje: d.cor, proximos: 'var(--blue)', nf: 'var(--danger)', transito: 'var(--purple)', fim: 'var(--ok)', cancel: 'var(--faint)' }
+    const tot = Math.max(1, lista.length); let off = 0
+    return ABAS_DEF.filter(([id]) => id !== 'todos').map(([id, lab]) => {
+      const n = contagem[id] || 0; const frac = n / tot; const seg = { id, lab, n, cor: cores[id], dash: Math.round(frac * 201), off }
+      off += Math.round(frac * 201); return seg
+    })
+  }, [pedidos, contagem])
+
   return (
-    <div className="glass rounded-2xl p-3">
-      <div className="flex items-center gap-2 mb-2 flex-wrap"><Settings size={13} style={{ color: cor }} /><b className="text-[12px]">Regras do operador · automatize o repetitivo</b><span className="text-[7px] font-bold uppercase px-1.5 py-0.5 rounded-full" style={{ color: '#1a1008', background: cor }}>você no comando</span></div>
-      <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(3,1fr)' }}>
-        {DEF.map(([k, t, s]) => {
-          const on = !!regras[k]
-          return (
-            <div key={k} className="flex items-center gap-2.5 rounded-xl px-3 py-2" style={{ background: 'rgba(0,0,0,.18)', border: `1px solid ${on ? 'rgba(47,217,141,.3)' : 'var(--glass-border)'}` }}>
-              <div className="flex-1 min-w-0"><div className="text-[9.5px] font-bold truncate">{t}</div><div className="text-[7.5px] text-faint">{s}</div></div>
-              <button onClick={() => setRegras((r) => ({ ...r, [k]: !on }))} className="w-7 h-4 rounded-full relative shrink-0" style={{ background: on ? 'linear-gradient(90deg,#2FD98D,#1fae6e)' : 'rgba(255,255,255,.12)' }}><span className="absolute top-0.5 w-3 h-3 rounded-full bg-white" style={{ left: on ? 15 : 2, transition: 'left .15s' }} /></button>
+    <div className="pcuv2" style={{ '--ch': d.cor, '--chd': d.txt }}>
+      {/* HEADER — DOM do mockup */}
+      <div className="glass" style={{ padding: '16px 18px', marginBottom: 12, border: '1px solid transparent', background: `linear-gradient(var(--surface),var(--surface)) padding-box, linear-gradient(110deg, ${d.cor}88, rgba(214,0,127,.4), ${d.cor}44) border-box` }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 13, flexWrap: 'wrap' }}>
+          <div style={{ width: 46, height: 46, borderRadius: 12, background: d.brand, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none', boxShadow: '0 6px 20px rgba(0,0,0,.35)' }}><Package size={24} color="#1a1008" /></div>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <b className="serif" style={{ fontSize: 21 }}>Central de pedidos</b>
+              {chip(d.nome.toUpperCase(), '#1a1008', d.cor)}
+              {chip('HUB BLING · NF-e', '#e9dbfb', 'rgba(160,107,232,.2)')}
+              {chip('TEMPO REAL', 'var(--ok)', 'rgba(47,217,141,.12)', Zap)}
             </div>
-          )
-        })}
+            <div style={{ fontSize: 10.5, color: 'var(--dim)' }}>Do pagamento à entrega — separação, etiquetas, NF-e, repasse com margem e o perfil de quem compra</div>
+          </div>
+          <div style={{ flex: 1 }} />
+          {/* seletor de canal */}
+          <div className="seg">
+            {['ml', 'shopee'].map((c) => <span key={c} className={canal === c ? 'on' : ''} onClick={() => setCanal(c)}>{CH[c].nome}</span>)}
+          </div>
+          <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', alignItems: 'center' }}>
+            <div className="btn" onClick={() => setModal('sep')}><Layers size={13} />Separação</div>
+            <div className="btn" onClick={() => { setMesaIdx(0); setModal('mesa') }}><ScanLine size={13} />Mesa de Despacho</div>
+            <div className="btn" onClick={() => setModal('imp')}><Printer size={13} />Impressão</div>
+            <div className="btn primary" onClick={() => baixarEtiquetas()}><Tag size={13} color="#1a1008" />Etiquetas em lote ({sel.size || contagem.hoje || 0})</div>
+          </div>
+        </div>
+        {/* FILA OPERACIONAL */}
+        <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+          {filaChip(Tag, 'Etiquetas prontas', lista.filter((p) => p.rastreio && classifica(p) === 'hoje').length, 'var(--ok)')}
+          {filaChip(FileText, 'Aguardando NF-e', semNf, semNf ? 'var(--danger)' : 'var(--dim)')}
+          {canal === 'ml' ? filaChip(Clock, 'Etiqueta libera depois (buffered)', lista.filter((p) => !p.rastreio && classifica(p) === 'hoje').length, 'var(--warn)') : filaChip(MapPin, 'Drop-off disponível', 'sim', 'var(--warn)')}
+          {filaChip(AlertTriangle, 'Despacho atrasado', lista.filter((p) => p.shipBy && p.shipBy * 1000 < agoraTs && classifica(p) === 'hoje').length, 'var(--danger)')}
+          {filaChip(Box, 'Volumes · peso da coleta', `${lista.filter((p) => classifica(p) === 'hoje').reduce((s, p) => s + p.qtd, 0)} · ${pesoEstim}kg`, 'var(--blue)')}
+          <div style={{ flex: 1 }} />
+          <span style={{ fontSize: 8.5, color: 'var(--faint)', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+            {fundo ? <><Loader2 size={10} className="animate-spin" />sincronizando {fundo.carregados} de {fundo.total} — pode trabalhar</> : <><RefreshCw size={10} />sincronizado agora</>}
+          </span>
+        </div>
       </div>
+
+      {/* ABAS */}
+      <div style={{ display: 'flex', gap: 7, overflowX: 'auto', paddingBottom: 4, marginBottom: 11 }}>
+        {ABAS_DEF.map(([id, lab, Icon]) => (
+          <div key={id} className={`tab ${aba === id ? 'on' : ''}`} onClick={() => setAba(id)}><Icon size={13} />{lab}<span className="pill">{contagem[id] || 0}</span></div>
+        ))}
+      </div>
+
+      {/* TOOLBAR */}
+      <div className="glass" style={{ padding: '11px 15px', marginBottom: 11, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <span className="up" style={{ fontSize: 8, color: 'var(--faint)', fontWeight: 800 }}>pagamento</span>
+        <div className="seg">
+          {[['todos', 'Todos'], ['pagos', 'Pagos'], ['aguard', 'Aguardando']].map(([id, l]) => <span key={id} className={pgto === id ? 'on' : ''} onClick={() => setPgto(id)}>{l}</span>)}
+        </div>
+        <div style={{ width: 1, height: 20, background: 'var(--glass-border)' }} />
+        <div className={`toggle ${aba === 'nf' ? 'on' : ''}`} style={{ color: 'var(--danger)', borderColor: 'rgba(255,122,122,.35)' }} onClick={() => setAba(aba === 'nf' ? 'todos' : 'nf')}><span className="sw" />Sem dados fiscais ({semNf})</div>
+        <div className="toggle" style={{ color: 'var(--warn)' }} onClick={() => setOrdem('prioridade')}><span className="sw" />Atrasados primeiro</div>
+        <div style={{ flex: 1 }} />
+        <div className="seg">
+          {[7, 15, 30].map((dd) => <span key={dd} className={dias === dd ? 'on' : ''} onClick={() => setDias(dd)}>{dd}d</span>)}
+        </div>
+        <div className="seg">
+          <span className={densidade === 'conf' ? 'on' : ''} onClick={() => setDensidade('conf')}>Confortável</span>
+          <span className={densidade === 'comp' ? 'on' : ''} onClick={() => setDensidade('comp')}>Compacto</span>
+        </div>
+      </div>
+
+      {/* COLETA */}
+      <div className="glass" style={{ padding: '12px 16px', marginBottom: 11, borderLeft: `3px solid ${corteCor}`, display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', background: `linear-gradient(110deg, ${corteCor}18, transparent)` }}>
+        <span className="chip" style={{ color: '#1a1008', background: corteCor === 'var(--faint)' ? 'var(--warn)' : corteCor }}><Clock size={9} color="#1a1008" />{corteTxt} · FICA VERMELHO EM 1H</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}><Truck size={18} style={{ color: d.cor }} /><div><div className="up" style={{ fontSize: 7, color: 'var(--faint)' }}>Coleta de hoje</div><b style={{ fontSize: 13 }}>janela da transportadora à tarde</b></div></div>
+        <div style={{ width: 1, height: 26, background: 'var(--glass-border)' }} />
+        <div><div className="up" style={{ fontSize: 7, color: 'var(--faint)' }}>A despachar</div><b className="num" style={{ fontSize: 12, color: d.cor }}>{aDespachar}</b></div>
+        <div style={{ flex: 1 }} />
+        <span style={{ fontSize: 8.5, color: 'var(--faint)' }}>o alerta muda de cor a 1h do corte</span>
+      </div>
+
+      {/* KPIs 8 */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8,1fr)', gap: 8, marginBottom: 8 }}>
+        {kpis.map((k, i) => (
+          <div key={i} className="kpi glass" style={k.hero ? { borderLeft: '3px solid var(--ok)' } : undefined}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+              <div className="ico" style={{ background: k.hero ? 'rgba(47,217,141,.15)' : 'rgba(255,255,255,.05)' }}><k.ic size={14} style={{ color: k.hero ? 'var(--ok)' : k.warn ? 'var(--warn)' : 'var(--dim)' }} /></div>
+            </div>
+            <div className="up" style={{ fontSize: 6.5, color: 'var(--faint)' }}>{k.lab}</div>
+            <b className="num serif" style={{ fontSize: 15.5, color: k.hero ? 'var(--ok)' : k.warn ? 'var(--warn)' : 'var(--fg)' }}>{k.val}</b>
+          </div>
+        ))}
+      </div>
+      {/* MICRO KPIs 8 */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8,1fr)', gap: 8, marginBottom: 11 }}>
+        {micro.map(([lab, val, c], i) => (
+          <div key={i} style={{ background: 'rgba(0,0,0,.2)', border: '1px solid var(--glass-border)', borderRadius: 11, padding: '7px 10px' }}>
+            <div className="up" style={{ fontSize: 6, color: 'var(--faint)' }}>{lab}</div><b className="num" style={{ fontSize: 11, color: c }}>{val}</b>
+          </div>
+        ))}
+      </div>
+
+      {/* ANALYTICS: barras · donut resumo · heatmap */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1.45fr 1fr 1fr', gap: 10, marginBottom: 11 }}>
+        <div className="glass" style={{ padding: '14px 15px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 13 }}><span className="up" style={{ fontSize: 8.5, color: 'var(--faint)', fontWeight: 800, display: 'flex', alignItems: 'center', gap: 6 }}><DollarSign size={12} style={{ color: d.cor }} />Receita por dia</span><div style={{ flex: 1 }} /><span className="num" style={{ fontSize: 8, color: 'var(--faint)' }}>pico {serie.length ? brl(serie[peakIdx][1]) : '—'}</span></div>
+          <div className="barrow">
+            {serie.map(([k, v], i) => <div key={k} className={`b ${i === peakIdx ? 'peak' : ''}`} style={{ height: `${Math.max(5, v / maxS * 96)}px` }} title={`${k} · ${brl(v)}`}><span>{i === peakIdx ? brl(v).replace('R$ ', '') : ''}</span></div>)}
+            {serie.length === 0 && <span style={{ fontSize: 9, color: 'var(--faint)', margin: 'auto' }}>sem dados no período</span>}
+          </div>
+        </div>
+        <div className="glass" style={{ padding: '14px 15px' }}>
+          <div className="up" style={{ fontSize: 8.5, color: 'var(--faint)', fontWeight: 800, marginBottom: 11, display: 'flex', alignItems: 'center', gap: 6 }}><Layers size={12} style={{ color: d.cor }} />Resumo do período</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 13 }}>
+            <div style={{ position: 'relative', width: 82, height: 82, flex: 'none' }}>
+              <svg width="82" height="82" viewBox="0 0 78 78">
+                <circle cx="39" cy="39" r="32" fill="none" stroke="rgba(255,255,255,.06)" strokeWidth="9" />
+                {donut.map((s) => s.n > 0 && <circle key={s.id} cx="39" cy="39" r="32" fill="none" stroke={s.cor} strokeWidth="9" strokeDasharray={`${s.dash} 999`} strokeDashoffset={-s.off} transform="rotate(-90 39 39)" />)}
+              </svg>
+              <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}><b className="num serif" style={{ fontSize: 15 }}>{lista.length}</b><span style={{ fontSize: 6, color: 'var(--faint)' }}>pedidos</span></div>
+            </div>
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {donut.filter((s) => s.n > 0).slice(0, 5).map((s) => (
+                <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ width: 7, height: 7, borderRadius: '50%', background: s.cor }} /><span style={{ fontSize: 8.5, color: 'var(--dim)', flex: 1 }}>{s.lab}</span><b className="num" style={{ fontSize: 9 }}>{s.n}</b></div>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div className="glass" style={{ padding: '14px 15px' }}>
+          <div className="up" style={{ fontSize: 8.5, color: 'var(--faint)', fontWeight: 800, marginBottom: 11, display: 'flex', alignItems: 'center', gap: 6 }}><Clock size={12} style={{ color: d.cor }} />Horários de compra · hoje ajuda a prever</div>
+          <div className="heat">
+            {heat.map((v, h) => <div key={h} title={`${h}h · ${v} pedido(s)`} style={{ height: 26, borderRadius: 5, background: v ? `rgba(214,0,127,${0.15 + v / maxH * 0.7})` : 'rgba(255,255,255,.04)' }} />)}
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}><span style={{ fontSize: 6.5, color: 'var(--faint)' }}>0h</span><span style={{ fontSize: 6.5, color: 'var(--faint)' }}>12h</span><span style={{ fontSize: 6.5, color: 'var(--faint)' }}>23h</span></div>
+        </div>
+      </div>
+
+      {/* INTELIGÊNCIA: PROJEÇÃO · ABC · DESTINOS — DOM do mockup */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1.2fr', gap: 10, marginBottom: 11 }}>
+        <div className="glass" style={{ padding: '13px 15px' }}>
+          <div className="up" style={{ fontSize: 8.5, color: 'var(--faint)', fontWeight: 800, marginBottom: 9, display: 'flex', alignItems: 'center', gap: 6 }}><Zap size={12} style={{ color: d.cor }} />Projeção do dia</div>
+          <b className="num serif" style={{ fontSize: 21, color: 'var(--ok)' }}>{brl(projecao)}</b>
+          <div style={{ fontSize: 8.5, color: 'var(--faint)', marginTop: 2 }}>no ritmo de hoje ({brl(receitaHoje)} até agora · {Math.round(fracaoDia * 100)}% do dia)</div>
+          <div style={{ height: 7, borderRadius: 4, background: 'rgba(255,255,255,.07)', overflow: 'hidden', marginTop: 8 }}><div style={{ height: '100%', width: `${Math.round(fracaoDia * 100)}%`, background: 'linear-gradient(90deg,var(--ok),rgba(47,217,141,.3))' }} /></div>
+        </div>
+        <div className="glass" style={{ padding: '13px 15px' }}>
+          <div className="up" style={{ fontSize: 8.5, color: 'var(--faint)', fontWeight: 800, marginBottom: 9, display: 'flex', alignItems: 'center', gap: 6 }}><Layers size={12} style={{ color: d.cor }} />Curva ABC · receita do período</div>
+          {abc.map((x) => (
+            <div key={x[0]} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7 }}>
+              <b style={{ width: 14, fontSize: 11, color: x[3] }}>{x[0]}</b>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 7.5, color: 'var(--dim)' }}>{x[1]} <b className="num" style={{ color: x[3] }}>{x[2]}%</b></div>
+                <div style={{ height: 6, borderRadius: 4, background: 'rgba(255,255,255,.06)', overflow: 'hidden', marginTop: 2 }}><div style={{ height: '100%', width: `${x[2]}%`, background: x[3] }} /></div>
+              </div>
+            </div>
+          ))}
+          <div style={{ fontSize: 7, color: 'var(--faint)' }}>foque reposição e resposta rápida nos A — eles pagam o mês</div>
+        </div>
+        <div className="glass" style={{ padding: '13px 15px' }}>
+          <div className="up" style={{ fontSize: 8.5, color: 'var(--faint)', fontWeight: 800, marginBottom: 9, display: 'flex', alignItems: 'center', gap: 6 }}><MapPin size={12} style={{ color: d.cor }} />Para onde você vende · top estados</div>
+          {ufs.top.length === 0 && <div style={{ fontSize: 8.5, color: 'var(--faint)' }}>endereços chegam com o detalhe dos pedidos</div>}
+          {ufs.top.map(([uf, pct]) => (
+            <div key={uf} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
+              <b className="num" style={{ width: 22, fontSize: 9 }}>{uf}</b>
+              <div style={{ flex: 1, height: 8, borderRadius: 4, background: 'rgba(255,255,255,.06)', overflow: 'hidden' }}><div style={{ height: '100%', width: `${pct * 2}%`, background: `linear-gradient(90deg,${d.cor},${d.cor}44)` }} /></div>
+              <span className="num" style={{ fontSize: 8.5, color: 'var(--dim)', width: 28, textAlign: 'right' }}>{pct}%</span>
+            </div>
+          ))}
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--glass-border)' }}><span style={{ fontSize: 7.5, color: 'var(--faint)' }}>coorte de recompra</span><b className="num" style={{ fontSize: 8.5, color: 'var(--accent)' }}>{coorte}% voltam</b></div>
+        </div>
+      </div>
+
+      {/* REGRAS DO OPERADOR */}
+      <div className="glass" style={{ padding: '12px 15px', marginBottom: 11 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 9, flexWrap: 'wrap' }}>
+          <Settings size={13} style={{ color: d.cor }} /><b className="serif" style={{ fontSize: 13 }}>Regras do operador · automatize o repetitivo</b>
+          {chip('VOCÊ NO COMANDO', '#1a1008', d.cor)}
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8 }}>
+          {[['nf_imprime', 'NF-e emitida → imprimir etiqueta sozinho', 'elimina 1 clique por pedido'], ['risco_segura', 'Risco de fraude → segurar e avisar', 'nunca despacha pedido sinalizado'], ['presente_selo', 'Mensagem contém “presente” → selo PRESENTE', 'embrulho certo na separação']].map(([k, t, s]) => {
+            const on = !!regras[k]
+            return (
+              <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'rgba(0,0,0,.18)', border: `1px solid ${on ? 'rgba(47,217,141,.3)' : 'var(--glass-border)'}`, borderRadius: 11, padding: '9px 11px' }}>
+                <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 9.5, fontWeight: 700 }}>{t}</div><div style={{ fontSize: 7.5, color: 'var(--faint)' }}>{s}</div></div>
+                <div className={`toggle ${on ? 'on' : ''}`} style={{ padding: '3px 4px' }} onClick={() => setRegras((r) => ({ ...r, [k]: !on }))}><span className="sw" /></div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* BUSCA + ORDENAR + PAGINAÇÃO TOPO */}
+      <div className="glass" style={{ padding: '10px 14px', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
+        <Search size={13} style={{ color: 'var(--faint)' }} />
+        <input data-pcu-busca value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Buscar por pedido, comprador, produto, SKU, rastreio…" style={{ flex: 1, minWidth: 180, background: 'transparent', border: 'none', outline: 'none', color: 'var(--fg)', fontSize: 12 }} />
+        <div className="seg">
+          {[['recentes', 'Recentes'], ['antigos', 'Antigos'], ['prioridade', 'Prioridade']].map(([id, l]) => <span key={id} className={ordem === id ? 'on' : ''} onClick={() => setOrdem(id)}>{l}</span>)}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div className="pgbtn" onClick={() => setPagina((p) => Math.max(1, p - 1))}><ChevronLeft size={12} /></div>
+          <span className="num" style={{ fontSize: 9, color: 'var(--faint)' }}>pág. {pagina} de {nPag} · {filtrados.length}</span>
+          <div className="pgbtn" onClick={() => setPagina((p) => Math.min(nPag, p + 1))}><ChevronRight size={12} /></div>
+        </div>
+      </div>
+
+      {/* LISTA */}
+      {erro && <div className="glass" style={{ padding: 16, fontSize: 11, color: 'var(--dim)', display: 'flex', gap: 8, alignItems: 'center' }}><AlertTriangle size={14} style={{ color: 'var(--danger)' }} /> {erro} <span className="btn" onClick={() => carregar()}>tentar de novo</span></div>}
+      {pedidos === null ? <div className="glass" style={{ padding: 24, display: 'flex', gap: 8, alignItems: 'center', color: 'var(--dim)', fontSize: 12 }}><Loader2 size={15} className="animate-spin" /> carregando os pedidos…</div>
+        : pageItems.length === 0 ? <div className="glass" style={{ padding: 24, textAlign: 'center', fontSize: 11, color: 'var(--faint)' }}>Nenhum pedido {busca ? 'para esta busca' : 'nesta aba'}.</div>
+          : <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+            {pageItems.map((p) => <UltraCard key={p.id} p={p} d={d} canal={canal} exp={aberto === p.id} densidade={densidade}
+              onToggle={() => setAberto(aberto === p.id ? null : p.id)} sel={sel.has(p.id)} onSel={() => toggleSel(p.id)}
+              baixarEtiqueta={() => baixarEtiquetas(p.id)} agoraTs={agoraTs} notify={notify} />)}
+          </div>}
+
+      {/* MASSBAR */}
+      {sel.size > 0 && (
+        <div className="massbar">
+          <span className="chip" style={{ color: '#fff', background: 'var(--accent)' }}>{sel.size} SELECIONADO{sel.size > 1 ? 'S' : ''}</span>
+          <div className="btn primary" style={{ fontSize: 10 }} onClick={() => baixarEtiquetas()}><Tag size={12} color="#1a1008" />Etiquetas</div>
+          <div className="btn" style={{ fontSize: 10 }} onClick={() => setModal('sep')}><Layers size={12} />Separação</div>
+          <div className="btn" style={{ fontSize: 10 }} onClick={() => { setMesaIdx(0); setModal('mesa') }}><ScanLine size={12} />Mesa</div>
+          <span style={{ fontSize: 8, color: 'var(--faint)' }}>esc limpa</span>
+        </div>
+      )}
+
+      {/* TOAST tempo real */}
+      {novos > 0 && (
+        <div className="toast">
+          <Zap size={14} style={{ color: 'var(--ok)' }} />
+          <div><b style={{ fontSize: 10 }}>{novos} pedido{novos > 1 ? 's' : ''} novo{novos > 1 ? 's' : ''} chegaram</b><div style={{ fontSize: 8, color: 'var(--faint)' }}>sincronização automática · agora</div></div>
+          <div className="btn" style={{ fontSize: 9, padding: '5px 10px' }} onClick={() => { setNovos(0); setOrdem('recentes'); setPagina(1) }}>trazer para a tela</div>
+        </div>
+      )}
+
+      {/* PAGINAÇÃO RODAPÉ */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 9, justifyContent: 'center', padding: '16px 0 30px' }}>
+        <div className="pgbtn" onClick={() => setPagina((p) => Math.max(1, p - 1))}><ChevronLeft size={13} /></div>
+        {Array.from({ length: Math.min(nPag, 5) }, (_, i) => i + Math.max(1, Math.min(pagina - 2, nPag - 4))).map((n) => (
+          <div key={n} className={`pgbtn ${n === pagina ? 'on' : ''}`} onClick={() => setPagina(n)}>{n}</div>
+        ))}
+        <span style={{ fontSize: 9, color: 'var(--faint)' }}>· {filtrados.length} pedidos</span>
+      </div>
+
+      {/* KBDBAR */}
+      <div className="kbdbar">
+        <span><span className="kbd">J</span>/<span className="kbd">K</span> navega</span><span><span className="kbd">E</span> recolhe</span>
+        <span><span className="kbd">M</span> mesa</span><span><span className="kbd">B</span> busca</span><span><span className="kbd">esc</span> limpa</span>
+      </div>
+
+      {modal === 'mesa' && <UltraMesa fila={filtrados.filter((p) => classifica(p) === 'hoje' || aba === 'todos').slice(0, 40)} idx={mesaIdx} setIdx={setMesaIdx} conf={mesaConf} setConf={setMesaConf} onFechar={() => setModal(null)} d={d} />}
+      {modal === 'sep' && <ModalSimples titulo="Lista de separação" onFechar={() => setModal(null)} d={d}>
+        {canal === 'shopee'
+          ? <div style={{ fontSize: 11, color: 'var(--dim)', lineHeight: 1.7 }}>A separação v2 (corredor → bin → rota, dupla conferência ✓1/✓2) imprime pela Central Shopee em <b>Canais → Shopee → Pedidos & Financeiro → Separação</b> — com os pedidos do status escolhido.</div>
+          : <div style={{ fontSize: 11, color: 'var(--dim)', lineHeight: 1.7 }}>Para o Mercado Livre, selecione os pedidos e use <b>Etiquetas</b> + a <b>Mesa de Despacho</b>; a lista de separação unificada ML entra na próxima rodada do módulo.</div>}
+      </ModalSimples>}
+      {modal === 'imp' && <ModalSimples titulo="Modelos de impressão" onFechar={() => setModal(null)} d={d}>
+        <div style={{ fontSize: 11, color: 'var(--dim)', lineHeight: 1.7 }}>
+          Os três modelos ULTRA — <b>Etiqueta com ESTAÇÃO/ROTA</b>, <b>Folha do Pedido V8</b> e <b>Separação v2</b> — estão ativos na impressão da Central Shopee (Personalizar → toggles). No ML, a etiqueta oficial sai em PDF pelo botão <b>Etiquetas</b>.
+        </div>
+      </ModalSimples>}
     </div>
   )
 }
 
-// ————————————————————————————— card + expansão inline (2 colunas do mockup) —————————————————————————————
-function UltraCard({ p, cor, aberto, onToggle, sel, onSel, canal, notify, agoraTs }) {
-  const score = p.cancelado ? 88 : p.devolucao ? 54 : ((p.compras || 0) <= 1 && (p.receita || 0) > 60) ? 26 : 8
-  const scoreCor = score >= 70 ? DANGER : score >= 40 ? WARN : OK
-  const recorrente = (p.compras || 0) > 1
-  return (
-    <div className="rounded-2xl overflow-hidden" style={{ border: `1px solid ${aberto ? cor + '55' : 'var(--glass-border)'}`, background: aberto ? `linear-gradient(165deg, ${cor}08, var(--glass))` : 'var(--glass)' }}>
-      {/* linha resumo */}
-      <div className="flex items-center gap-3 px-3.5 py-3 cursor-pointer" onClick={onToggle}>
-        <button onClick={(e) => { e.stopPropagation(); onSel() }} className="w-[17px] h-[17px] rounded-md grid place-items-center shrink-0" style={{ background: sel ? 'var(--accent)' : 'transparent', border: sel ? 'none' : '1.5px solid var(--glass-border)' }}>{sel && <Check size={11} color="#fff" />}</button>
-        <div className="w-9 h-9 rounded-lg overflow-hidden shrink-0" style={{ background: 'rgba(255,255,255,.06)' }}>{p.itens[0]?.imagem ? <img src={p.itens[0].imagem} className="w-full h-full object-cover" /> : <div className="w-full h-full grid place-items-center"><Package size={14} className="text-faint" /></div>}</div>
-        <div className="flex-1 min-w-0">
-          <div className="text-[12px] font-medium truncate flex items-center gap-2">{p.titulo}{p.qtd > 1 && <span className="text-[7.5px] font-bold px-1.5 py-0.5 rounded-full text-white shrink-0" style={{ background: 'var(--accent)' }}>{p.qtd}un</span>}</div>
-          <div className="text-[9px] text-faint num truncate">#{p.id} · {p.criado ? new Date(p.criado).toLocaleDateString('pt-BR') : '—'} · <User size={9} className="inline" /> {p.comprador}{recorrente && <span className="ml-1 text-[7px] font-bold px-1 rounded" style={{ background: ML, color: '#1a1008' }}><Repeat size={7} className="inline" /> {p.compras}ª</span>}</div>
-        </div>
-        <div className="flex items-center gap-1.5 shrink-0">
-          {p.cancelado && <span className="text-[7.5px] font-bold uppercase px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(255,122,122,.15)', color: DANGER }}>cancelado</span>}
-          {p.devolucao && <span className="text-[7.5px] font-bold uppercase px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(224,162,60,.15)', color: WARN }}>devolução</span>}
-          {!p.cancelado && !p.devolucao && <span className="text-[7.5px] font-bold uppercase px-1.5 py-0.5 rounded-full" style={{ background: `${cor}18`, color: cor }}>{p.status.slice(0, 18) || 'pago'}</span>}
-        </div>
-        <b className="num text-[14px] shrink-0">{brl(p.receita)}</b>
-        <ChevronDown size={14} className="text-faint shrink-0" style={{ transform: aberto ? 'rotate(180deg)' : 'none', transition: 'transform .18s' }} />
-      </div>
+// ————— CARD fiel ao cardHTML/cardCompacto do mockup —————
+function UltraCard({ p, d, canal, exp, densidade, onToggle, sel, onSel, baixarEtiqueta, agoraTs, notify }) {
+  const rail = p.cancelado ? 'var(--danger)' : p.devolucao ? 'var(--warn)' : classifica(p) === 'fim' ? 'var(--ok)' : d.cor
+  const estado = p.cancelado ? 'CANCELADO' : p.devolucao ? 'DEVOLUÇÃO' : (p.status || 'PAGO').toUpperCase().slice(0, 22)
+  const estadoCor = p.cancelado ? 'var(--danger)' : p.devolucao ? 'var(--warn)' : classifica(p) === 'fim' ? 'var(--ok)' : d.cor
+  const conta = p.shipBy ? (p.shipBy * 1000 < agoraTs ? 'despacho atrasado' : `despachar até ${new Date(p.shipBy * 1000).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`) : (p.criado ? new Date(p.criado).toLocaleDateString('pt-BR') : '')
+  const contaCor = p.shipBy && p.shipBy * 1000 < agoraTs ? 'var(--danger)' : 'var(--dim)'
+  const chip = (txt, c, bg) => <span className="chip" style={{ color: c, background: bg }}>{txt}</span>
 
-      {/* expansão · 2 colunas do mockup */}
-      {aberto && (
-        <div className="px-3.5 pb-3.5 grid gap-2.5" style={{ gridTemplateColumns: '1.25fr 1fr', borderTop: '1px solid var(--glass-border)', paddingTop: 12 }}>
-          {/* ESQ: produtos · entrega · fiscal */}
-          <div className="space-y-2.5">
-            <Bloco titulo="Produtos do pedido" icon={Package}>
-              {p.itens.map((it, i) => (
-                <div key={i} className="flex items-center gap-2 py-1">
-                  <div className="w-6 h-6 rounded overflow-hidden shrink-0" style={{ background: 'rgba(255,255,255,.06)' }}>{it.imagem && <img src={it.imagem} className="w-full h-full object-cover" />}</div>
-                  <span className="flex-1 text-[10.5px] truncate">{it.nome}</span>
-                  {it.bin && <span className="num text-[8px] font-bold" style={{ color: cor }}>bin {it.bin}</span>}
-                  {it.sku && <span className="num text-[8.5px] text-faint">{it.sku}</span>}
-                  <b className="num text-[10.5px]">{it.qtd}un</b>
+  if (densidade === 'comp' && !exp) {
+    return (
+      <div className="card glass" style={{ padding: 0 }}>
+        <div className="rail" style={{ background: rail }} />
+        <div style={{ padding: '9px 14px 9px 18px', display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }} onClick={onToggle}>
+          <div onClick={(e) => { e.stopPropagation(); onSel() }} style={{ width: 14, height: 14, borderRadius: 4, border: sel ? 'none' : '2px solid var(--glass-border)', background: sel ? 'var(--accent)' : 'transparent', flex: 'none', display: 'grid', placeItems: 'center' }}>{sel && <Check size={10} color="#fff" />}</div>
+          <div style={{ width: 30, height: 30, borderRadius: 7, overflow: 'hidden', background: 'rgba(255,255,255,.06)', flex: 'none' }}>{p.itens[0]?.imagem && <img src={p.itens[0].imagem} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}</div>
+          <b style={{ fontSize: 11, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.titulo}</b>
+          {chip(estado, estadoCor === 'var(--ok)' || estadoCor === 'var(--danger)' ? '#1a1008' : '#fff', estadoCor)}
+          {p.taxas != null && <span className="num" style={{ fontSize: 8.5, color: 'var(--warn)' }}>tx − {brl(p.taxas)}</span>}
+          {p.liquido != null && <span className="num" style={{ fontSize: 8.5, color: 'var(--ok)' }}>sobra {brl(p.liquido)}{p.margem != null ? ` · ${Math.round(p.margem)}%` : ''}</span>}
+          <b className="num" style={{ fontSize: 12, flex: 'none' }}>{brl(p.receita)}</b>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className={`card glass ${exp ? 'exp' : ''}`} style={{ padding: 0 }}>
+      <div className="rail" style={{ background: rail }} />
+      <div style={{ padding: '12px 15px 12px 19px', cursor: 'pointer' }} onClick={onToggle}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+          <div onClick={(e) => { e.stopPropagation(); onSel() }} style={{ width: 16, height: 16, borderRadius: 4, border: sel ? 'none' : '2px solid var(--glass-border)', background: sel ? 'var(--accent)' : 'transparent', flex: 'none', display: 'grid', placeItems: 'center' }}>{sel && <Check size={11} color="#fff" />}</div>
+          <div style={{ width: 48, height: 48, borderRadius: 10, overflow: 'hidden', background: 'linear-gradient(135deg,#4a2a3a,#3a2530)', flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            {p.itens[0]?.imagem ? <img src={p.itens[0].imagem} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Box size={19} style={{ color: 'rgba(255,255,255,.55)' }} />}
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              <b style={{ fontSize: 12.5 }}>{p.titulo}</b>
+              <span className="chip" style={{ fontSize: 7.5, color: 'var(--faint)', background: 'rgba(255,255,255,.05)' }}>{p.qtd} un</span>
+              {(p.compras || 0) > 1 && chip(`${p.compras}ª COMPRA`, '#1a1008', 'var(--gold, #F2C200)')}
+              {!p.nf && !p.cancelado && chip('SEM NF-E', '#fff', 'var(--danger)')}
+            </div>
+            <div style={{ fontSize: 9, color: 'var(--faint)', marginTop: 3 }}>#{p.id} · {p.criado ? new Date(p.criado).toLocaleDateString('pt-BR') : '—'} · {p.comprador} · <span style={{ color: 'var(--dim)' }}>{p.itens[0]?.sku || ''}</span></div>
+          </div>
+          <div style={{ textAlign: 'right', flex: 'none' }}>
+            <div className="up" style={{ fontSize: 7, color: 'var(--faint)' }}>Vendido</div>
+            <b className="num serif" style={{ fontSize: 16 }}>{brl(p.receita)}</b>
+          </div>
+          <div style={{ flex: 'none', color: 'var(--faint)', transform: exp ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}><ChevronRight size={18} /></div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '10px 0', flexWrap: 'wrap', padding: '8px 11px', borderRadius: 11, background: 'rgba(0,0,0,.18)' }}>
+          {chip(estado, estadoCor === 'var(--ok)' || estadoCor === 'var(--danger)' ? '#1a1008' : '#fff', estadoCor)}
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9, color: contaCor }}><Clock size={10} />{conta}</span>
+          <div style={{ flex: 1 }} />
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9, color: 'var(--dim)' }}><CreditCard size={10} />{p.pago ? 'pago' : 'aguardando'}</span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9, color: p.nf ? 'var(--ok)' : 'var(--danger)' }}><FileText size={10} />{p.nf ? 'NF-e emitida' : 'NF-e pendente'}</span>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8 }}>
+          <KpiMini lab="Vendido" val={brl(p.receita)} sub={p.alvo ? `alvo Bling ${brl(p.alvo)}` : ''} cor="var(--fg)" />
+          <KpiMini lab="Taxas mkt" val={p.taxas != null ? `− ${brl(p.taxas)}` : '—'} cor="var(--warn)" />
+          <KpiMini lab={d.freteRot} val={p.frete != null ? (p.frete ? `− ${brl(p.frete)}` : 'sem custo') : '—'} cor="var(--warn)" />
+          <KpiMiniMargem val={brl(p.liquido)} m={p.margem != null ? Math.round(p.margem) : null} />
+        </div>
+      </div>
+      {exp && <UltraExpand p={p} d={d} canal={canal} baixarEtiqueta={baixarEtiqueta} notify={notify} agoraTs={agoraTs} />}
+    </div>
+  )
+}
+function KpiMini({ lab, val, sub, cor }) {
+  return <div style={{ background: 'rgba(255,255,255,.03)', border: '1px solid var(--glass-border)', borderRadius: 10, padding: '7px 10px' }}>
+    <div className="up" style={{ fontSize: 6.5, color: 'var(--faint)' }}>{lab}</div><b className="num" style={{ fontSize: 12.5, color: cor }}>{val}</b>
+    {sub ? <div className="num" style={{ fontSize: 7, color: 'var(--faint)' }}>{sub}</div> : null}</div>
+}
+function KpiMiniMargem({ val, m }) {
+  const dash = Math.round((m || 0) / 100 * 40)
+  return <div style={{ background: 'rgba(47,217,141,.06)', border: '1px solid rgba(47,217,141,.25)', borderRadius: 10, padding: '7px 10px', display: 'flex', alignItems: 'center', gap: 8 }}>
+    <div style={{ flex: 1 }}><div className="up" style={{ fontSize: 6.5, color: 'var(--ok)' }}>Sobra / líquido</div><b className="num" style={{ fontSize: 13, color: 'var(--ok)' }}>{val}</b></div>
+    {m != null && <div style={{ position: 'relative', width: 30, height: 30, flex: 'none' }}>
+      <svg width="30" height="30" viewBox="0 0 32 32"><circle cx="16" cy="16" r="13" fill="none" stroke="rgba(255,255,255,.08)" strokeWidth="4" /><circle cx="16" cy="16" r="13" fill="none" stroke="var(--ok)" strokeWidth="4" strokeLinecap="round" strokeDasharray={`${dash} 999`} transform="rotate(-90 16 16)" /></svg>
+      <div className="num" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 7.5, fontWeight: 800 }}>{m}</div>
+    </div>}
+  </div>
+}
+
+// ————— EXPANSÃO fiel ao expandHTML do mockup (2 colunas) —————
+function UltraExpand({ p, d, canal, baixarEtiqueta, notify, agoraTs }) {
+  const [msgs, setMsgs] = useState(undefined)
+  const [msgTexto, setMsgTexto] = useState('')
+  const [enviando, setEnviando] = useState(false)
+  useEffect(() => {
+    let vivo = true
+    if (canal === 'ml' && p.packId) api.mlMensagens(p.packId).then((r) => vivo && setMsgs(r)).catch(() => vivo && setMsgs(null))
+    else setMsgs(null)
+    return () => { vivo = false }
+  }, [p.id])
+  const enviarMsg = async () => {
+    const t = msgTexto.trim(); if (!t) return
+    setEnviando(true)
+    try { await api.mlEnviarMensagem(p.packId, p.buyerId, t); setMsgTexto(''); notify('Mensagem enviada.', 'ok') } catch (e) { notify(e.message || 'Falha ao enviar', 'danger') }
+    setEnviando(false)
+  }
+  const score = p.cancelado ? 88 : p.devolucao ? 54 : ((p.compras || 0) <= 1 && (p.receita || 0) > 60) ? 26 : 8
+  const scoreCor = score >= 70 ? 'var(--danger)' : score >= 40 ? 'var(--warn)' : 'var(--ok)'
+  const mDash = Math.round((p.margem || 0) / 100 * 201)
+  const fase = p.cancelado ? 0 : /deliver|entreg|complet/i.test(p.status) ? 3 : /shipped|enviado|transit/i.test(p.status) ? 2 : 1
+  const cliKpi = (lab, val, Icon) => (
+    <div style={{ background: 'rgba(0,0,0,.2)', border: '1px solid var(--glass-border)', borderRadius: 9, padding: '6px 9px', display: 'flex', alignItems: 'center', gap: 7 }}>
+      <Icon size={11} style={{ color: 'var(--accent)' }} /><div><div className="up" style={{ fontSize: 6, color: 'var(--faint)' }}>{lab}</div><b className="num" style={{ fontSize: 9.5 }}>{val}</b></div>
+    </div>
+  )
+  return (
+    <div style={{ borderTop: '1px solid var(--glass-border)', background: 'linear-gradient(180deg,rgba(214,0,127,.04),transparent)', padding: '14px 15px 15px 19px' }}>
+      <div style={{ display: 'flex', gap: 7, marginBottom: 12, flexWrap: 'wrap' }}>
+        <div className="btn primary" style={{ fontSize: 10 }} onClick={baixarEtiqueta}><Tag size={12} color="#1a1008" />Baixar etiqueta</div>
+        <div className="btn" style={{ fontSize: 10 }} onClick={() => window.open(canal === 'ml' ? `https://www.mercadolivre.com.br/vendas/${p.id}/detalhe` : `https://seller.shopee.com.br/portal/sale/order/${p.id}`, '_blank')}><Box size={12} />Abrir no canal</div>
+        <div style={{ flex: 1 }} />
+        {!p.cancelado && !p.devolucao && <span className="chip" style={{ color: 'var(--ok)', background: 'rgba(47,217,141,.12)' }}><ShieldCheck size={9} style={{ color: 'var(--ok)' }} />SLA NO PRAZO</span>}
+      </div>
+      <div className="exp-grid">
+        {/* coluna esquerda */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div className="blk">
+            <h4 style={{ color: 'var(--ch, ' + d.cor + ')' }}><Truck size={12} style={{ color: d.cor }} />Linha do tempo do envio</h4>
+            <div className="tl">
+              {['Pagamento aprovado', p.status || 'Em preparação', canal === 'ml' ? 'Coletado pela transportadora' : 'Coletado pela SPX', 'Entregue'].map((t, i) => (
+                <div key={i} className={`node ${i <= fase ? 'done' : ''}`} style={i > fase ? { opacity: .5 } : undefined}>
+                  <div style={{ fontSize: 10, fontWeight: 600 }}>{t}</div>
+                  {i === 0 && p.pago && <div className="num" style={{ fontSize: 7.5, color: 'var(--faint)' }}>{new Date(p.pago).toLocaleString('pt-BR')}</div>}
+                  {i === 1 && p.shipBy && <div className="num" style={{ fontSize: 7.5, color: p.shipBy * 1000 < agoraTs ? 'var(--danger)' : 'var(--warn)' }}>despachar até {new Date(p.shipBy * 1000).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</div>}
                 </div>
               ))}
-            </Bloco>
-            <Bloco titulo="Entrega & rastreio" icon={Truck}>
-              <Linha k="Situação" v={p.status || '—'} />
-              <Linha k="Rastreio" v={p.rastreio || 'ainda não gerado'} num />
-              {p.shipBy && <Linha k="Despachar até" v={new Date(p.shipBy * 1000).toLocaleString('pt-BR')} cor={WARN} />}
-              <Linha k="Criado · pago" v={`${p.criado ? new Date(p.criado).toLocaleDateString('pt-BR') : '—'} · ${p.pago ? new Date(p.pago).toLocaleDateString('pt-BR') : '—'}`} />
-            </Bloco>
-            <Bloco titulo="Fiscal" icon={FileText}>
-              <Linha k="NF-e" v={p.nf ? 'emitida' : 'pendente'} cor={p.nf ? OK : WARN} />
-            </Bloco>
+            </div>
           </div>
-          {/* DIR: radar de risco · repasse+billing+conciliação */}
-          <div className="space-y-2.5">
-            <Bloco titulo="Radar de risco" icon={ShieldCheck}>
-              <div className="flex items-center gap-3">
-                <Anel valor={score} cor={scoreCor} />
-                <div><b className="text-[12px]" style={{ color: scoreCor }}>{score >= 70 ? 'ALTO' : score >= 40 ? 'MÉDIO' : 'BAIXO'}</b>
-                  <div className="text-[9px] text-faint leading-snug">{p.cancelado ? 'pedido cancelado — não despache' : p.devolucao ? 'devolução aberta — responda em 48h' : recorrente ? 'comprador recorrente, histórico limpo' : 'comprador novo'}</div></div>
+          <div className="blk">
+            <h4 style={{ color: d.cor }}><MapPin size={12} style={{ color: d.cor }} />Entrega</h4>
+            {canal === 'shopee'
+              ? <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: 9, borderRadius: 9, background: 'rgba(224,162,60,.06)', border: '1px solid rgba(224,162,60,.25)' }}>
+                <Lock size={13} style={{ color: 'var(--warn)', flex: 'none' }} />
+                <div style={{ fontSize: 9, color: 'var(--dim)', lineHeight: 1.5 }}><b style={{ color: 'var(--warn)' }}>Dados do comprador mascarados pela Shopee.</b> Nome e endereço completos saem apenas na <b>waybill oficial da SPX</b>, gerada no envio.{p.rastreio ? <> Rastreio: <span className="num">{p.rastreio}</span></> : null}</div>
               </div>
-            </Bloco>
-            <Bloco titulo={`Repasse do ${canal === 'ml' ? 'Mercado Livre' : 'Shopee'}`} icon={Wallet}>
-              <Linha k="Vendido" v={brl(p.receita)} num />
-              {p.taxas != null && <Linha k="Custos do canal (billing)" v={`− ${brl(p.taxas)}`} cor={WARN} num />}
-              {p.frete != null && <Linha k="Frete" v={p.frete ? `− ${brl(p.frete)}` : 'sem custo p/ você'} num />}
-              <div className="my-1" style={{ borderTop: '1px dashed var(--glass-border)' }} />
-              <Linha k="Sobra (líquido)" v={brl(p.liquido)} cor={OK} num forte />
-              {p.margem != null && <Linha k="Margem" v={`${Math.round(p.margem)}%`} cor={OK} num />}
-              {p.liquido != null && !p.cancelado && <div className="flex items-center gap-1.5 mt-1.5 pt-1.5" style={{ borderTop: '1px solid var(--glass-border)' }}><CheckCheck size={11} style={{ color: OK }} /><span className="text-[9px] text-dim">Conciliação: repasse previsto bate com o extrato do canal.</span></div>}
-            </Bloco>
+              : <div style={{ fontSize: 10, lineHeight: 1.65 }}>
+                <b>{p.comprador}</b>{p.uf ? ` · ${p.uf}` : ''}<br />
+                <span style={{ color: 'var(--faint)' }}>{p.rastreio ? <>rastreio <span className="num">{p.rastreio}</span></> : 'etiqueta/rastreio liberam com o envio'}</span>
+              </div>}
+          </div>
+          <div className="blk">
+            <h4 style={{ color: d.cor }}><Box size={12} style={{ color: d.cor }} />Produtos</h4>
+            {p.itens.map((it, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: i < p.itens.length - 1 ? 7 : 0 }}>
+                <div style={{ width: 38, height: 38, borderRadius: 8, overflow: 'hidden', background: 'linear-gradient(135deg,#4a2a3a,#3a2530)', flex: 'none' }}>{it.imagem && <img src={it.imagem} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}</div>
+                <div style={{ flex: 1 }}><div style={{ fontSize: 10, fontWeight: 600 }}>{it.nome}</div><div className="num" style={{ fontSize: 7.5, color: 'var(--faint)' }}>{[it.sku, `${it.qtd} un`, it.bin ? `bin ${it.bin}` : ''].filter(Boolean).join(' · ')}</div></div>
+              </div>
+            ))}
+          </div>
+          <div className="blk">
+            <h4 style={{ color: p.nf ? d.cor : 'var(--danger)' }}><FileText size={12} style={{ color: p.nf ? d.cor : 'var(--danger)' }} />Nota fiscal</h4>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span className="chip" style={{ color: p.nf ? 'var(--ok)' : '#fff', background: p.nf ? 'rgba(47,217,141,.12)' : 'var(--danger)' }}>{p.nf ? 'NF-E EMITIDA' : 'NF-E PENDENTE'}</span>
+              <span style={{ fontSize: 8.5, color: 'var(--faint)' }}>{p.nf ? 'vinculada ao pedido via Bling' : 'emitir no Bling para liberar o envio'}</span>
+            </div>
           </div>
         </div>
-      )}
+        {/* coluna direita */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div className="blk" style={{ borderColor: 'rgba(214,0,127,.3)' }}>
+            <h4 style={{ color: 'var(--accent)' }}><User size={12} style={{ color: 'var(--accent)' }} />Comprador · comportamento</h4>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 9 }}>
+              <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'linear-gradient(145deg,var(--accent),#7b2a8c)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}><User size={16} color="#fff" /></div>
+              <div style={{ flex: 1 }}><b style={{ fontSize: 11 }}>{p.comprador}</b><div style={{ fontSize: 7.5, color: 'var(--faint)' }}>{canal === 'ml' ? 'perfil via /orders do ML' : 'histórico com a sua loja'}</div></div>
+              {(p.compras || 0) > 1 && <span className="chip" style={{ color: '#1a1008', background: 'var(--gold, #F2C200)' }}>RECORRENTE</span>}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 6 }}>
+              {cliKpi('Compras na loja', `${p.compras || 1}x`, Repeat)}
+              {cliKpi('Última compra', p.criado ? new Date(p.criado).toLocaleDateString('pt-BR') : '—', Clock)}
+              {cliKpi('Ticket deste pedido', brl(p.receita), Star)}
+              {cliKpi('Disputas', p.devolucao ? '1 aberta' : 'nenhuma', AlertTriangle)}
+            </div>
+          </div>
+          <div className="blk" style={{ border: '1px solid rgba(47,217,141,.3)' }}>
+            <h4 style={{ color: 'var(--ok)' }}><DollarSign size={12} style={{ color: 'var(--ok)' }} />Repasse e margem{canal === 'shopee' ? ' · escrow real' : ''}</h4>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 5, fontSize: 9.5 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--dim)' }}>Receita</span><b className="num">{brl(p.receita)}</b></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--dim)' }}>Taxas mkt</span><b className="num" style={{ color: 'var(--warn)' }}>{p.taxas != null ? `− ${brl(p.taxas)}` : '—'}</b></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--dim)' }}>{d.freteRot}</span><b className="num" style={{ color: 'var(--warn)' }}>{p.frete != null ? (p.frete ? `− ${brl(p.frete)}` : 'sem custo') : '—'}</b></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 5, borderTop: '1px solid var(--glass-border)' }}><span style={{ fontWeight: 700 }}>Sobra (líquido)</span><b className="num" style={{ color: 'var(--ok)' }}>{brl(p.liquido)}</b></div>
+                {p.alvo && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--faint)', fontSize: 8 }}>alvo (Preço Bling)</span><b className="num" style={{ fontSize: 8, color: 'var(--faint)' }}>{brl(p.alvo)}</b></div>}
+              </div>
+              {p.margem != null && <div style={{ position: 'relative', width: 70, height: 70, flex: 'none' }}>
+                <svg width="70" height="70" viewBox="0 0 78 78"><circle cx="39" cy="39" r="32" fill="none" stroke="rgba(255,255,255,.06)" strokeWidth="8" /><circle cx="39" cy="39" r="32" fill="none" stroke="var(--ok)" strokeWidth="8" strokeLinecap="round" strokeDasharray={`${mDash} 999`} transform="rotate(-90 39 39)" /></svg>
+                <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}><b className="num serif" style={{ fontSize: 14, color: 'var(--ok)' }}>{Math.round(p.margem)}%</b><span style={{ fontSize: 5.5, color: 'var(--faint)' }}>margem</span></div>
+              </div>}
+            </div>
+            {p.liquido != null && !p.cancelado && <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, paddingTop: 7, borderTop: '1px solid var(--glass-border)' }}><CheckCheck size={11} style={{ color: 'var(--ok)' }} /><span style={{ fontSize: 8.5, color: 'var(--dim)' }}>Conciliação: repasse previsto bate com o extrato do canal.</span></div>}
+          </div>
+          <div className="blk risk">
+            <h4 style={{ color: scoreCor }}><ShieldCheck size={12} style={{ color: scoreCor }} />Radar de risco</h4>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+              <div style={{ position: 'relative', width: 44, height: 44, flex: 'none' }}>
+                <svg width="44" height="44" viewBox="0 0 48 48"><circle cx="24" cy="24" r="19" fill="none" stroke="rgba(255,255,255,.08)" strokeWidth="5" /><circle cx="24" cy="24" r="19" fill="none" stroke={scoreCor} strokeWidth="5" strokeLinecap="round" strokeDasharray={`${Math.round(score / 100 * 119)} 999`} transform="rotate(-90 24 24)" /></svg>
+                <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' }}><b className="num" style={{ fontSize: 11, color: scoreCor }}>{score}</b></div>
+              </div>
+              <div><b style={{ fontSize: 11.5, color: scoreCor }}>{score >= 70 ? 'ALTO' : score >= 40 ? 'MÉDIO' : 'BAIXO'}</b>
+                <div style={{ fontSize: 8.5, color: 'var(--faint)', lineHeight: 1.5 }}>{p.cancelado ? 'pedido cancelado — não despache' : p.devolucao ? 'devolução aberta — responda em 48h' : (p.compras || 0) > 1 ? 'comprador recorrente · histórico limpo' : 'comprador novo'}</div></div>
+            </div>
+          </div>
+          {canal === 'ml' && (
+            <div className="blk">
+              <h4 style={{ color: d.cor }}><Send size={12} style={{ color: d.cor }} />Mensagens com o comprador</h4>
+              {msgs === undefined && <div style={{ fontSize: 9, color: 'var(--faint)', display: 'flex', gap: 6, alignItems: 'center' }}><Loader2 size={10} className="animate-spin" />carregando…</div>}
+              {Array.isArray(msgs?.mensagens) && msgs.mensagens.slice(-2).map((m, i) => (
+                <div key={i} style={{ fontSize: 9, color: 'var(--dim)', padding: '5px 8px', borderRadius: 8, background: 'rgba(0,0,0,.2)', marginBottom: 4 }}>{(m.texto || m.text || '').slice(0, 140)}</div>
+              ))}
+              {!msgTexto && (
+                <div onClick={() => setMsgTexto('Olá! Seu pedido já está em preparação e sai na próxima coleta. Assim que despachar, o código de rastreio aparece aqui. Obrigado pela compra!')} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 9px', borderRadius: 8, background: 'rgba(160,107,232,.08)', border: '1px dashed rgba(160,107,232,.4)', cursor: 'pointer', marginBottom: 5 }}>
+                  <span className="chip" style={{ fontSize: 6.5, color: '#e9dbfb', background: 'rgba(160,107,232,.35)' }}><Sparkles size={8} />RASCUNHO IA</span>
+                  <span style={{ fontSize: 8.5, color: 'var(--dim)', flex: 1 }}>"Olá! Seu pedido já está em preparação…"</span>
+                  <b style={{ fontSize: 8, color: 'var(--purple)' }}>usar</b>
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input value={msgTexto} onChange={(e) => setMsgTexto(e.target.value.slice(0, 350))} placeholder="Escreva para o comprador…" style={{ flex: 1, background: 'rgba(0,0,0,.25)', border: '1px solid var(--glass-border)', borderRadius: 8, padding: '6px 9px', fontSize: 10, color: 'var(--fg)', outline: 'none' }} />
+                <div className="btn" style={{ fontSize: 9 }} onClick={enviarMsg}>{enviando ? <Loader2 size={11} className="animate-spin" /> : <Send size={11} />}Enviar</div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
-function Bloco({ titulo, icon: Icon, children }) {
-  return <div className="rounded-xl p-3" style={{ background: 'var(--glass-hover, rgba(255,255,255,.04))', border: '1px solid var(--glass-border)' }}>
-    <div className="text-[8px] font-bold uppercase tracking-wider text-faint mb-1.5 flex items-center gap-1.5"><Icon size={11} /> {titulo}</div>{children}</div>
-}
-function Linha({ k, v, cor, num, forte }) {
-  return <div className="flex items-center justify-between py-0.5"><span className="text-[9.5px] text-faint">{k}</span><b className={`text-[${forte ? '12' : '10.5'}px] ${num ? 'num' : ''}`} style={{ color: cor || 'var(--text)' }}>{v}</b></div>
-}
-function Anel({ valor, cor }) {
-  const dash = Math.round(valor / 100 * 119)
-  return <div className="relative shrink-0" style={{ width: 46, height: 46 }}>
-    <svg width="46" height="46" viewBox="0 0 48 48"><circle cx="24" cy="24" r="19" fill="none" stroke="rgba(255,255,255,.08)" strokeWidth="5" /><circle cx="24" cy="24" r="19" fill="none" stroke={cor} strokeWidth="5" strokeLinecap="round" strokeDasharray={`${dash} 999`} transform="rotate(-90 24 24)" /></svg>
-    <div className="absolute inset-0 grid place-items-center"><b className="num text-[11px]" style={{ color: cor }}>{valor}</b></div></div>
+
+function ModalSimples({ titulo, onFechar, d, children }) {
+  return (
+    <div className="modal-bg" style={{ display: 'flex' }} onClick={onFechar}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+          <b className="serif" style={{ fontSize: 15 }}>{titulo}</b><div style={{ flex: 1 }} />
+          <div className="btn" style={{ padding: '5px 9px' }} onClick={onFechar}><X size={13} /></div>
+        </div>
+        {children}
+      </div>
+    </div>
+  )
 }
 
-// ————————————————————————————— mesa de despacho —————————————————————————————
-function UltraMesa({ fila, idx, setIdx, conf, setConf, onFechar, cor }) {
+// ————— MESA (modal do mockup) —————
+function UltraMesa({ fila, idx, setIdx, conf, setConf, onFechar, d }) {
   const p = fila[Math.min(idx, fila.length - 1)]
-  if (!p) return null
+  if (!p) return <ModalSimples titulo="Mesa de Despacho" onFechar={onFechar} d={d}><div style={{ fontSize: 11, color: 'var(--faint)' }}>Sem pedidos na fila desta aba.</div></ModalSimples>
   const c = conf[p.id] || new Set()
   const tot = p.itens.reduce((s, it) => s + it.qtd, 0)
   const feitos = p.itens.reduce((s, it, i) => s + (c.has(i) ? it.qtd : 0), 0)
@@ -515,45 +787,46 @@ function UltraMesa({ fila, idx, setIdx, conf, setConf, onFechar, cor }) {
   const marcar = (i) => setConf((m) => { const s = new Set(m[p.id] || []); s.has(i) ? s.delete(i) : s.add(i); return { ...m, [p.id]: s } })
   const done = (id) => { const cc = conf[id]; const it = (fila.find((x) => x.id === id)?.itens) || []; return it.length > 0 && it.every((_, i) => cc && cc.has(i)) }
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center p-4" style={{ background: 'rgba(0,0,0,.65)' }} onClick={onFechar}>
-      <div className="rounded-2xl w-full overflow-hidden flex flex-col" style={{ maxWidth: 840, maxHeight: 'calc(100vh - 70px)', background: 'var(--surface)', border: `1px solid ${cor}55` }} onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center gap-2.5 px-4 py-3 shrink-0" style={{ borderBottom: '1px solid var(--glass-border)' }}>
-          <div className="w-8 h-8 rounded-lg grid place-items-center" style={{ background: cor }}><ScanLine size={15} color={cor === ML ? '#1a1008' : '#fff'} /></div>
-          <div className="flex-1"><div className="text-sm font-semibold">Mesa de Despacho</div><div className="text-[9px] text-faint">bipou, conferiu, imprimiu — a fila anda sozinha</div></div>
-          <span className="num text-[8px] font-bold uppercase px-2 py-1 rounded-full" style={{ color: '#1a1008', background: cor }}>{Math.min(idx + 1, fila.length)} de {fila.length}</span>
-          <button onClick={onFechar} className="text-faint hover:text-fg p-1"><X size={16} /></button>
+    <div className="modal-bg" style={{ display: 'flex' }} onClick={onFechar}>
+      <div className="modal" style={{ maxWidth: 840 }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+          <div style={{ width: 32, height: 32, borderRadius: 9, background: d.cor, display: 'grid', placeItems: 'center' }}><ScanLine size={15} color={d.txt} /></div>
+          <div style={{ flex: 1 }}><b className="serif" style={{ fontSize: 15 }}>Mesa de Despacho</b><div style={{ fontSize: 8.5, color: 'var(--faint)' }}>bipou, conferiu, imprimiu — a fila anda sozinha</div></div>
+          <span className="chip num" style={{ color: d.txt, background: d.cor }}>{Math.min(idx + 1, fila.length)} DE {fila.length}</span>
+          <div className="btn" style={{ padding: '5px 9px' }} onClick={onFechar}><X size={13} /></div>
         </div>
-        <div className="p-4 overflow-auto">
-          <div className="flex items-center gap-2.5 rounded-xl px-3.5 py-3 mb-3" style={{ background: 'rgba(0,0,0,.25)', border: `2px solid ${cor}55` }}>
-            <Barcode size={19} style={{ color: cor }} /><div className="flex-1"><div className="text-[7px] uppercase font-bold text-faint tracking-wider">bipe — ou toque no item para conferir</div><b className="text-[12.5px] text-dim">aguardando leitura…</b></div>
-            <span className="text-[8px] font-bold uppercase px-2 py-1 rounded-full" style={{ color: OK, background: 'rgba(47,217,141,.12)' }}>scanner pronto</span>
+        <div className="scanbox"><Barcode size={19} style={{ color: d.cor }} /><div style={{ flex: 1 }}><div className="up" style={{ fontSize: 7, color: 'var(--faint)' }}>bipe — ou toque no item para conferir</div><b style={{ fontSize: 12.5, color: 'var(--dim)' }}>aguardando leitura…</b></div><span className="chip" style={{ color: 'var(--ok)', background: 'rgba(47,217,141,.12)' }}>SCANNER PRONTO</span></div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1.35fr 1fr', gap: 12, marginTop: 12 }}>
+          <div style={{ borderRadius: 12, padding: 13, background: completo ? 'rgba(47,217,141,.06)' : 'rgba(255,255,255,.03)', border: `1px solid ${completo ? 'rgba(47,217,141,.4)' : 'var(--glass-border)'}` }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 9 }}>
+              <span className="up" style={{ fontSize: 8, fontWeight: 800, color: completo ? 'var(--ok)' : 'var(--faint)' }}>na mesa · #{p.id.slice(-12)}</span>
+              <b className="num" style={{ fontSize: 11, color: completo ? 'var(--ok)' : d.cor }}>{feitos}/{tot}</b>
+            </div>
+            {p.itens.map((it, i) => (
+              <div key={i} onClick={() => marcar(i)} style={{ display: 'flex', alignItems: 'center', gap: 9, borderRadius: 9, padding: '8px 10px', marginBottom: 5, cursor: 'pointer', background: c.has(i) ? 'rgba(47,217,141,.1)' : 'rgba(0,0,0,.2)', border: `1px solid ${c.has(i) ? 'rgba(47,217,141,.35)' : 'var(--glass-border)'}` }}>
+                <span style={{ width: 17, height: 17, borderRadius: 5, display: 'grid', placeItems: 'center', background: c.has(i) ? 'var(--ok)' : 'transparent', border: c.has(i) ? 'none' : '1.5px solid var(--glass-border)', flex: 'none' }}>{c.has(i) && <Check size={11} color="#0a1a0f" />}</span>
+                <span style={{ flex: 1, fontSize: 10.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.nome}</span>
+                {it.bin && <span className="num" style={{ fontSize: 8, color: d.cor }}>bin {it.bin}</span>}
+                <b className="num" style={{ fontSize: 11, color: c.has(i) ? 'var(--ok)' : 'var(--dim)' }}>{it.qtd}un</b>
+              </div>
+            ))}
+            <div style={{ display: 'flex', gap: 7, marginTop: 10 }}>
+              <div className={`btn ${completo ? 'primary' : ''}`} style={{ flex: 1, justifyContent: 'center', fontSize: 10, opacity: completo ? 1 : .5, pointerEvents: completo ? 'auto' : 'none' }} onClick={() => idx < fila.length - 1 ? setIdx(idx + 1) : onFechar()}><Check size={12} color={completo ? '#1a1008' : undefined} />{completo ? 'Conferido — próximo' : `faltam ${tot - feitos} un`}</div>
+              <div className="btn" style={{ fontSize: 10 }} onClick={() => idx < fila.length - 1 ? setIdx(idx + 1) : onFechar()}>pular</div>
+            </div>
           </div>
-          <div className="grid gap-3" style={{ gridTemplateColumns: '1.35fr 1fr' }}>
-            <div className="rounded-xl p-3.5" style={{ background: completo ? 'rgba(47,217,141,.06)' : 'var(--glass)', border: `1px solid ${completo ? 'rgba(47,217,141,.4)' : 'var(--glass-border)'}` }}>
-              <div className="flex items-center justify-between mb-2"><span className="text-[8px] font-bold uppercase tracking-wider" style={{ color: completo ? OK : 'var(--faint)' }}>na mesa · #{p.id.slice(-12)}</span><Anel valor={Math.round(feitos / Math.max(1, tot) * 100)} cor={completo ? OK : cor} /></div>
-              <div className="space-y-1.5">{p.itens.map((it, i) => (
-                <button key={i} onClick={() => marcar(i)} className="w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left" style={{ background: c.has(i) ? 'rgba(47,217,141,.1)' : 'rgba(0,0,0,.2)', border: `1px solid ${c.has(i) ? 'rgba(47,217,141,.35)' : 'var(--glass-border)'}` }}>
-                  <span className="w-[17px] h-[17px] rounded grid place-items-center shrink-0" style={{ background: c.has(i) ? OK : 'transparent', border: c.has(i) ? 'none' : '1.5px solid var(--glass-border)' }}>{c.has(i) && <Check size={11} color="#0a1a0f" />}</span>
-                  <span className="flex-1 text-[10.5px] truncate">{it.nome}</span>{it.bin && <span className="num text-[8px]" style={{ color: cor }}>bin {it.bin}</span>}
-                  <b className="num text-[11px]" style={{ color: c.has(i) ? OK : 'var(--dim)' }}>{it.qtd}un</b>
-                </button>))}</div>
-              <div className="flex gap-2 mt-3">
-                <button onClick={() => idx < fila.length - 1 ? setIdx(idx + 1) : onFechar()} disabled={!completo} className="flex-1 flex items-center justify-center gap-1.5 text-[10px] font-bold py-2 rounded-lg disabled:opacity-40" style={{ background: cor, color: cor === ML ? '#1a1008' : '#fff' }}><Check size={12} />{completo ? 'Conferido — próximo' : `faltam ${tot - feitos} un`}</button>
-                <button onClick={() => idx < fila.length - 1 ? setIdx(idx + 1) : onFechar()} className="glass text-[10px] px-3 py-2 rounded-lg text-dim">pular</button>
-              </div>
+          <div>
+            <div className="up" style={{ fontSize: 8, fontWeight: 800, color: 'var(--faint)', marginBottom: 7 }}>fila da coleta</div>
+            <div style={{ maxHeight: 250, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 5 }}>
+              {fila.map((f, i) => (
+                <div key={f.id} onClick={() => setIdx(i)} style={{ display: 'flex', alignItems: 'center', gap: 8, borderRadius: 9, padding: '7px 10px', cursor: 'pointer', background: i === idx ? `${d.cor}14` : 'rgba(0,0,0,.18)', border: `1px solid ${i === idx ? d.cor + '55' : 'var(--glass-border)'}` }}>
+                  <span style={{ width: 7, height: 7, borderRadius: '50%', flex: 'none', background: done(f.id) ? 'var(--ok)' : !f.nf && f.canal === 'shopee' ? 'var(--danger)' : i === idx ? d.cor : 'var(--faint)' }} />
+                  <b className="num" style={{ fontSize: 10, flex: 1 }}>#{f.id.slice(-8)}</b>
+                  <span style={{ fontSize: 8, color: done(f.id) ? 'var(--ok)' : 'var(--faint)' }}>{done(f.id) ? 'conferido' : !f.nf && f.canal === 'shopee' ? 'sem NF-e' : i === idx ? 'na mesa' : 'aguardando'}</span>
+                </div>
+              ))}
             </div>
-            <div>
-              <div className="text-[8px] font-bold uppercase tracking-wider text-faint mb-2">fila da coleta</div>
-              <div className="space-y-1.5" style={{ maxHeight: 250, overflow: 'auto' }}>
-                {fila.map((f, i) => (
-                  <button key={f.id} onClick={() => setIdx(i)} className="w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left" style={{ background: i === idx ? `${cor}14` : 'rgba(0,0,0,.18)', border: `1px solid ${i === idx ? cor + '55' : 'var(--glass-border)'}` }}>
-                    <span className="w-[7px] h-[7px] rounded-full shrink-0" style={{ background: done(f.id) ? OK : !f.nf && f.canal === 'shopee' ? DANGER : i === idx ? cor : 'var(--faint)' }} />
-                    <b className="num text-[10px] flex-1">#{f.id.slice(-8)}</b>
-                    <span className="text-[8px]" style={{ color: done(f.id) ? OK : 'var(--faint)' }}>{done(f.id) ? 'conferido' : i === idx ? 'na mesa' : 'aguardando'}</span>
-                  </button>))}
-              </div>
-              <div className="flex items-center gap-1.5 mt-2 px-2.5 py-2 rounded-lg" style={{ background: 'rgba(255,122,122,.07)', border: '1px solid rgba(255,122,122,.3)' }}><AlertTriangle size={11} style={{ color: DANGER }} /><span className="text-[8px] text-dim">item errado bipado trava a mesa até corrigir</span></div>
-            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, padding: '7px 10px', borderRadius: 9, background: 'rgba(255,122,122,.07)', border: '1px solid rgba(255,122,122,.3)' }}><AlertTriangle size={11} style={{ color: 'var(--danger)' }} /><span style={{ fontSize: 8, color: 'var(--dim)' }}>item errado bipado trava a mesa até corrigir</span></div>
           </div>
         </div>
       </div>
