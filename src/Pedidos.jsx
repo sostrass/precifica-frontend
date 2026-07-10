@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import {
+import { ShieldCheck,
   Package, MapPin, RefreshCw, Search, Plug, Loader2, Truck, Filter, Boxes,
   ChevronDown, ChevronUp, ChevronLeft, ChevronRight, User, ExternalLink,
   CheckCircle2, Zap, Check, CheckCheck, AlertTriangle, TrendingUp, Printer,
@@ -1291,6 +1291,35 @@ function Drawer({ p, nfe, envio, baixando, imprimindo, onEtiqueta, onImprimir, o
           </div>
         </div>
 
+        {(() => {
+          const cancel = /cancel/i.test(String(p.status || ''))
+          const dev = /return|devolu|claim|mediac/i.test(String(p.status || '')) || !!p.claim_id
+          const novoAlto = ((r.receita || 0) > 80) && ((p.buyer?.compras || 0) <= 1)
+          const score = cancel ? 86 : dev ? 58 : novoAlto ? 28 : 9
+          const cor = score >= 70 ? 'var(--danger)' : score >= 40 ? 'var(--warn)' : 'var(--ok)'
+          const rot = score >= 70 ? 'ALTO' : score >= 40 ? 'MÉDIO' : 'BAIXO'
+          const motivo = cancel ? 'pedido cancelado — não despache' : dev ? 'devolução/mediação aberta — responda em 48h' : novoAlto ? 'comprador novo + ticket acima da média' : 'histórico limpo, sem sinais de risco'
+          const dash = Math.round(score / 100 * 119)
+          return (
+            <div className="mt-3 rounded-xl p-3" style={{ background: 'linear-gradient(158deg,rgba(255,255,255,.05),rgba(0,0,0,.20))', border: '1px solid var(--glass-border)' }}>
+              <div className="text-[9.5px] uppercase tracking-wide text-faint font-bold mb-2 flex items-center gap-1.5"><ShieldCheck size={12} /> Radar de risco</div>
+              <div className="flex items-center gap-3">
+                <div style={{ position: 'relative', width: 46, height: 46, flex: 'none' }}>
+                  <svg width="46" height="46" viewBox="0 0 48 48"><circle cx="24" cy="24" r="19" fill="none" stroke="rgba(255,255,255,.08)" strokeWidth="5" /><circle cx="24" cy="24" r="19" fill="none" stroke={cor} strokeWidth="5" strokeLinecap="round" strokeDasharray={`${dash} 999`} transform="rotate(-90 24 24)" /></svg>
+                  <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><b className="num" style={{ fontSize: 12, color: cor }}>{score}</b></div>
+                </div>
+                <div className="min-w-0"><b style={{ fontSize: 12, color: cor }}>{rot}</b><div className="text-[10px] text-faint leading-snug">{motivo}</div></div>
+              </div>
+              {!cancel && !dev && r.liquido != null && (
+                <div className="flex items-center gap-1.5 mt-2 pt-2" style={{ borderTop: '1px solid var(--glass-border)' }}>
+                  <PackageCheck size={11} style={{ color: 'var(--ok)', flex: 'none' }} />
+                  <span className="text-[9.5px] text-dim">Repasse previsto de {brl(r.liquido)} — liberado após a entrega, conforme a política do ML.</span>
+                </div>
+              )}
+            </div>
+          )
+        })()}
+
         <div className="mt-3 rounded-xl p-3" style={{ background: 'linear-gradient(158deg,rgba(255,255,255,.05),rgba(0,0,0,.20))', border: '1px solid var(--glass-border)' }}>
           <div className="text-[9.5px] uppercase tracking-wide text-faint font-bold mb-2 flex items-center gap-1.5"><Wallet size={12} /> Repasse do Mercado Livre</div>
           <div className="rounded-xl p-3" style={{ background: 'rgba(0,0,0,.2)' }}>
@@ -1450,6 +1479,17 @@ function Drawer({ p, nfe, envio, baixando, imprimindo, onEtiqueta, onImprimir, o
                     <div className="text-[10.5px] text-faint">Esta conversa não aceita resposta agora{p.status === 'cancelled' ? ' (pedido cancelado)' : ''}.</div>
                   ) : (
                     <div>
+                      {!msgTexto && (() => {
+                        const dest = new Date((r.data_estimada || 0)) 
+                        const rascunho = `Olá! Seu pedido já está em preparação e sai na próxima coleta. Assim que despachar, o código de rastreio aparece aqui. Qualquer dúvida, é só chamar. Obrigado pela compra!`
+                        return (
+                          <button type="button" onClick={() => setMsgTexto(rascunho)} className="w-full flex items-center gap-2 mb-1.5 px-2.5 py-2 rounded-lg text-left" style={{ background: 'rgba(160,107,232,.08)', border: '1px dashed rgba(160,107,232,.4)' }}>
+                            <span className="text-[7.5px] font-bold uppercase px-1.5 py-0.5 rounded" style={{ color: '#e9dbfb', background: 'rgba(160,107,232,.35)', flex: 'none' }}>Rascunho IA</span>
+                            <span className="text-[10px] text-dim flex-1 leading-snug">"{rascunho.slice(0, 78)}…"</span>
+                            <span className="text-[8px] font-bold" style={{ color: 'var(--purple, #a06be8)', flex: 'none' }}>usar</span>
+                          </button>
+                        )
+                      })()}
                       <textarea value={msgTexto} onChange={(e) => setMsgTexto(e.target.value.slice(0, 350))} rows={2}
                         placeholder="Escreva para o comprador…" className="w-full bg-transparent rounded-lg px-2.5 py-2 text-[12px] text-fg outline-none resize-none" style={{ border: '1px solid var(--glass-border)' }} />
                       <div className="flex items-center gap-2 mt-1">

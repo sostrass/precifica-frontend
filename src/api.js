@@ -314,6 +314,7 @@ export const api = {
   shopeeEncerrarBundle: (id) => req(`/api/shopee/bundles/${id}`, { method: 'DELETE' }),
   shopeeAddons: (status = 'ongoing') => req(`/api/shopee/addons?status=${status}`),
   shopeeCriarAddon: (b) => req('/api/shopee/addons', { method: 'POST', body: b }),
+  shopeePedidosInteligencia: (dias = 45) => req(`/api/shopee/pedidos/inteligencia?dias=${dias}`),
   shopeeEncerrarAddon: (id) => req(`/api/shopee/addons/${id}`, { method: 'DELETE' }),
   shopeeFlashSlots: (dias = 3) => req(`/api/shopee/flash/slots?dias=${dias}`),
   shopeeFlash: (tipo = 1) => req(`/api/shopee/flash?tipo=${tipo}`),

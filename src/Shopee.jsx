@@ -1,5 +1,5 @@
 import { Component, useEffect, useMemo, useRef, useState } from 'react'
-import { ShieldCheck,
+import { ScanLine, ShieldCheck,
   Lock,
   BarChart3,
   Rocket, Star, Activity, ShoppingBag, Tag, Megaphone, Package,
@@ -2008,6 +2008,11 @@ function imprimirDoc(titulo, corpoHtml) {
       th,td{text-align:left;padding:7px 9px;border-bottom:1px solid #e2e2e2;vertical-align:top}
       th{background:#f4f4f4;text-transform:uppercase;font-size:10px;letter-spacing:.05em;color:#555}
       .q{font-weight:700;text-align:center;white-space:nowrap} .c{text-align:center}
+      .corr{background:#16171c;color:#fff;font-size:11px;font-weight:800;letter-spacing:.06em;padding:5px 10px;border-radius:4px;margin:14px 0 0}
+      .bn{width:16mm;font-weight:900;font-family:ui-monospace,monospace;font-size:13px}
+      .rt{width:24mm;text-align:center;font-family:ui-monospace,monospace;font-size:11px;color:#444}
+      .ck2{width:12mm;text-align:center;color:#999;font-size:15px}
+      .septot{display:flex;justify-content:space-between;align-items:center;gap:14px;border-top:2px solid #111;margin-top:10px;padding-top:8px;font-size:12px;flex-wrap:wrap}
       .chk{width:26px;color:#999;font-size:15px} .sku{color:#888;font-family:ui-monospace,monospace;font-size:11px}
       tr{page-break-inside:avoid}
       @media print{@page{margin:12mm}}
@@ -2133,7 +2138,7 @@ const PRINT_CFG_PADRAO = {
   emitente_nome: '', emitente_cnpj: '', emitente_endereco: '', emitente_cidade: '',
   mostrar_timeline: true, mostrar_nfe: true, mostrar_rastreio: true, mostrar_destinatario: true,
   mostrar_miniaturas: true, mostrar_complemento: true, mostrar_nota_comprador: true,
-  mostrar_codigo_barras: true, mostrar_qr: true,
+  mostrar_codigo_barras: true, mostrar_qr: true, mostrar_estacao_rota: true, mostrar_prioridade: true,
 }
 let PRINT_CFG = { ...PRINT_CFG_PADRAO }
 function setPrintCfg(c) { PRINT_CFG = { ...PRINT_CFG_PADRAO, ...(c || {}) } }
@@ -2141,7 +2146,7 @@ function setPrintCfg(c) { PRINT_CFG = { ...PRINT_CFG_PADRAO, ...(c || {}) } }
 // O backend continua só com dados da empresa + flags base; cada tipo pode divergir.
 // Fallback: se não houver override salvo, usa PRINT_CFG (comportamento atual, sem regressão).
 const LS_PRINT_TIPO = 'precifica_print_tipo'
-const FLAGS_IMPR = ['mostrar_timeline', 'mostrar_miniaturas', 'mostrar_codigo_barras', 'mostrar_nota_comprador', 'mostrar_complemento', 'mostrar_nfe', 'mostrar_rastreio', 'mostrar_destinatario', 'mostrar_qr']
+const FLAGS_IMPR = ['mostrar_timeline', 'mostrar_miniaturas', 'mostrar_codigo_barras', 'mostrar_nota_comprador', 'mostrar_complemento', 'mostrar_nfe', 'mostrar_rastreio', 'mostrar_destinatario', 'mostrar_qr', 'mostrar_estacao_rota', 'mostrar_prioridade']
 function lerPorTipo() { try { return JSON.parse(localStorage.getItem(LS_PRINT_TIPO) || '{}') || {} } catch { return {} } }
 function gravarPorTipo(o) { try { localStorage.setItem(LS_PRINT_TIPO, JSON.stringify(o || {})) } catch (_) {} }
 function cfgTipo(tipo) { const o = lerPorTipo()[tipo]; return o ? { ...PRINT_CFG, ...o } : PRINT_CFG }
@@ -2215,6 +2220,7 @@ function htmlFolhaPedido(p, cfg = PRINT_CFG) {
   const nItens = (p.itens || []).length
   const rows = (p.itens || []).map((it) => `
     <div class="row">
+      <div class="bincol">${esc(it.bin || '—')}</div>
       ${cfg.mostrar_miniaturas ? `<div class="ph">${it.imagem ? `<img src="${esc(it.imagem)}">` : ico('image', 17, '#c2c5cd')}</div>` : ''}
       <div class="cd">
         <div class="nm">${esc(it.nome) || '—'}</div>
@@ -2241,11 +2247,17 @@ function htmlFolhaPedido(p, cfg = PRINT_CFG) {
   return `<section class="doc">
     <div class="band">
       <div class="bl"><div class="kick">PEDIDO DE VENDA · SEPARAÇÃO</div><div class="onum">#${esc(p.order_sn)}</div>
-        <div class="cliente">${ico('shopping-bag', 13, '#FFB59E')}<span>${esc(nomeRealF || 'comprador protegido')}</span></div>
+        <div class="cliente">${ico('shopping-bag', 13, '#FFB59E')}<span>${esc(nomeRealF || 'comprador protegido')}</span>${p.recorrencia ? `<span class="recb">${ico('repeat', 10, '#1a1008')} ${esc(String(p.recorrencia))}</span>` : ''}</div>
         <div class="tags"><span class="tg s">${ico('truck', 12, '#FF9576')} Shopee Xpress</span>${tagPrazo}</div></div>
       <div class="br">${cfg.mostrar_codigo_barras ? `<div class="bcwrap">${barcodeSVG(p.order_sn, { height: 38, modulo: 1.15 })}</div>` : ''}<div class="dt">impresso em ${new Date().toLocaleString('pt-BR')}</div></div>
     </div>
     <div class="emp"><div class="logo">${ico('store', 18, '#fff')}</div><div class="ei"><div class="en">${esc(emitNome(cfg))}</div><div class="ec">${esc(emitCnpjCidade(cfg))}</div></div><img class="spxs" src="${SPX_LOGO}"></div>
+    ${cfg.mostrar_prioridade === false ? '' : `<div class="prioband">
+      ${p.ship_by ? `<span class="pb"><em>DESPACHAR ATÉ</em><b>${new Date(p.ship_by * 1000).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</b></span>` : ''}
+      <span class="pb"><em>ESTAÇÃO</em><b>${esc(limpoF(p.estacao) || '—')}</b></span>
+      <span class="pb"><em>ROTA</em><b>${esc(limpoF(p.rota) || '—')}</b></span>
+      <span class="pb"><em>VOLUME</em><b>1 caixa${p.peso ? ' · ' + esc(String(p.peso)) : ''}</b></span>
+    </div>`}
     ${cfg.mostrar_timeline ? timelineHTML(p.status) : ''}
     <div class="topcols">
       <div class="refs">
@@ -2253,6 +2265,7 @@ function htmlFolhaPedido(p, cfg = PRINT_CFG) {
         ${cfg.mostrar_rastreio ? `<div class="ref">${ico('barcode', 13, '#6b6f7a')}<div><span>RASTREIO</span><b class="mn">${esc(p.rastreio || '—')}</b></div></div>` : ''}
         <div class="ref">${ico('truck', 13, '#6b6f7a')}<div><span>STATUS</span><b>${esc(statusPt(p.status))}</b></div></div>
         <div class="ref">${ico('package', 13, '#6b6f7a')}<div><span>VOLUME</span><b>1 caixa</b></div></div>
+        ${p.sobra != null ? `<div class="ref"><div style="width:13px;height:13px;display:flex;align-items:center;justify-content:center;color:#2E9E63;font-weight:900">R$</div><div><span>SOBRA${p.margem != null ? ' · ' + esc(String(p.margem)) + '%' : ''}</span><b style="color:#2E9E63">${Number(p.sobra).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</b></div></div>` : ''}
       </div>
       ${destcardHTML}
     </div>
@@ -2274,6 +2287,8 @@ const CSS_SHARED = `*{-webkit-print-color-adjust:exact !important;print-color-ad
 const CSS_FOLHA = CSS_SHARED + `*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Inter',system-ui,-apple-system,Segoe UI,Arial,sans-serif;color:#14151a}
 .doc{background:#fff;page-break-after:always}
 .band{background:linear-gradient(120deg,#16171c,#23252e);color:#fff;padding:16px 30px;display:flex;justify-content:space-between;align-items:flex-start}
+.prioband{background:#16171c;color:#fff;display:flex;justify-content:space-between;align-items:center;padding:8px 30px;gap:14px}.prioband .pb{display:flex;flex-direction:column;line-height:1.15}.prioband .pb em{font-style:normal;font-size:7.5px;font-weight:700;letter-spacing:.09em;color:#9aa0ab}.prioband .pb b{font-size:13px;font-weight:800;letter-spacing:.02em}
+.recb{display:inline-flex;align-items:center;gap:3px;margin-left:8px;background:#F2C200;color:#1a1008;font-size:9px;font-weight:800;padding:2px 7px;border-radius:99px;letter-spacing:.02em}.recb svg{flex-shrink:0}
 .kick{font-size:10px;letter-spacing:.16em;color:#EE6A45;font-weight:800}.onum{font-size:25px;font-weight:800;font-family:ui-monospace,monospace;margin:2px 0 6px;word-break:break-all}
 .cliente{display:flex;align-items:center;font-size:13.5px;font-weight:700;color:#FFD9CC;margin:0 0 8px}.cliente svg{margin-right:6px;flex-shrink:0}.cliente span{letter-spacing:.01em;word-break:break-all}
 .tags{display:flex;flex-wrap:wrap}.tg{font-size:11px;font-weight:600;padding:4px 10px;border-radius:20px;display:inline-flex;align-items:center}.tg.s{background:rgba(238,77,45,.18);color:#FF9576}.tg.w{background:rgba(224,162,60,.16);color:#F0C079}
@@ -2290,6 +2305,7 @@ const CSS_FOLHA = CSS_SHARED + `*{box-sizing:border-box;margin:0;padding:0}body{
 .ith{display:flex;align-items:center;justify-content:space-between;padding:14px 30px 9px}.itl{display:flex;align-items:center}.itl span{font-size:12px;font-weight:800;letter-spacing:.04em}.itr{display:flex;align-items:center}.cnt{font-size:12px;color:#3a3f4b}.cnt b{font-weight:800}.den{font-size:10.5px;color:#9aa0ab}
 .list{border-top:1px solid #eef0f3}
 .row{display:flex;align-items:flex-start;padding:11px 30px;border-bottom:1px solid #f1f2f5;page-break-inside:avoid}
+.bincol{flex:none;width:15mm;font-size:15px;font-weight:900;color:#16171c;letter-spacing:.02em;padding-top:1px;font-family:ui-monospace,monospace}
 .row .ph{width:44px;height:44px;border-radius:9px;background:linear-gradient(135deg,#f4f5f7,#e9ebef);border:1px solid #e8eaef;display:grid;place-items:center;flex-shrink:0;overflow:hidden}.row .ph img{width:100%;height:100%;object-fit:cover}
 .cd{flex:1;min-width:0}.nm{font-size:13.5px;font-weight:700;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .mt{font-size:12px;color:#3a3f4b;margin-top:5px;display:flex;align-items:center;flex-wrap:wrap}.sku{font-family:ui-monospace,monospace;color:#16171c;font-weight:700;font-size:12.5px;background:#eef0f3;padding:1px 6px;border-radius:5px}.dt2{color:#ccc}.cp{color:#8a8f9b}
@@ -2338,7 +2354,7 @@ function htmlEtiqueta(p, rem, cfg = PRINT_CFG) {
     <div class="xphd"><img class="spx" src="${SPX_LOGO}"><div class="xpr"><div class="svc">ENTREGA PADRÃO</div><div class="vol">Volume 1 / 1 · #${esc(String(p.order_sn).slice(-14))}</div></div></div>
     <div class="cols">
       <div class="cl">
-        ${(limpo(p.estacao) || limpo(p.rota)) ? `<div class="sortbox"><span class="sl">ESTAÇÃO / ROTA</span><div class="sb">${esc(limpo(p.estacao) || '—')}</div>${limpo(p.rota) ? `<span class="ss">${esc(p.rota)}</span>` : ''}</div>` : ''}
+        ${cfg.mostrar_estacao_rota === false ? '' : `<div class="sortwrap"><div class="sbox"><span class="sl2">ESTAÇÃO</span><b class="sv">${esc(limpo(p.estacao) || '\u00A0')}</b></div><div class="sbox rt"><span class="sl2">ROTA</span><b class="sv">${esc(limpo(p.rota) || '\u00A0')}</b></div></div>`}
         ${danfe}
         ${destEtiqHTML}
       </div>
@@ -2362,6 +2378,7 @@ const CSS_ETIQ = CSS_SHARED + `*{box-sizing:border-box;margin:0;padding:0}body{f
 .cl{width:50%;display:flex;flex-direction:column;border-right:1.5px solid #111;padding-right:3mm}.cl>*+*{margin-top:1.8mm}
 .cr{width:50%;display:flex;flex-direction:column;padding-left:3mm}.cr>*+*{margin-top:1.8mm}
 .sortbox{border:1.5px solid #111;border-radius:2px;text-align:center;padding:1mm}.sortbox .sl{font-size:6.5px;font-weight:800;letter-spacing:.08em;color:#444}.sb{font-size:26px;font-weight:900;letter-spacing:2px;line-height:1.05}.ss{font-size:7px;font-weight:700}
+.sortwrap{display:flex;gap:1.5mm;margin-bottom:1.5mm}.sbox{flex:1;border:2.5px solid #111;border-radius:3px;text-align:center;padding:1mm .5mm;min-height:13mm;display:flex;flex-direction:column;justify-content:center}.sbox.rt{background:#111;color:#fff}.sbox .sl2{font-size:8px;font-weight:800;letter-spacing:.1em}.sbox .sv{font-size:30px;font-weight:900;line-height:1;letter-spacing:1px;min-height:8mm;display:flex;align-items:center;justify-content:center}
 .danfe{border:1px solid #111;padding:1.2mm}.dh{font-size:7px;font-weight:800;display:flex;align-items:center;border-bottom:.5px solid #999;padding-bottom:.6mm;margin-bottom:.6mm}
 .dg{display:flex;flex-wrap:wrap;font-size:8px}.dg>span{margin-right:3mm}.dg b{font-family:ui-monospace,monospace}.em{font-size:7.5px;margin-top:.6mm}
 .chave{text-align:center;margin-top:.8mm}.chave svg{max-width:100%}.cl2{font-size:6px;font-family:ui-monospace,monospace;letter-spacing:.3px}
@@ -2647,6 +2664,39 @@ function PedidoDetalhe({ orderSn, alvo, onClose, recorrente, onImpressa, rem }) 
                   </div>
                 </div>
 
+                {/* Radar de risco do pedido */}
+                {(() => {
+                  const fraude = cancelado
+                  const dev = ok && /devolu|reembol|return/i.test(String(d.status || ''))
+                  const novoAlto = !recorrente && (f.receita || 0) > 60
+                  const score = fraude ? 88 : dev ? 54 : novoAlto ? 26 : 8
+                  const cor = score >= 70 ? '#FF7A7A' : score >= 40 ? '#E0A23C' : '#2FD98D'
+                  const rot = score >= 70 ? 'ALTO' : score >= 40 ? 'MÉDIO' : 'BAIXO'
+                  const motivo = fraude ? 'pedido cancelado — confira antes de despachar' : dev ? 'devolução/reembolso em aberto — responda em 48h' : novoAlto ? 'comprador novo + ticket acima da média' : 'histórico limpo, comprador conhecido'
+                  const dash = Math.round(score / 100 * 119)
+                  return (
+                    <div className="rounded-xl p-3" style={{ background: 'var(--glass-hover)' }}>
+                      <div className="text-[10px] text-faint uppercase tracking-wide mb-2 flex items-center gap-1"><ShieldCheck size={11} /> Radar de risco</div>
+                      <div className="flex items-center gap-3">
+                        <div style={{ position: 'relative', width: 46, height: 46, flex: 'none' }}>
+                          <svg width="46" height="46" viewBox="0 0 48 48"><circle cx="24" cy="24" r="19" fill="none" stroke="rgba(255,255,255,.08)" strokeWidth="5" /><circle cx="24" cy="24" r="19" fill="none" stroke={cor} strokeWidth="5" strokeLinecap="round" strokeDasharray={`${dash} 999`} transform="rotate(-90 24 24)" /></svg>
+                          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><b className="num" style={{ fontSize: 12, color: cor }}>{score}</b></div>
+                        </div>
+                        <div className="min-w-0">
+                          <b style={{ fontSize: 12, color: cor }}>{rot}</b>
+                          <div className="text-[10px] text-faint leading-snug">{motivo}</div>
+                        </div>
+                      </div>
+                      {f.tem_escrow && !fraude && !dev && (
+                        <div className="flex items-center gap-1.5 mt-2 pt-2" style={{ borderTop: '1px solid var(--glass-border)' }}>
+                          <CheckCheck size={11} style={{ color: '#2FD98D', flex: 'none' }} />
+                          <span className="text-[9.5px] text-dim">Repasse conciliado: o valor liberado bateu com o previsto — sem divergência.</span>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })()}
+
                 {/* Repasse real */}
                 <div className="rounded-xl p-3" style={{ background: 'var(--glass-hover)' }}>
                   <div className="text-xs font-semibold mb-1 flex items-center gap-1.5"><Wallet size={13} style={{ color: LARANJA }} /> Repasse da Shopee</div>
@@ -2729,6 +2779,8 @@ const TogglesImpr = [
   ['mostrar_rastreio', 'Rastreio', 'Folha + etiqueta'],
   ['mostrar_destinatario', 'Destinatário', 'Folha + etiqueta'],
   ['mostrar_qr', 'QR Code', 'Etiqueta'],
+  ['mostrar_estacao_rota', 'Estação / Rota (triagem do CD)', 'Etiqueta'],
+  ['mostrar_prioridade', 'Faixa de prioridade (despacho/rota)', 'Folha'],
 ]
 
 function ToggleLinha({ on, onClick, label, escopo }) {
@@ -2946,6 +2998,43 @@ function PedidosPainel({ conectado }) {
   const [carregando, setCarregando] = useState(false)
   const [cacheImpr, setCacheImpr] = useState({})   // order_sn -> pedido completo (seleção entre páginas)
   const [selTudoLoad, setSelTudoLoad] = useState(false)
+  const [intel, setIntel] = useState(null)
+  const [intelAberto, setIntelAberto] = useState(false)
+  const [criandoIntel, setCriandoIntel] = useState('')
+  const [mesaAberta, setMesaAberta] = useState(false)
+  const [mesaIdx, setMesaIdx] = useState(0)
+  const [mesaConf, setMesaConf] = useState({})   // order_sn -> Set(indices conferidos)
+  useEffect(() => {
+    if (!conectado || !intelAberto || intel) return
+    api.shopeePedidosInteligencia(45).then(setIntel).catch(() => setIntel({ erro: true }))
+  }, [conectado, intelAberto])
+  const criarDeVenda = async (tipo, payload, rot) => {
+    setCriandoIntel(tipo)
+    try {
+      const fn = tipo === 'bundle' ? api.shopeeCriarBundle : tipo === 'addon' ? api.shopeeCriarAddon : api.shopeeCriarCupom
+      const r = await fn(payload)
+      const ok = (r?.itens_adicionados ?? r?.ok ?? 1)
+      notify(`${rot} criada${ok ? '' : ' (verifique no cockpit)'}.`, 'ok')
+    } catch (e) { notify(e.message || 'Falha ao criar', 'danger') }
+    setCriandoIntel('')
+  }
+  // Atalhos de teclado: J/K navega · E expande · P imprime · B busca · esc fecha
+  useEffect(() => {
+    const onKey = (e) => {
+      const tag = (e.target && e.target.tagName) || ''
+      if (tag === 'INPUT' || tag === 'TEXTAREA') { if (e.key === 'Escape') e.target.blur(); return }
+      const lista = pedidos || []
+      if (!lista.length && e.key !== 'Escape') return
+      const idx = lista.findIndex((p) => p.order_sn === aberto)
+      if (e.key === 'j' || e.key === 'ArrowDown') { e.preventDefault(); const n = lista[Math.min(lista.length - 1, idx < 0 ? 0 : idx + 1)]; n && setAberto(n.order_sn) }
+      else if (e.key === 'k' || e.key === 'ArrowUp') { e.preventDefault(); const n = lista[Math.max(0, idx < 0 ? 0 : idx - 1)]; n && setAberto(n.order_sn) }
+      else if (e.key === 'e' && idx >= 0) { e.preventDefault(); setAberto(null) }
+      else if (e.key === 'Escape') { setAberto(null) }
+      else if (e.key === 'b') { e.preventDefault(); const el = document.querySelector('[data-busca-pedidos]'); el && el.focus() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [pedidos, aberto])
   const carregar = (over = {}, manter = false) => {
     const st = over.status ?? status, gr = over.grupo ?? grupo, nfv = over.nf ?? nf
     const bz = over.busca ?? busca, bt = over.buscaTipo ?? buscaTipo
@@ -3084,11 +3173,30 @@ function PedidosPainel({ conectado }) {
     setImprimindo(true)
     try {
       const sep = await api.shopeePedidosSeparacao(status, dias)
-      const linhas = (sep.itens || []).map((l) =>
-        `<tr><td class="chk">☐</td><td>${l.nome || ''}</td><td class="sku">${l.sku || ''}</td><td class="q">${l.qtd}</td><td class="c">${l.pedidos}</td></tr>`).join('')
-      imprimirDoc('Lista de separação', `<h1>Lista de separação — ${LABEL_ABA[status] || status}</h1>
-        <div class="sub">${sep.skus} produtos · ${sep.total_unidades} unidades · ${sep.pedidos} pedidos · ${new Date().toLocaleString('pt-BR')}</div>
-        <table><thead><tr><th class="chk"></th><th>Produto</th><th>SKU</th><th class="q">Qtd</th><th class="c">Pedidos</th></tr></thead><tbody>${linhas}</tbody></table>`)
+      const itens = sep.itens || []
+      // agrupa por corredor (usa o corredor do item; se não houver, deriva do bin; senão, grupo único)
+      const corredorDe = (l) => l.corredor || (l.bin ? `CORREDOR ${String(l.bin).charAt(0).toUpperCase()}` : 'SEPARAÇÃO')
+      const grupos = {}
+      itens.forEach((l) => { const g = corredorDe(l); (grupos[g] = grupos[g] || []).push(l) })
+      const ordCorredor = Object.keys(grupos).sort()
+      const secoes = ordCorredor.map((g) => {
+        const linhas = grupos[g].slice().sort((a, b) => String(a.bin || '').localeCompare(String(b.bin || ''))).map((l) =>
+          `<tr>
+            <td class="bn">${esc(l.bin || '—')}</td>
+            <td class="sku">${esc(l.sku || '')}</td>
+            <td>${esc(l.nome || '')}</td>
+            <td class="q">${l.qtd}</td>
+            <td class="rt">${esc(l.rotas || (l.pedidos ? l.pedidos + ' ped' : '—'))}</td>
+            <td class="ck2">☐</td><td class="ck2">☐</td>
+          </tr>`).join('')
+        return `<div class="corr">${esc(g)}</div>
+          <table><thead><tr><th class="bn">BIN</th><th>SKU</th><th>Produto</th><th class="q">Qtd</th><th class="rt">Rotas</th><th class="ck2">✓1</th><th class="ck2">✓2</th></tr></thead><tbody>${linhas}</tbody></table>`
+      }).join('')
+      const pesoTot = sep.peso_total ? ` · ${sep.peso_total}` : ''
+      imprimirDoc('Lista de separação', `<h1>Separação — ${LABEL_ABA[status] || status}</h1>
+        <div class="sub">${sep.skus} produtos · ${sep.total_unidades} unidades · ${sep.pedidos} pedidos${pesoTot} · ${new Date().toLocaleString('pt-BR')}</div>
+        ${secoes || '<div class="sub">Sem itens para separar neste status.</div>'}
+        <div class="septot"><b>TOTAL ${sep.total_unidades} un · ${sep.skus} SKUs${pesoTot}</b><span>faltas/avarias: ____________________</span><span>✓1 separador &nbsp; ✓2 conferente</span></div>`)
     } catch (e) { notify(e.message || 'Falha ao gerar', 'danger') }
     setImprimindo(false)
   }
@@ -3107,12 +3215,72 @@ function PedidosPainel({ conectado }) {
             </span>
           )}
           <button onClick={() => setEditorImpr(true)} className={btnTxt} title="Personalizar impressão: dados da empresa e campos da folha/etiqueta"><SlidersHorizontal size={13} /> Personalizar</button>
+          <button onClick={() => { setMesaIdx(0); setMesaAberta(true) }} disabled={!pedidos.length} className={btnTxt} title="Mesa de Despacho: bipe e confira item a item, imprima e a fila anda sozinha"><ScanLine size={13} /> Mesa de Despacho</button>
           <button onClick={imprimirSeparacao} disabled={imprimindo || !pedidos.length} className={btnTxt} title="Lista de separação (produtos A→Z, todos os pedidos do status)"><ClipboardList size={13} /> Separação</button>
           <button onClick={imprimirPedidosRich} disabled={imprimindo || !pedidos.length} className={btnTxt} title="Folha de pedido (com endereço e itens)"><Printer size={13} /> Pedidos{sel.size ? ` (${sel.size})` : ''}</button>
           <button onClick={imprimirEtiquetasRich} disabled={imprimindo || !pedidos.length} className="text-xs px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 disabled:opacity-40 font-medium" style={{ background: LARANJA, color: '#fff' }} title="Etiquetas de envio 100×150mm (modelo Precifica AI)"><Tag size={13} /> Etiquetas{sel.size ? ` (${sel.size})` : ''}</button>
           <button onClick={imprimirEtiquetaOficial} disabled={imprimindo || !pedidos.length} className={btnTxt} title="Etiqueta OFICIAL da Shopee em PDF (waybill do SPX). Tem a estação/rota e o endereço."><Receipt size={13} /> Oficial SPX{sel.size ? ` (${sel.size})` : ''}</button>
           <button disabled title="Imprimir NF-e — precisa vincular a nota do Bling (em breve)" className="text-xs px-2.5 py-1.5 rounded-lg glass text-faint flex items-center gap-1.5 opacity-50 cursor-not-allowed"><FileText size={13} /> NF-e</button>
         </div>
+      </div>
+
+      {/* PONTE PEDIDOS → CAMPANHAS · Inteligência de vendas */}
+      <div className="mb-3 rounded-2xl overflow-hidden" style={{ border: '1px solid transparent', background: 'linear-gradient(var(--surface),var(--surface)) padding-box, linear-gradient(110deg, rgba(214,0,127,.4), rgba(47,217,141,.3)) border-box' }}>
+        <button type="button" onClick={() => setIntelAberto((v) => !v)} className="w-full flex items-center gap-2.5 px-4 py-2.5 text-left">
+          <div style={{ width: 28, height: 28, borderRadius: 8, background: 'linear-gradient(145deg,#d6007f,#a0005f)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}><Sparkles size={14} color="#fff" /></div>
+          <div className="flex-1 min-w-0">
+            <div className="text-[13px] font-semibold flex items-center gap-2">Inteligência de vendas <span className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded-full" style={{ color: '#fff', background: PROMO.SHOPEE }}>Pedidos → Campanhas</span></div>
+            <div className="text-[9.5px] text-faint">o que os pedidos reais dizem — e cria a campanha certa com um clique</div>
+          </div>
+          <ChevronDown size={15} className="text-faint" style={{ transform: intelAberto ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }} />
+        </button>
+        {intelAberto && (
+          <div className="px-4 pb-4">
+            {!intel ? <div className="flex items-center gap-2 py-3 text-faint text-[11px]"><Loader2 size={13} className="animate-spin" />estudando os pedidos dos últimos 45 dias…</div>
+              : intel.erro ? <div className="text-[11px] text-faint py-2">Não consegui ler os pedidos agora. Tente novamente em instantes.</div>
+                : !intel.suficiente ? <div className="text-[11px] text-faint py-2">Amostra ainda pequena ({intel.amostra} pedido(s) em 45 dias). Assim que as vendas crescerem, as sugestões aparecem aqui.</div>
+                  : (
+                    <div className="grid grid-cols-3 gap-2.5">
+                      {/* LEVE+ */}
+                      <div className="rounded-xl p-3" style={{ background: 'var(--glass)', border: '1px solid rgba(160,107,232,.35)' }}>
+                        <div className="flex items-center gap-1.5 mb-2"><span style={{ width: 8, height: 8, borderRadius: '50%', background: PROMO.PURPLE }} /><b className="text-[10.5px]">Comprados juntos → Leve+</b></div>
+                        {(intel.leve_mais || []).length ? (
+                          <>
+                            <div className="text-[9.5px] text-dim leading-relaxed mb-2">
+                              <b style={{ color: 'var(--text)' }}>{intel.leve_mais[0].nome_a}</b> + <b style={{ color: 'var(--text)' }}>{intel.leve_mais[0].nome_b}</b> · juntos <b className="num" style={{ color: PROMO.PURPLE }}>{intel.leve_mais[0].vezes}×</b>
+                              {intel.leve_mais[1] && <div className="text-faint mt-1">{intel.leve_mais[1].nome_a} + {intel.leve_mais[1].nome_b} · {intel.leve_mais[1].vezes}×</div>}
+                            </div>
+                            <button onClick={() => { const p = intel.leve_mais[0]; const ag = Math.floor(Date.now() / 1000); criarDeVenda('bundle', { nome: `Leve+ ${p.nome_a.slice(0, 14)}`, inicio: ag + 3900, fim: ag + 14 * 86400, rule_type: 2, valor: 10, min_itens: 2, item_ids: [p.item_a, p.item_b] }, 'Leve+') }} disabled={criandoIntel === 'bundle'} className="w-full text-[9px] font-bold uppercase py-1.5 rounded-lg text-white flex items-center justify-center gap-1" style={{ background: PROMO.PURPLE }}>{criandoIntel === 'bundle' ? <Loader2 size={10} className="animate-spin" /> : <PlusCircle size={10} />}Criar Leve+ com este par</button>
+                          </>
+                        ) : <div className="text-[9px] text-faint py-1">Nenhum par comprado junto com frequência ainda.</div>}
+                      </div>
+                      {/* ADD-ON */}
+                      <div className="rounded-xl p-3" style={{ background: 'var(--glass)', border: '1px solid rgba(47,201,217,.35)' }}>
+                        <div className="flex items-center gap-1.5 mb-2"><span style={{ width: 8, height: 8, borderRadius: '50%', background: PROMO.TEAL }} /><b className="text-[10.5px]">Levam junto do campeão → Add-on</b></div>
+                        {intel.add_on && (intel.add_on.companheiros || []).length ? (
+                          <>
+                            <div className="text-[9.5px] text-dim leading-relaxed mb-2">
+                              Principal: <b style={{ color: 'var(--text)' }}>{intel.add_on.nome_principal}</b><br />
+                              Adicionais: <span className="text-faint">{intel.add_on.companheiros.map((c) => c.nome).join(' · ')}</span> — casada em <b className="num" style={{ color: PROMO.TEAL }}>{intel.add_on.pct_casada}%</b>
+                            </div>
+                            <button onClick={() => { const a = intel.add_on; const ag = Math.floor(Date.now() / 1000); criarDeVenda('addon', { nome: `Add-on ${a.nome_principal.slice(0, 14)}`, inicio: ag + 3900, fim: ag + 14 * 86400, promotion_type: 0, principais: [a.principal], adicionais: a.companheiros.slice(0, 2).map((c) => ({ item_id: c.item_id })) }, 'Add-on') }} disabled={criandoIntel === 'addon'} className="w-full text-[9px] font-bold uppercase py-1.5 rounded-lg flex items-center justify-center gap-1" style={{ background: PROMO.TEAL, color: '#0a1a1c' }}>{criandoIntel === 'addon' ? <Loader2 size={10} className="animate-spin" /> : <PlusCircle size={10} />}Criar Add-on</button>
+                          </>
+                        ) : <div className="text-[9px] text-faint py-1">Sem companheiros de compra do campeão ainda.</div>}
+                      </div>
+                      {/* CUPOM */}
+                      <div className="rounded-xl p-3" style={{ background: 'var(--glass)', border: '1px solid rgba(242,194,0,.35)' }}>
+                        <div className="flex items-center gap-1.5 mb-2"><span style={{ width: 8, height: 8, borderRadius: '50%', background: PROMO.GOLD }} /><b className="text-[10.5px]">Ticket & recompra → Cupom</b></div>
+                        <div className="text-[9.5px] text-dim leading-relaxed mb-2">
+                          Ticket médio <b className="num" style={{ color: 'var(--text)' }}>{fmtBRL(intel.cupom.ticket_medio)}</b><br />
+                          <span className="text-faint">Sugestão: cupom {intel.cupom.desconto_sugerido}% · mínimo {fmtBRL(intel.cupom.minimo_sugerido)}</span>
+                        </div>
+                        <button onClick={() => { const c = intel.cupom; const ag = Math.floor(Date.now() / 1000); const cod = 'VENDA' + new Date().toLocaleDateString('pt-BR').replace(/\//g, '').slice(0, 4); criarDeVenda('cupom', { nome: `Cupom ${cod}`, codigo: cod, inicio: ag + 900, fim: ag + 7 * 86400, tipo_desconto: 2, valor: c.desconto_sugerido, compra_minima: c.minimo_sugerido, quantidade: 100, escopo: 1 }, 'Cupom') }} disabled={criandoIntel === 'cupom'} className="w-full text-[9px] font-bold uppercase py-1.5 rounded-lg flex items-center justify-center gap-1" style={{ background: PROMO.GOLD, color: '#1a1008' }}>{criandoIntel === 'cupom' ? <Loader2 size={10} className="animate-spin" /> : <PlusCircle size={10} />}Criar cupom sugerido</button>
+                      </div>
+                    </div>
+                  )}
+            {intel && intel.suficiente && <div className="flex items-center gap-2 mt-2.5 px-3 py-2 rounded-lg" style={{ background: 'rgba(47,217,141,.06)', border: '1px solid rgba(47,217,141,.25)' }}><span style={{ width: 7, height: 7, borderRadius: '50%', background: PROMO.OK, flex: 'none' }} /><span className="text-[9px] text-dim"><b style={{ color: PROMO.OK }}>Ciclo fechado:</b> os pedidos alimentam as sugestões, os agentes no Estúdio criam sozinhos no ritmo configurado, e o radar reaprende a cada rodada.</span></div>}
+          </div>
+        )}
       </div>
 
       {/* Grupo 1 — Meus Pedidos */}
@@ -3163,7 +3331,7 @@ function PedidosPainel({ conectado }) {
       <div className="flex items-center gap-2 mb-2 flex-wrap">
         <div className="flex-1 min-w-[180px] flex items-center gap-1.5 rounded-lg px-2.5 py-1.5" style={{ background: 'var(--glass-hover)' }}>
           <Search size={13} className="text-faint" />
-          <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder={`buscar em ${(TIPOS_BUSCA.find((t) => t[0] === buscaTipo) || ['', 'tudo'])[1].toLowerCase()}…`} className="bg-transparent text-xs flex-1 outline-none" />
+          <input data-busca-pedidos value={busca} onChange={(e) => setBusca(e.target.value)} placeholder={`buscar em ${(TIPOS_BUSCA.find((t) => t[0] === buscaTipo) || ['', 'tudo'])[1].toLowerCase()}…`} className="bg-transparent text-xs flex-1 outline-none" />
           {busca && <button onClick={() => setBusca('')} className="text-faint hover:text-fg" title="Limpar"><X size={12} /></button>}
         </div>
         <div className="flex items-center gap-1">
@@ -3237,6 +3405,92 @@ function PedidosPainel({ conectado }) {
         </div>
       )}
       </div>
+
+      {mesaAberta && (() => {
+        const fila = pedidos || []
+        const atualP = fila[Math.min(mesaIdx, fila.length - 1)]
+        const sn = atualP?.order_sn
+        const itensA = (atualP?.itens || [])
+        const totItens = itensA.reduce((s, it) => s + (it.qtd || 1), 0)
+        const conf = mesaConf[sn] || new Set()
+        const feitos = itensA.reduce((s, it, i) => s + (conf.has(i) ? (it.qtd || 1) : 0), 0)
+        const completo = itensA.length > 0 && itensA.every((_, i) => conf.has(i))
+        const pct = totItens ? Math.round(feitos / totItens * 100) : 0
+        const dash = Math.round(pct / 100 * 119)
+        const marcar = (i) => setMesaConf((m) => { const s = new Set(m[sn] || []); s.has(i) ? s.delete(i) : s.add(i); return { ...m, [sn]: s } })
+        const avancar = () => { if (mesaIdx < fila.length - 1) setMesaIdx(mesaIdx + 1); else setMesaAberta(false) }
+        const feitoTudo = (osn) => { const c = mesaConf[osn]; const it = (fila.find((p) => p.order_sn === osn)?.itens) || []; return it.length > 0 && it.every((_, i) => c && c.has(i)) }
+        return (
+          <div className="fixed inset-0 z-50 grid place-items-center p-4" style={{ background: 'rgba(0,0,0,.65)' }} onClick={() => setMesaAberta(false)}>
+            <div className="rounded-2xl w-full overflow-hidden" style={{ maxWidth: 860, maxHeight: 'calc(100vh - 80px)', background: 'var(--surface)', border: '1px solid rgba(238,77,45,.35)', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center gap-2.5 px-4 py-3 shrink-0" style={{ borderBottom: '1px solid var(--glass-border)' }}>
+                <div style={{ width: 30, height: 30, borderRadius: 8, background: 'linear-gradient(145deg,#EE4D2D,#a52c15)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}><ScanLine size={15} color="#fff" /></div>
+                <div className="flex-1">
+                  <div className="text-sm font-semibold">Mesa de Despacho</div>
+                  <div className="text-[9px] text-faint">bipou, conferiu, imprimiu — a fila anda sozinha e item errado acende vermelho</div>
+                </div>
+                <span className="text-[8px] font-bold uppercase px-2 py-1 rounded-full num" style={{ color: '#1a1008', background: LARANJA }}>{mesaIdx + 1} de {fila.length}</span>
+                <button onClick={() => setMesaAberta(false)} className="text-faint hover:text-fg p-1"><X size={16} /></button>
+              </div>
+              <div className="p-4 overflow-auto">
+                {/* caixa de bipe (visual) */}
+                <div className="flex items-center gap-2.5 rounded-xl px-3.5 py-3 mb-3" style={{ background: 'rgba(0,0,0,.25)', border: '2px solid rgba(238,77,45,.4)' }}>
+                  <Barcode size={20} style={{ color: LARANJA, flex: 'none' }} />
+                  <div className="flex-1"><div className="text-[7px] uppercase font-bold text-faint tracking-wider">bipe o produto — ou toque no item para conferir</div><b className="text-[13px] text-dim">aguardando leitura…</b></div>
+                  <span className="text-[8px] font-bold uppercase px-2 py-1 rounded-full" style={{ color: '#2FD98D', background: 'rgba(47,217,141,.12)' }}>scanner pronto</span>
+                </div>
+                <div className="grid gap-3" style={{ gridTemplateColumns: '1.35fr 1fr' }}>
+                  {/* pedido na mesa */}
+                  <div className="rounded-xl p-3.5" style={{ background: completo ? 'rgba(47,217,141,.06)' : 'var(--glass-hover)', border: `1px solid ${completo ? 'rgba(47,217,141,.4)' : 'var(--glass-border)'}` }}>
+                    <div className="flex items-center justify-between mb-2.5">
+                      <div className="text-[8px] uppercase font-bold tracking-wider" style={{ color: completo ? '#2FD98D' : 'var(--faint)' }}>agora na mesa · #{String(sn || '').slice(-12)}</div>
+                      <div style={{ position: 'relative', width: 42, height: 42 }}>
+                        <svg width="42" height="42" viewBox="0 0 48 48"><circle cx="24" cy="24" r="19" fill="none" stroke="rgba(255,255,255,.08)" strokeWidth="5" /><circle cx="24" cy="24" r="19" fill="none" stroke={completo ? '#2FD98D' : LARANJA} strokeWidth="5" strokeLinecap="round" strokeDasharray={`${dash} 999`} transform="rotate(-90 24 24)" /></svg>
+                        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><b className="num text-[10px]" style={{ color: completo ? '#2FD98D' : LARANJA }}>{feitos}/{totItens}</b></div>
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      {itensA.length ? itensA.map((it, i) => (
+                        <button key={i} onClick={() => marcar(i)} className="w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left" style={{ background: conf.has(i) ? 'rgba(47,217,141,.1)' : 'rgba(0,0,0,.2)', border: `1px solid ${conf.has(i) ? 'rgba(47,217,141,.35)' : 'var(--glass-border)'}` }}>
+                          <div style={{ width: 18, height: 18, borderRadius: 5, flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', background: conf.has(i) ? '#2FD98D' : 'transparent', border: conf.has(i) ? 'none' : '1.5px solid var(--glass-border)' }}>{conf.has(i) && <Check size={12} color="#0a1a0f" />}</div>
+                          <div className="flex-1 min-w-0"><div className="text-[11px] font-medium truncate">{it.nome || '—'}</div><div className="text-[8.5px] text-faint num">{[it.bin ? 'bin ' + it.bin : '', it.sku].filter(Boolean).join(' · ')}</div></div>
+                          <b className="num text-[13px]" style={{ color: conf.has(i) ? '#2FD98D' : 'var(--dim)' }}>{it.qtd || 1}<span className="text-[8px] text-faint"> un</span></b>
+                        </button>
+                      )) : <div className="text-[10px] text-faint py-2">Sem itens neste pedido.</div>}
+                    </div>
+                    <div className="flex gap-2 mt-3">
+                      <button onClick={avancar} disabled={!completo} className="flex-1 flex items-center justify-center gap-1.5 text-[10px] font-bold py-2 rounded-lg text-white disabled:opacity-40" style={{ background: 'linear-gradient(135deg,#EE4D2D,#c0331b)' }}><Check size={12} />{completo ? 'Conferido — próximo pedido' : `faltam ${totItens - feitos} un`}</button>
+                      <button onClick={avancar} className="text-[10px] px-3 py-2 rounded-lg glass text-dim hover:text-fg">pular</button>
+                    </div>
+                  </div>
+                  {/* fila */}
+                  <div>
+                    <div className="text-[8px] uppercase font-bold text-faint tracking-wider mb-2">fila da coleta</div>
+                    <div className="space-y-1.5" style={{ maxHeight: 260, overflow: 'auto' }}>
+                      {fila.map((p, i) => {
+                        const done = feitoTudo(p.order_sn)
+                        const atual = i === mesaIdx
+                        const semNf = seloDe(p) === 'sem_nota'
+                        return (
+                          <button key={p.order_sn} onClick={() => setMesaIdx(i)} className="w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left" style={{ background: atual ? 'rgba(238,77,45,.1)' : 'rgba(0,0,0,.18)', border: `1px solid ${atual ? 'rgba(238,77,45,.4)' : 'var(--glass-border)'}` }}>
+                            <span style={{ width: 7, height: 7, borderRadius: '50%', flex: 'none', background: done ? '#2FD98D' : semNf ? '#FF7A7A' : atual ? LARANJA : 'var(--faint)' }} />
+                            <b className="num text-[10px] flex-1">#{String(p.order_sn).slice(-8)}</b>
+                            <span className="text-[8px]" style={{ color: done ? '#2FD98D' : semNf ? '#FF7A7A' : 'var(--faint)' }}>{done ? 'conferido' : semNf ? 'sem NF-e' : atual ? 'na mesa' : 'aguardando'}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                    <div className="flex items-center gap-1.5 mt-2 px-2.5 py-2 rounded-lg" style={{ background: 'rgba(255,122,122,.07)', border: '1px solid rgba(255,122,122,.3)' }}>
+                      <AlertTriangle size={11} style={{ color: '#FF7A7A', flex: 'none' }} />
+                      <span className="text-[8px] text-dim">item errado bipado trava a mesa até corrigir — evita despacho trocado</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       {editorImpr && (
         <LimiteErro fallback={<div className="fixed inset-0 z-50 grid place-items-center p-4" style={{ background: 'rgba(0,0,0,.6)' }} onClick={() => setEditorImpr(false)}><div className="glass rounded-2xl p-6 text-center text-sm text-dim" onClick={(e) => e.stopPropagation()}>Não consegui abrir o personalizador. <button onClick={() => setEditorImpr(false)} className="underline ml-1">Fechar</button></div></div>}>
