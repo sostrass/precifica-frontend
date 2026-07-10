@@ -2975,7 +2975,7 @@ function Paginacao({ page, total, onIr }) {
   )
 }
 
-function PedidosPainel({ conectado }) {
+export function PedidosPainel({ conectado }) {
   const notify = useToast()
   const agora = useAgora(1000)
   const [status, setStatus] = useState('A_ENVIAR')
