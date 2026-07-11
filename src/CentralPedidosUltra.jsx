@@ -5,6 +5,7 @@ import {
   DollarSign, Send, Sparkles, Settings, RefreshCw, Loader2, User, Repeat, Star, CreditCard, Eye, Lock, CalendarDays,
 } from 'lucide-react'
 import { api } from './api.js'
+import { imprimirFolhasPedido, imprimirEtiquetas } from './Shopee.jsx'
 import { useToast } from './toast.jsx'
 import './central-ultra.css'
 
@@ -22,10 +23,10 @@ const STATUS_PT = {
 }
 const statusPt = (s) => STATUS_PT[s] || STATUS_PT[String(s || '').toLowerCase()] || String(s || '').replace(/_/g, ' ') || 'Pago'
 const UF_RE = /\b(AC|AL|AP|AM|BA|CE|DF|ES|GO|MA|MT|MS|MG|PA|PB|PR|PE|PI|RJ|RN|RS|RO|RR|SC|SP|SE|TO)\b/
-// Cores OFICIAIS de cada plataforma: ML amarelo #FFE600 + azul #3483FA · Shopee laranja #EE4D2D + #FF6633
+// Cores EXATAS do HTML aprovado (CH do mockup): ML #F2C200→#c99b00 · Shopee #EE4D2D→#b83a1f
 const CH = {
-  ml: { nome: 'Mercado Livre', cor: '#FFE600', cor2: '#3483FA', txt: '#1a1008', freteRot: 'Frete ML', brand: 'linear-gradient(135deg,#FFE600,#e6cf00)', barA: '#FFE600', barB: '#3483FA' },
-  shopee: { nome: 'Shopee', cor: '#EE4D2D', cor2: '#FF6633', txt: '#fff', freteRot: 'Frete', brand: 'linear-gradient(135deg,#FF6633,#EE4D2D)', barA: '#FF6633', barB: '#EE4D2D' },
+  ml: { nome: 'Mercado Livre', cor: '#F2C200', cord: '#c99b00', txt: '#1a1008', freteRot: 'Frete ML', brand: 'linear-gradient(145deg,#F2C200,#c99b00)' },
+  shopee: { nome: 'Shopee', cor: '#EE4D2D', cord: '#b83a1f', txt: '#1a1008', freteRot: 'Frete', brand: 'linear-gradient(145deg,#EE4D2D,#b83a1f)' },
 }
 const hexA = (hex, a) => { const h = hex.replace('#', ''); const n = parseInt(h, 16); return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})` }
 
@@ -40,7 +41,7 @@ function adaptaML(p) {
     comprador: p.buyer?.nickname || '—', compras: p.buyer?.compras || 0, buyerId: p.buyer?.id, packId: p.pack_id,
     status: p.status || '', criado: p.date_created, pago: p.date_paid || p.aprovado_em || p.date_created,
     receita: r.receita ?? p.valor, taxas: r.taxas ?? r.taxas_mkt, frete: r.tarifa ?? r.frete, liquido: r.liquido, margem: r.margem, alvo: p.preco_bling,
-    rastreio: p.rastreio || p.tracking, shipId: p.shipment_id || p.envio_id || p.envio?.id,
+    rastreio: p.rastreio || p.tracking, shipId: p.shipping_id || p.shipment_id || p.envio_id || p.envio?.id,
     uf: (p.uf || p.envio?.uf || '').toUpperCase() || ((p.endereco || '').match(UF_RE) || [])[0],
     nf: !!(p.nfe || p.nf), cancelado: /cancel/i.test(String(p.status || '')),
     devolucao: /return|devolu|claim|mediac/i.test(String(p.status || '')) || !!p.claim_id, bruto: p,
@@ -89,6 +90,16 @@ function classifica(p) {
   return 'hoje'
 }
 
+function paraImpressao(p) {
+  return {
+    order_sn: p.id, status: p.status, comprador: p.comprador, buyer_username: p.comprador,
+    cliente: p.clienteReal || undefined, cidade: p.cidade, uf: p.uf, cep: p.cep,
+    ship_by: p.shipBy, rastreio: p.rastreio, cod: false, recorrencia: (p.compras || 0) > 1 ? `${p.compras}ª compra` : null,
+    total: p.receita, sobra: p.liquido, margem: p.margem != null ? Math.round(p.margem) : null,
+    itens: (p.itens || []).map((it) => ({ nome: it.nome, sku: it.sku, qtd: it.qtd, imagem: it.imagem, bin: it.bin, variacao: it.variacao })),
+  }
+}
+
 export default function CentralPedidosUltra() {
   const notify = useToast()
   const [canal, setCanal] = useState('ml')
@@ -100,6 +111,7 @@ export default function CentralPedidosUltra() {
   const [pgto, setPgto] = useState('todos')
   const [densidade, setDensidade] = useState('conf')
   const [soDevolucao, setSoDevolucao] = useState(false)
+  const [soSemNf, setSoSemNf] = useState(false)
   const [agrupo, setAgrupo] = useState('dia')
   const [busca, setBusca] = useState('')
   const [ordem, setOrdem] = useState('recentes')
@@ -221,16 +233,17 @@ export default function CentralPedidosUltra() {
     if (pgto === 'pagos') arr = arr.filter((p) => p.pago)
     if (pgto === 'aguard') arr = arr.filter((p) => !p.pago)
     if (soDevolucao) arr = arr.filter((p) => p.devolucao)
+    if (soSemNf) arr = arr.filter((p) => !p.nf && !p.nfDesconhecida)
     if (q) arr = arr.filter((p) => [p.id, p.titulo, p.comprador, p.rastreio, ...(p.itens.map((i) => i.sku))].join(' ').toLowerCase().includes(q))
     return arr.slice().sort((a, b) => {
       if (ordem === 'antigos') return new Date(a.criado || 0) - new Date(b.criado || 0)
       if (ordem === 'prioridade') return (b.devolucao - a.devolucao) || (b.cancelado - a.cancelado) || ((a.shipBy || 9e12) - (b.shipBy || 9e12))
       return new Date(b.criado || 0) - new Date(a.criado || 0)
     })
-  }, [pedidos, aba, pgto, busca, ordem, soDevolucao])
+  }, [pedidos, aba, pgto, busca, ordem, soDevolucao, soSemNf])
   const nPag = Math.max(1, Math.ceil(filtrados.length / POR_PAG))
   const pageItems = filtrados.slice((pagina - 1) * POR_PAG, pagina * POR_PAG)
-  useEffect(() => { setPagina(1) }, [busca, ordem, aba, pgto, soDevolucao])
+  useEffect(() => { setPagina(1) }, [busca, ordem, aba, pgto, soDevolucao, soSemNf])
 
   const mix = useMemo(() => {
     const base = filtrados.length || 1
@@ -238,7 +251,7 @@ export default function CentralPedidosUltra() {
     const semEtq = Math.round(filtrados.filter((p) => !p.rastreio && !p.cancelado).length / base * 100)
     const canc = Math.max(0, 100 - prontos - semEtq)
     return [['etiqueta pronta', prontos, 'var(--ok)'], ['aguardando etiqueta', semEtq, d.cor], ['cancelado/outros', canc, 'var(--faint)']]
-  }, [pedidos, aba, pgto, busca, ordem, canal])
+  }, [pedidos, aba, pgto, busca, ordem, canal, soDevolucao, soSemNf])
 
 
   const toggleSel = (id) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
@@ -303,7 +316,7 @@ export default function CentralPedidosUltra() {
   }, [pedidos, contagem])
 
   return (
-    <div className="pcuv2" style={{ '--ch': d.cor, '--chd': d.txt, '--chA': hexA(d.barB, .82), '--chB': hexA(d.barB, .10), '--ch2': d.barA }}>
+    <div className="pcuv2" style={{ '--ch': d.cor, '--chd': d.cord }}>
       {/* HEADER — DOM do mockup */}
       <div className="glass" style={{ padding: '16px 18px', marginBottom: 12, border: '1px solid transparent', background: `linear-gradient(var(--surface),var(--surface)) padding-box, linear-gradient(110deg, ${d.cor}88, rgba(214,0,127,.4), ${d.cor}44) border-box` }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 13, flexWrap: 'wrap' }}>
@@ -359,8 +372,8 @@ export default function CentralPedidosUltra() {
           {[['todos', 'Todos'], ['pagos', 'Pagos'], ['aguard', 'Aguardando']].map(([id, l]) => <span key={id} className={pgto === id ? 'on' : ''} onClick={() => setPgto(id)}>{l}</span>)}
         </div>
         <div style={{ width: 1, height: 20, background: 'var(--glass-border)' }} />
-        <div className={`toggle ${aba === 'nf' ? 'on' : ''}`} style={{ color: 'var(--danger)', borderColor: 'rgba(255,122,122,.35)' }} onClick={() => setAba(aba === 'nf' ? 'todos' : 'nf')}><span className="sw" />Sem dados fiscais ({semNf})</div>
-        <div className={`toggle ${soDevolucao ? 'on' : ''}`} style={{ color: 'var(--warn)' }} onClick={() => setSoDevolucao((v) => !v)}><span className="sw" />Devoluções ({lista.filter((p) => p.devolucao).length})</div>
+        <div className={`toggle ${soSemNf ? 'on' : ''}`} style={soSemNf ? { color: 'var(--danger)', borderColor: 'rgba(255,122,122,.45)', background: 'rgba(255,122,122,.08)' } : undefined} onClick={() => setSoSemNf((v) => !v)}><span className="sw" />Sem dados fiscais ({semNf})</div>
+        <div className={`toggle ${soDevolucao ? 'on' : ''}`} style={soDevolucao ? { color: 'var(--warn)', borderColor: 'rgba(224,162,60,.45)', background: 'rgba(224,162,60,.08)' } : undefined} onClick={() => setSoDevolucao((v) => !v)}><span className="sw" />Devoluções ({lista.filter((p) => p.devolucao).length})</div>
         <div style={{ flex: 1 }} />
         <div className="btn" style={{ fontSize: 9.5 }} onClick={() => setAgrupo(agrupo === 'dia' ? 'mes' : 'dia')}><CalendarDays size={12} />{agrupo === 'dia' ? 'Dia' : 'Mês'}·gráfico</div>
         <div className="btn" style={{ fontSize: 9.5 }} onClick={() => setOrdem('prioridade')}>Prioridade de despacho</div>
@@ -442,7 +455,7 @@ export default function CentralPedidosUltra() {
         <div className="glass" style={{ padding: '14px 15px' }}>
           <div className="up" style={{ fontSize: 8.5, color: 'var(--faint)', fontWeight: 800, marginBottom: 11, display: 'flex', alignItems: 'center', gap: 6 }}><Clock size={12} style={{ color: d.cor }} />Horários de compra · hoje ajuda a prever</div>
           <div className="heat">
-            {heat.map((v, h) => <div key={h} title={`${h}h · ${v} pedido(s)`} style={{ height: 26, borderRadius: 5, background: v ? hexA(d.cor, 0.18 + v / maxH * 0.62) : 'rgba(255,255,255,.04)' }} />)}
+            {heat.map((v, h) => <div key={h} title={`${h}h · ${v} pedido(s)`} style={{ height: 26, borderRadius: 5, background: v ? `rgba(214,0,127,${(0.18 + v / maxH * 0.62).toFixed(2)})` : 'rgba(255,255,255,.04)' }} />)}
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}><span style={{ fontSize: 6.5, color: 'var(--faint)' }}>0h</span><span style={{ fontSize: 6.5, color: 'var(--faint)' }}>12h</span><span style={{ fontSize: 6.5, color: 'var(--faint)' }}>23h</span></div>
         </div>
@@ -493,9 +506,9 @@ export default function CentralPedidosUltra() {
           {[['nf_imprime', 'NF-e emitida → imprimir etiqueta sozinho', 'elimina 1 clique por pedido'], ['risco_segura', 'Risco de fraude → segurar e avisar', 'nunca despacha pedido sinalizado'], ['presente_selo', 'Mensagem contém “presente” → selo PRESENTE', 'embrulho certo na separação']].map(([k, t, s]) => {
             const on = !!regras[k]
             return (
-              <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'rgba(0,0,0,.18)', border: `1px solid ${on ? 'rgba(47,217,141,.3)' : 'var(--glass-border)'}`, borderRadius: 11, padding: '9px 11px' }}>
+              <div key={k} onClick={() => setRegras((r) => ({ ...r, [k]: !on }))} style={{ display: 'flex', alignItems: 'center', gap: 10, background: on ? 'rgba(47,217,141,.05)' : 'rgba(0,0,0,.18)', border: `1px solid ${on ? 'rgba(47,217,141,.35)' : 'var(--glass-border)'}`, borderRadius: 11, padding: '9px 11px', cursor: 'pointer', userSelect: 'none' }}>
                 <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 9.5, fontWeight: 700 }}>{t}</div><div style={{ fontSize: 7.5, color: 'var(--faint)' }}>{s}</div></div>
-                <div className={`toggle ${on ? 'on' : ''}`} style={{ padding: '3px 4px' }} onClick={() => setRegras((r) => ({ ...r, [k]: !on }))}><span className="sw" /></div>
+                <div className={`toggle ${on ? 'on' : ''}`} style={{ padding: '3px 4px', pointerEvents: 'none', background: on ? 'rgba(47,217,141,.15)' : undefined, borderColor: on ? 'rgba(47,217,141,.4)' : undefined }}><span className="sw" /></div>
               </div>
             )
           })}
@@ -533,7 +546,7 @@ export default function CentralPedidosUltra() {
           <div className="btn primary" style={{ fontSize: 10 }} onClick={() => baixarEtiquetas()}><Tag size={12} color="#1a1008" />Etiquetas</div>
           <div className="btn" style={{ fontSize: 10 }} onClick={() => setAba('nf')}><FileText size={12} />NF-e</div>
           <div className="btn" style={{ fontSize: 10 }} onClick={() => setModal('sep')}><Layers size={12} />Separação</div>
-          <div className="btn" style={{ fontSize: 10 }} onClick={() => baixarEtiquetas()}><Printer size={12} />Imprimir tudo</div>
+          <div className="btn" style={{ fontSize: 10 }} onClick={() => imprimirFolhasPedido(filtrados.filter((x) => sel.has(x.id)).map(paraImpressao))}><Printer size={12} />Imprimir pedidos</div>
           <div className="btn" style={{ fontSize: 10 }} onClick={() => { setMesaIdx(0); setModal('mesa') }}><ScanLine size={12} />Mesa</div>
           <span style={{ fontSize: 8, color: 'var(--faint)' }}>esc limpa</span>
         </div>
@@ -707,8 +720,8 @@ function UltraExpand({ p, d, canal, baixarEtiqueta, notify, agoraTs }) {
     <div style={{ borderTop: '1px solid var(--glass-border)', background: 'linear-gradient(180deg,rgba(214,0,127,.04),transparent)', padding: '14px 15px 15px 19px' }}>
       <div style={{ display: 'flex', gap: 7, marginBottom: 12, flexWrap: 'wrap' }}>
         <div className="btn primary" style={{ fontSize: 10 }} onClick={baixarEtiqueta}><Tag size={12} color={d.txt} />Baixar etiqueta</div>
-        <div className="btn" style={{ fontSize: 10 }} onClick={() => setModalEtq(true)}><Eye size={12} />Ver modelo da etiqueta</div>
-        <div className="btn" style={{ fontSize: 10 }} onClick={baixarEtiqueta}><Printer size={12} />Imprimir</div>
+        <div className="btn" style={{ fontSize: 10 }} onClick={() => imprimirEtiquetas([paraImpressao(p)], '')}><Eye size={12} />Etiqueta da transportadora</div>
+        <div className="btn" style={{ fontSize: 10 }} onClick={() => imprimirFolhasPedido([paraImpressao(p)])}><Printer size={12} />Imprimir pedido</div>
         <div className="btn" style={{ fontSize: 10 }} onClick={() => window.open(canal === 'ml' ? `https://www.mercadolivre.com.br/vendas/${p.id}/detalhe` : `https://seller.shopee.com.br/portal/sale/order/${p.id}`, '_blank')}><Box size={12} />Abrir no canal</div>
         <div style={{ flex: 1 }} />
         {!p.cancelado && !p.devolucao && <span className="chip" style={{ color: 'var(--ok)', background: 'rgba(47,217,141,.12)' }}><ShieldCheck size={9} style={{ color: 'var(--ok)' }} />SLA NO PRAZO</span>}

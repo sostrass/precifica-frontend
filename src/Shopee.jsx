@@ -2394,12 +2394,12 @@ table.ci{width:100%;table-layout:fixed;border-collapse:collapse}table.ci td{padd
 .lfl{display:flex;align-items:center}.lfl .gen{margin-left:6px}.gen{font-size:7.5px;color:#555}.lfr{font-size:7.5px;color:#555;display:flex;align-items:center}.lfr svg{margin-right:3px}
 .dh>svg,.cap>svg,.pkh>svg{margin-right:3px}@media print{@page{size:100mm 150mm;margin:0}}`
 
-function imprimirFolhasPedido(pedidos) {
+export function imprimirFolhasPedido(pedidos) {
   if (!pedidos.length) return
   const cfg = cfgTipo('folha')
   abrirImpressao('Pedidos', CSS_FOLHA, pedidos.map((p) => htmlFolhaPedido(p, cfg)).join(''))
 }
-function imprimirEtiquetas(pedidos, rem) {
+export function imprimirEtiquetas(pedidos, rem) {
   if (!pedidos.length) return
   const cfg = cfgTipo('etiqueta')
   abrirImpressao('Etiquetas', CSS_ETIQ, pedidos.map((p) => htmlEtiqueta(p, rem, cfg)).join(''))
