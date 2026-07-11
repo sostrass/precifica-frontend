@@ -12,10 +12,20 @@ const OK = 'var(--ok)'
 const WARN = 'var(--warn)'
 const DANGER = 'var(--danger)'
 const brl = (v) => (v == null ? '—' : Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }))
+const STATUS_PT = {
+  READY_TO_SHIP: 'Pronto p/ despachar', PROCESSED: 'Etiqueta emitida', RETRY_SHIP: 'Reenviar',
+  SHIPPED: 'Enviado', TO_CONFIRM_RECEIVE: 'A confirmar entrega', COMPLETED: 'Concluído',
+  CANCELLED: 'Cancelado', IN_CANCEL: 'Cancelamento em análise', TO_RETURN: 'Em devolução', UNPAID: 'Aguardando pagamento',
+  paid: 'Pago', confirmed: 'Confirmado', payment_required: 'Aguardando pagamento', payment_in_process: 'Pagamento em análise',
+  partially_paid: 'Parcialmente pago', cancelled: 'Cancelado', invalid: 'Inválido',
+  ready_to_ship: 'Pronto p/ despachar', handling: 'Em preparação', shipped: 'Enviado', delivered: 'Entregue', not_delivered: 'Não entregue',
+}
+const statusPt = (s) => STATUS_PT[s] || STATUS_PT[String(s || '').toLowerCase()] || String(s || '').replace(/_/g, ' ') || 'Pago'
 const UF_RE = /\b(AC|AL|AP|AM|BA|CE|DF|ES|GO|MA|MT|MS|MG|PA|PB|PR|PE|PI|RJ|RN|RS|RO|RR|SC|SP|SE|TO)\b/
+// Cores OFICIAIS de cada plataforma: ML amarelo #FFE600 + azul #3483FA · Shopee laranja #EE4D2D + #FF6633
 const CH = {
-  ml: { nome: 'Mercado Livre', cor: '#F2C200', cor2: '#FFE066', txt: '#1a1008', freteRot: 'Frete ML', brand: 'linear-gradient(135deg,#F2C200,#b8940a)' },
-  shopee: { nome: 'Shopee', cor: '#FF7A50', cor2: '#FFB020', txt: '#1a1008', freteRot: 'Frete', brand: 'linear-gradient(135deg,#FFB020,#FF6B4A)' },
+  ml: { nome: 'Mercado Livre', cor: '#FFE600', cor2: '#3483FA', txt: '#1a1008', freteRot: 'Frete ML', brand: 'linear-gradient(135deg,#FFE600,#e6cf00)', barA: '#FFE600', barB: '#3483FA' },
+  shopee: { nome: 'Shopee', cor: '#EE4D2D', cor2: '#FF6633', txt: '#fff', freteRot: 'Frete', brand: 'linear-gradient(135deg,#FF6633,#EE4D2D)', barA: '#FF6633', barB: '#EE4D2D' },
 }
 const hexA = (hex, a) => { const h = hex.replace('#', ''); const n = parseInt(h, 16); return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})` }
 
@@ -26,7 +36,7 @@ function adaptaML(p) {
     id: String(p.id || p.pack_id || ''), canal: 'ml',
     titulo: (p.itens?.[0]?.titulo || p.itens?.[0]?.nome || 'Pedido ML'),
     qtd: (p.itens || []).reduce((s, i) => s + (i.qtd || i.quantidade || 1), 0),
-    itens: (p.itens || []).map((i) => ({ nome: i.titulo || i.nome, sku: i.sku, qtd: i.qtd || i.quantidade || 1, imagem: i.imagem })),
+    itens: (p.itens || []).map((i) => ({ nome: i.titulo || i.nome, sku: i.sku, qtd: i.qtd || i.quantidade || 1, imagem: i.imagem, preco: i.unit_price ?? i.preco })),
     comprador: p.buyer?.nickname || '—', compras: p.buyer?.compras || 0, buyerId: p.buyer?.id, packId: p.pack_id,
     status: p.status || '', criado: p.date_created, pago: p.date_paid || p.aprovado_em || p.date_created,
     receita: r.receita ?? p.valor, taxas: r.taxas ?? r.taxas_mkt, frete: r.tarifa ?? r.frete, liquido: r.liquido, margem: r.margem, alvo: p.preco_bling,
@@ -89,6 +99,8 @@ export default function CentralPedidosUltra() {
   const [aba, setAba] = useState('todos')
   const [pgto, setPgto] = useState('todos')
   const [densidade, setDensidade] = useState('conf')
+  const [soDevolucao, setSoDevolucao] = useState(false)
+  const [agrupo, setAgrupo] = useState('dia')
   const [busca, setBusca] = useState('')
   const [ordem, setOrdem] = useState('recentes')
   const [pagina, setPagina] = useState(1)
@@ -180,7 +192,7 @@ export default function CentralPedidosUltra() {
   const semNf = lista.filter((p) => !p.nf && !p.nfDesconhecida && !p.cancelado).length
   const naoLidas = 0
 
-  const serie = useMemo(() => { const m = {}; for (const p of lista) { if (!p.criado) continue; const dt = new Date(p.criado); const k = `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}`; m[k] = (m[k] || 0) + (p.receita || 0) } return Object.entries(m).slice(-12) }, [pedidos])
+  const serie = useMemo(() => { const m = {}; for (const p of lista) { if (!p.criado) continue; const dt = new Date(p.criado); const k = agrupo === 'mes' ? `${String(dt.getMonth() + 1).padStart(2, '0')}/${String(dt.getFullYear()).slice(2)}` : `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}`; m[k] = (m[k] || 0) + (p.receita || 0) } return Object.entries(m).slice(-12) }, [pedidos, agrupo])
   const maxS = Math.max(1, ...serie.map(([, v]) => v))
   const peakIdx = serie.reduce((bi, [, v], i, a) => (v > a[bi][1] ? i : bi), 0)
   const heat = useMemo(() => { const h = Array(24).fill(0); for (const p of lista) if (p.criado) h[new Date(p.criado).getHours()]++; return h }, [pedidos])
@@ -208,16 +220,26 @@ export default function CentralPedidosUltra() {
     if (aba !== 'todos') arr = arr.filter((p) => classifica(p) === aba)
     if (pgto === 'pagos') arr = arr.filter((p) => p.pago)
     if (pgto === 'aguard') arr = arr.filter((p) => !p.pago)
+    if (soDevolucao) arr = arr.filter((p) => p.devolucao)
     if (q) arr = arr.filter((p) => [p.id, p.titulo, p.comprador, p.rastreio, ...(p.itens.map((i) => i.sku))].join(' ').toLowerCase().includes(q))
     return arr.slice().sort((a, b) => {
       if (ordem === 'antigos') return new Date(a.criado || 0) - new Date(b.criado || 0)
       if (ordem === 'prioridade') return (b.devolucao - a.devolucao) || (b.cancelado - a.cancelado) || ((a.shipBy || 9e12) - (b.shipBy || 9e12))
       return new Date(b.criado || 0) - new Date(a.criado || 0)
     })
-  }, [pedidos, aba, pgto, busca, ordem])
+  }, [pedidos, aba, pgto, busca, ordem, soDevolucao])
   const nPag = Math.max(1, Math.ceil(filtrados.length / POR_PAG))
   const pageItems = filtrados.slice((pagina - 1) * POR_PAG, pagina * POR_PAG)
-  useEffect(() => { setPagina(1) }, [busca, ordem, aba, pgto])
+  useEffect(() => { setPagina(1) }, [busca, ordem, aba, pgto, soDevolucao])
+
+  const mix = useMemo(() => {
+    const base = filtrados.length || 1
+    const prontos = Math.round(filtrados.filter((p) => p.rastreio).length / base * 100)
+    const semEtq = Math.round(filtrados.filter((p) => !p.rastreio && !p.cancelado).length / base * 100)
+    const canc = Math.max(0, 100 - prontos - semEtq)
+    return [['etiqueta pronta', prontos, 'var(--ok)'], ['aguardando etiqueta', semEtq, d.cor], ['cancelado/outros', canc, 'var(--faint)']]
+  }, [pedidos, aba, pgto, busca, ordem, canal])
+
 
   const toggleSel = (id) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
   useEffect(() => {
@@ -281,7 +303,7 @@ export default function CentralPedidosUltra() {
   }, [pedidos, contagem])
 
   return (
-    <div className="pcuv2" style={{ '--ch': d.cor, '--chd': d.txt, '--chA': hexA(d.cor, .78), '--chB': hexA(d.cor, .10), '--ch2': d.cor2 }}>
+    <div className="pcuv2" style={{ '--ch': d.cor, '--chd': d.txt, '--chA': hexA(d.barB, .82), '--chB': hexA(d.barB, .10), '--ch2': d.barA }}>
       {/* HEADER — DOM do mockup */}
       <div className="glass" style={{ padding: '16px 18px', marginBottom: 12, border: '1px solid transparent', background: `linear-gradient(var(--surface),var(--surface)) padding-box, linear-gradient(110deg, ${d.cor}88, rgba(214,0,127,.4), ${d.cor}44) border-box` }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 13, flexWrap: 'wrap' }}>
@@ -301,9 +323,11 @@ export default function CentralPedidosUltra() {
             {['ml', 'shopee'].map((c) => <span key={c} className={canal === c ? 'on' : ''} onClick={() => setCanal(c)}>{CH[c].nome}</span>)}
           </div>
           <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', alignItems: 'center' }}>
+            <div className="btn" onClick={() => setModal('etq')}><Settings size={13} />Personalizar</div>
             <div className="btn" onClick={() => setModal('sep')}><Layers size={13} />Separação</div>
             <div className="btn" onClick={() => { setMesaIdx(0); setModal('mesa') }}><ScanLine size={13} />Mesa de Despacho</div>
             <div className="btn" onClick={() => setModal('imp')}><Printer size={13} />Impressão</div>
+            <div className="btn" onClick={() => setAba('nf')}><FileText size={13} />NF-e</div>
             <div className="btn primary" onClick={() => baixarEtiquetas()}><Tag size={13} color="#1a1008" />Etiquetas em lote ({sel.size || contagem.hoje || 0})</div>
           </div>
         </div>
@@ -336,8 +360,11 @@ export default function CentralPedidosUltra() {
         </div>
         <div style={{ width: 1, height: 20, background: 'var(--glass-border)' }} />
         <div className={`toggle ${aba === 'nf' ? 'on' : ''}`} style={{ color: 'var(--danger)', borderColor: 'rgba(255,122,122,.35)' }} onClick={() => setAba(aba === 'nf' ? 'todos' : 'nf')}><span className="sw" />Sem dados fiscais ({semNf})</div>
-        <div className="toggle" style={{ color: 'var(--warn)' }} onClick={() => setOrdem('prioridade')}><span className="sw" />Atrasados primeiro</div>
+        <div className={`toggle ${soDevolucao ? 'on' : ''}`} style={{ color: 'var(--warn)' }} onClick={() => setSoDevolucao((v) => !v)}><span className="sw" />Devoluções ({lista.filter((p) => p.devolucao).length})</div>
         <div style={{ flex: 1 }} />
+        <div className="btn" style={{ fontSize: 9.5 }} onClick={() => setAgrupo(agrupo === 'dia' ? 'mes' : 'dia')}><CalendarDays size={12} />{agrupo === 'dia' ? 'Dia' : 'Mês'}·gráfico</div>
+        <div className="btn" style={{ fontSize: 9.5 }} onClick={() => setOrdem('prioridade')}>Prioridade de despacho</div>
+        <div className="btn" style={{ fontSize: 9.5, padding: '7px 9px' }} onClick={() => carregar()} title="Sincronizar agora"><RefreshCw size={12} /></div>
         <div className="seg">
           {[7, 15, 30].map((dd) => <span key={dd} className={dias === dd ? 'on' : ''} onClick={() => setDias(dd)}>{dd}d</span>)}
         </div>
@@ -347,12 +374,14 @@ export default function CentralPedidosUltra() {
         </div>
       </div>
 
-      {/* COLETA */}
+      {/* COLETA — 4 blocos como no mockup */}
       <div className="glass" style={{ padding: '12px 16px', marginBottom: 11, borderLeft: `3px solid ${corteCor}`, display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', background: `linear-gradient(110deg, ${corteCor}18, transparent)` }}>
         <span className="chip" style={{ color: '#1a1008', background: corteCor === 'var(--faint)' ? 'var(--warn)' : corteCor }}><Clock size={9} color="#1a1008" />{corteTxt} · FICA VERMELHO EM 1H</span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}><Truck size={18} style={{ color: d.cor }} /><div><div className="up" style={{ fontSize: 7, color: 'var(--faint)' }}>Coleta de hoje</div><b style={{ fontSize: 13 }}>janela da transportadora à tarde</b></div></div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}><Truck size={18} style={{ color: d.cor }} /><div><div className="up" style={{ fontSize: 7, color: 'var(--faint)' }}>Coleta de hoje</div><b style={{ fontSize: 13 }}>{canal === 'ml' ? '14:00 – 17:00' : '13:30 – 16:30'}</b></div></div>
         <div style={{ width: 1, height: 26, background: 'var(--glass-border)' }} />
-        <div><div className="up" style={{ fontSize: 7, color: 'var(--faint)' }}>A despachar</div><b className="num" style={{ fontSize: 12, color: d.cor }}>{aDespachar}</b></div>
+        <div><div className="up" style={{ fontSize: 7, color: 'var(--faint)' }}>Corte</div><b className="num" style={{ fontSize: 12, color: 'var(--warn)' }}>15:00</b></div>
+        <div><div className="up" style={{ fontSize: 7, color: 'var(--faint)' }}>Transportadora</div><b style={{ fontSize: 11 }}>{canal === 'ml' ? 'Mercado Envios · Coleta' : 'SPX Express'}</b></div>
+        <div><div className="up" style={{ fontSize: 7, color: 'var(--faint)' }}>{canal === 'ml' ? 'Autorização' : 'AWB'}</div><b className="num" style={{ fontSize: 11, color: d.cor }}>{aDespachar > 0 ? `${aDespachar} volume(s)` : '—'}</b></div>
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: 8.5, color: 'var(--faint)' }}>o alerta muda de cor a 1h do corte</span>
       </div>
@@ -381,26 +410,32 @@ export default function CentralPedidosUltra() {
       {/* ANALYTICS: barras · donut resumo · heatmap */}
       <div style={{ display: 'grid', gridTemplateColumns: '1.45fr 1fr 1fr', gap: 10, marginBottom: 11 }}>
         <div className="glass" style={{ padding: '14px 15px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 13 }}><span className="up" style={{ fontSize: 8.5, color: 'var(--faint)', fontWeight: 800, display: 'flex', alignItems: 'center', gap: 6 }}><DollarSign size={12} style={{ color: d.cor }} />Receita por dia</span><div style={{ flex: 1 }} /><span className="num" style={{ fontSize: 8, color: 'var(--faint)' }}>pico {serie.length ? brl(serie[peakIdx][1]) : '—'}</span></div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 13 }}><span className="up" style={{ fontSize: 8.5, color: 'var(--faint)', fontWeight: 800, display: 'flex', alignItems: 'center', gap: 6 }}><DollarSign size={12} style={{ color: d.cor }} />Receita por {agrupo === 'mes' ? 'mês' : 'dia'} · {serie.length} {agrupo === 'mes' ? 'meses' : 'dias'}</span><div style={{ flex: 1 }} /><span className="num" style={{ fontSize: 8, color: 'var(--faint)' }}>pico {serie.length ? brl(serie[peakIdx][1]) : '—'}</span></div>
           <div className="barrow">
             {serie.map(([k, v], i) => <div key={k} className={`b ${i === peakIdx ? 'peak' : ''}`} style={{ height: `${Math.max(5, v / maxS * 96)}px` }} title={`${k} · ${brl(v)}`}><span>{i === peakIdx ? brl(v).replace('R$ ', '') : ''}</span></div>)}
             {serie.length === 0 && <span style={{ fontSize: 9, color: 'var(--faint)', margin: 'auto' }}>sem dados no período</span>}
           </div>
         </div>
         <div className="glass" style={{ padding: '14px 15px' }}>
-          <div className="up" style={{ fontSize: 8.5, color: 'var(--faint)', fontWeight: 800, marginBottom: 11, display: 'flex', alignItems: 'center', gap: 6 }}><Layers size={12} style={{ color: d.cor }} />Resumo do período</div>
+          <div className="up" style={{ fontSize: 8.5, color: 'var(--faint)', fontWeight: 800, marginBottom: 11, display: 'flex', alignItems: 'center', gap: 6 }}><Layers size={12} style={{ color: d.cor }} />Resumo da aba</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 13 }}>
             <div style={{ position: 'relative', width: 82, height: 82, flex: 'none' }}>
-              <svg width="82" height="82" viewBox="0 0 78 78">
-                <circle cx="39" cy="39" r="32" fill="none" stroke="rgba(255,255,255,.06)" strokeWidth="9" />
-                {donut.map((s) => s.n > 0 && <circle key={s.id} cx="39" cy="39" r="32" fill="none" stroke={s.cor} strokeWidth="9" strokeDasharray={`${s.dash} 999`} strokeDashoffset={-s.off} transform="rotate(-90 39 39)" />)}
-              </svg>
-              <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}><b className="num serif" style={{ fontSize: 15 }}>{lista.length}</b><span style={{ fontSize: 6, color: 'var(--faint)' }}>pedidos</span></div>
+              <svg width="82" height="82" viewBox="0 0 92 92"><circle cx="46" cy="46" r="40" fill="none" stroke="rgba(255,255,255,.06)" strokeWidth="9" /><circle cx="46" cy="46" r="40" fill="none" stroke="var(--ok)" strokeWidth="9" strokeLinecap="round" strokeDasharray={`${Math.round(Math.max(0, Math.min(100, margemMedia)) / 100 * 251)} 999`} transform="rotate(-90 46 46)" /></svg>
+              <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}><b className="num serif" style={{ fontSize: 17, color: 'var(--ok)' }}>{margemMedia}%</b><span style={{ fontSize: 6.5, color: 'var(--faint)' }}>margem méd.</span></div>
             </div>
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {donut.filter((s) => s.n > 0).slice(0, 5).map((s) => (
-                <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ width: 7, height: 7, borderRadius: '50%', background: s.cor }} /><span style={{ fontSize: 8.5, color: 'var(--dim)', flex: 1 }}>{s.lab}</span><b className="num" style={{ fontSize: 9 }}>{s.n}</b></div>
-              ))}
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 7 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ fontSize: 9.5, color: 'var(--dim)' }}>Pedidos</span><b className="num" style={{ fontSize: 12 }}>{filtrados.length}</b></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ fontSize: 9.5, color: 'var(--dim)' }}>Unidades</span><b className="num" style={{ fontSize: 12 }}>{filtrados.reduce((s, p) => s + p.qtd, 0)}</b></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ fontSize: 9.5, color: 'var(--dim)' }}>Com rastreio</span><b className="num" style={{ fontSize: 12, color: d.cor }}>{filtrados.filter((p) => p.rastreio).length}</b></div>
+            </div>
+          </div>
+          <div style={{ marginTop: 10 }}>
+            <div className="up" style={{ fontSize: 6.5, color: 'var(--faint)', marginBottom: 5 }}>mix logístico</div>
+            <div style={{ display: 'flex', height: 9, borderRadius: 5, overflow: 'hidden', gap: 2 }}>
+              {mix.map((m) => m[1] > 0 && <div key={m[0]} style={{ flex: m[1], background: m[2] }} title={`${m[0]} ${m[1]}%`} />)}
+            </div>
+            <div style={{ display: 'flex', gap: 9, marginTop: 5, flexWrap: 'wrap' }}>
+              {mix.map((m) => <span key={m[0]} style={{ fontSize: 7, color: 'var(--dim)', display: 'inline-flex', alignItems: 'center', gap: 4 }}><i style={{ width: 7, height: 7, borderRadius: 2, background: m[2], display: 'inline-block' }} />{m[0]} {m[1]}%</span>)}
             </div>
           </div>
         </div>
@@ -496,7 +531,9 @@ export default function CentralPedidosUltra() {
         <div className="massbar">
           <span className="chip" style={{ color: '#fff', background: 'var(--accent)' }}>{sel.size} SELECIONADO{sel.size > 1 ? 'S' : ''}</span>
           <div className="btn primary" style={{ fontSize: 10 }} onClick={() => baixarEtiquetas()}><Tag size={12} color="#1a1008" />Etiquetas</div>
+          <div className="btn" style={{ fontSize: 10 }} onClick={() => setAba('nf')}><FileText size={12} />NF-e</div>
           <div className="btn" style={{ fontSize: 10 }} onClick={() => setModal('sep')}><Layers size={12} />Separação</div>
+          <div className="btn" style={{ fontSize: 10 }} onClick={() => baixarEtiquetas()}><Printer size={12} />Imprimir tudo</div>
           <div className="btn" style={{ fontSize: 10 }} onClick={() => { setMesaIdx(0); setModal('mesa') }}><ScanLine size={12} />Mesa</div>
           <span style={{ fontSize: 8, color: 'var(--faint)' }}>esc limpa</span>
         </div>
@@ -510,6 +547,11 @@ export default function CentralPedidosUltra() {
           <div className="btn" style={{ fontSize: 9, padding: '5px 10px' }} onClick={() => { setNovos(0); setOrdem('recentes'); setPagina(1) }}>trazer para a tela</div>
         </div>
       )}
+
+      {/* RODAPÉ DE CONTAGEM */}
+      {pedidos !== null && <div style={{ textAlign: 'center', fontSize: 9, color: 'var(--faint)', paddingTop: 14 }}>
+        {filtrados.length ? `${(pagina - 1) * POR_PAG + 1}–${Math.min(pagina * POR_PAG, filtrados.length)} de ${filtrados.length}` : '0'} em «{(ABAS_DEF.find((a) => a[0] === aba) || [])[1]}» · últimos {dias} dias · {lista.length} pedido(s) carregado(s){fundo ? ` (de ${fundo.total})` : ''}
+      </div>}
 
       {/* PAGINAÇÃO RODAPÉ */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 9, justifyContent: 'center', padding: '16px 0 30px' }}>
@@ -527,16 +569,9 @@ export default function CentralPedidosUltra() {
       </div>
 
       {modal === 'mesa' && <UltraMesa fila={filtrados.filter((p) => classifica(p) === 'hoje' || aba === 'todos').slice(0, 40)} idx={mesaIdx} setIdx={setMesaIdx} conf={mesaConf} setConf={setMesaConf} onFechar={() => setModal(null)} d={d} />}
-      {modal === 'sep' && <ModalSimples titulo="Lista de separação" onFechar={() => setModal(null)} d={d}>
-        {canal === 'shopee'
-          ? <div style={{ fontSize: 11, color: 'var(--dim)', lineHeight: 1.7 }}>A separação v2 (corredor → bin → rota, dupla conferência ✓1/✓2) imprime pela Central Shopee em <b>Canais → Shopee → Pedidos & Financeiro → Separação</b> — com os pedidos do status escolhido.</div>
-          : <div style={{ fontSize: 11, color: 'var(--dim)', lineHeight: 1.7 }}>Para o Mercado Livre, selecione os pedidos e use <b>Etiquetas</b> + a <b>Mesa de Despacho</b>; a lista de separação unificada ML entra na próxima rodada do módulo.</div>}
-      </ModalSimples>}
-      {modal === 'imp' && <ModalSimples titulo="Modelos de impressão" onFechar={() => setModal(null)} d={d}>
-        <div style={{ fontSize: 11, color: 'var(--dim)', lineHeight: 1.7 }}>
-          Os três modelos ULTRA — <b>Etiqueta com ESTAÇÃO/ROTA</b>, <b>Folha do Pedido V8</b> e <b>Separação v2</b> — estão ativos na impressão da Central Shopee (Personalizar → toggles). No ML, a etiqueta oficial sai em PDF pelo botão <b>Etiquetas</b>.
-        </div>
-      </ModalSimples>}
+      {modal === 'sep' && <ModalSep filtrados={filtrados} d={d} canal={canal} onFechar={() => setModal(null)} abrirMesa={() => { setMesaIdx(0); setModal('mesa') }} />}
+      {modal === 'imp' && <ModalImp filtrados={filtrados} d={d} canal={canal} semNf={semNf} onFechar={() => setModal(null)} imprimirTudo={() => baixarEtiquetas()} />}
+      {modal === 'etq' && <ModalEtq d={d} canal={canal} exemplo={filtrados[0]} n={sel.size || aDespachar || filtrados.length} onFechar={() => setModal(null)} gerar={() => { setModal(null); baixarEtiquetas() }} />}
     </div>
   )
 }
@@ -544,7 +579,7 @@ export default function CentralPedidosUltra() {
 // ————— CARD fiel ao cardHTML/cardCompacto do mockup —————
 function UltraCard({ p, d, canal, exp, densidade, onToggle, sel, onSel, baixarEtiqueta, agoraTs, notify }) {
   const rail = p.cancelado ? 'var(--danger)' : p.devolucao ? 'var(--warn)' : classifica(p) === 'fim' ? 'var(--ok)' : d.cor
-  const estado = p.cancelado ? 'CANCELADO' : p.devolucao ? 'DEVOLUÇÃO' : (p.status || 'PAGO').toUpperCase().slice(0, 22)
+  const estado = p.cancelado ? 'CANCELADO' : p.devolucao ? 'DEVOLUÇÃO' : statusPt(p.status).toUpperCase().slice(0, 24)
   const estadoCor = p.cancelado ? 'var(--danger)' : p.devolucao ? 'var(--warn)' : classifica(p) === 'fim' ? 'var(--ok)' : d.cor
   const conta = p.shipBy ? (p.shipBy * 1000 < agoraTs ? 'despacho atrasado' : `despachar até ${new Date(p.shipBy * 1000).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`) : (p.criado ? new Date(p.criado).toLocaleDateString('pt-BR') : '')
   const contaCor = p.shipBy && p.shipBy * 1000 < agoraTs ? 'var(--danger)' : 'var(--dim)'
@@ -597,7 +632,7 @@ function UltraCard({ p, d, canal, exp, densidade, onToggle, sel, onSel, baixarEt
           {chip(estado, estadoCor === 'var(--ok)' || estadoCor === 'var(--danger)' ? '#1a1008' : '#fff', estadoCor)}
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9, color: contaCor }}><Clock size={10} />{conta}</span>
           <div style={{ flex: 1 }} />
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9, color: 'var(--dim)' }}><CreditCard size={10} />{p.pago ? 'pago' : 'aguardando'}</span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9, color: 'var(--dim)' }}><CreditCard size={10} />{p.pago ? 'pago' : 'aguardando pagamento'}</span>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9, color: p.nf ? 'var(--ok)' : 'var(--danger)' }}><FileText size={10} />{p.nf ? 'NF-e emitida' : 'NF-e pendente'}</span>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8 }}>
@@ -629,6 +664,8 @@ function KpiMiniMargem({ val, m }) {
 
 // ————— EXPANSÃO fiel ao expandHTML do mockup (2 colunas) —————
 function UltraExpand({ p, d, canal, baixarEtiqueta, notify, agoraTs }) {
+  const [modalEtq, setModalEtq] = useState(false)
+  const [envio, setEnvio] = useState(undefined)
   const [msgs, setMsgs] = useState(undefined)
   const [msgTexto, setMsgTexto] = useState('')
   const [enviando, setEnviando] = useState(false)
@@ -636,8 +673,21 @@ function UltraExpand({ p, d, canal, baixarEtiqueta, notify, agoraTs }) {
     let vivo = true
     if (canal === 'ml' && p.packId) api.mlMensagens(p.packId).then((r) => vivo && setMsgs(r)).catch(() => vivo && setMsgs(null))
     else setMsgs(null)
+    // endereço real do ML: vem do envio (shipment), não da lista
+    if (canal === 'ml' && p.shipId) api.mlEnvio(p.shipId).then((r) => vivo && setEnvio(r || null)).catch(() => vivo && setEnvio(null))
+    else setEnvio(null)
     return () => { vivo = false }
   }, [p.id])
+  const dest = envio?.destination?.shipping_address || envio?.receiver_address || envio?.destino || null
+  const destNome = envio?.destination?.receiver_name || dest?.receiver_name || dest?.nome || null
+  const destLinha = dest ? [dest.address_line || dest.endereco, dest.city?.name || dest.cidade, (dest.state?.id || dest.state?.name || dest.uf || '').toString().replace('BR-', ''), dest.zip_code || dest.cep].filter(Boolean).join(' · ') : null
+  const rastreioEnvio = envio?.tracking_number || envio?.rastreio || null
+  const fmtD = (v) => { const x = v?.date || v; if (!x) return null; try { return new Date(x).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) } catch (_) { return null } }
+  const lead = envio?.lead_time || envio || {}
+  const prevEntrega = fmtD(lead.estimated_delivery_time) || fmtD(lead.estimated_delivery_final) || null
+  const limiteDespacho = canal === 'ml' ? (fmtD(lead.estimated_handling_limit) || null) : (p.shipBy ? new Date(p.shipBy * 1000).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : null)
+  const LOGI = { me2: 'Coleta ME2', self_service: 'Flex', fulfillment: 'Full (ML expede)', drop_off: 'Agência (drop-off)', xd_drop_off: 'Agência (drop-off)', cross_docking: 'Coleta' }
+  const modalidade = canal === 'ml' ? (LOGI[envio?.logistic_type] || envio?.logistic_type || 'Mercado Envios') : 'SPX pickup / drop-off'
   const enviarMsg = async () => {
     const t = msgTexto.trim(); if (!t) return
     setEnviando(true)
@@ -656,7 +706,9 @@ function UltraExpand({ p, d, canal, baixarEtiqueta, notify, agoraTs }) {
   return (
     <div style={{ borderTop: '1px solid var(--glass-border)', background: 'linear-gradient(180deg,rgba(214,0,127,.04),transparent)', padding: '14px 15px 15px 19px' }}>
       <div style={{ display: 'flex', gap: 7, marginBottom: 12, flexWrap: 'wrap' }}>
-        <div className="btn primary" style={{ fontSize: 10 }} onClick={baixarEtiqueta}><Tag size={12} color="#1a1008" />Baixar etiqueta</div>
+        <div className="btn primary" style={{ fontSize: 10 }} onClick={baixarEtiqueta}><Tag size={12} color={d.txt} />Baixar etiqueta</div>
+        <div className="btn" style={{ fontSize: 10 }} onClick={() => setModalEtq(true)}><Eye size={12} />Ver modelo da etiqueta</div>
+        <div className="btn" style={{ fontSize: 10 }} onClick={baixarEtiqueta}><Printer size={12} />Imprimir</div>
         <div className="btn" style={{ fontSize: 10 }} onClick={() => window.open(canal === 'ml' ? `https://www.mercadolivre.com.br/vendas/${p.id}/detalhe` : `https://seller.shopee.com.br/portal/sale/order/${p.id}`, '_blank')}><Box size={12} />Abrir no canal</div>
         <div style={{ flex: 1 }} />
         {!p.cancelado && !p.devolucao && <span className="chip" style={{ color: 'var(--ok)', background: 'rgba(47,217,141,.12)' }}><ShieldCheck size={9} style={{ color: 'var(--ok)' }} />SLA NO PRAZO</span>}
@@ -667,7 +719,7 @@ function UltraExpand({ p, d, canal, baixarEtiqueta, notify, agoraTs }) {
           <div className="blk">
             <h4 style={{ color: 'var(--ch, ' + d.cor + ')' }}><Truck size={12} style={{ color: d.cor }} />Linha do tempo do envio</h4>
             <div className="tl">
-              {['Pagamento aprovado', p.status || 'Em preparação', canal === 'ml' ? 'Coletado pela transportadora' : 'Coletado pela SPX', 'Entregue'].map((t, i) => (
+              {['Pagamento aprovado', statusPt(p.status) || 'Em preparação', canal === 'ml' ? 'Coletado pela transportadora' : 'Coletado pela SPX', 'Entregue'].map((t, i) => (
                 <div key={i} className={`node ${i <= fase ? 'done' : ''}`} style={i > fase ? { opacity: .5 } : undefined}>
                   <div style={{ fontSize: 10, fontWeight: 600 }}>{t}</div>
                   {i === 0 && p.pago && <div className="num" style={{ fontSize: 7.5, color: 'var(--faint)' }}>{new Date(p.pago).toLocaleString('pt-BR')}</div>}
@@ -687,9 +739,19 @@ function UltraExpand({ p, d, canal, baixarEtiqueta, notify, agoraTs }) {
                 </div>
               </div>
               : <div style={{ fontSize: 10, lineHeight: 1.65 }}>
-                <b>{p.comprador}</b>{p.uf ? ` · ${p.uf}` : ''}<br />
-                <span style={{ color: 'var(--faint)' }}>{p.rastreio ? <>rastreio <span className="num">{p.rastreio}</span></> : 'etiqueta/rastreio liberam com o envio'}</span>
+                {envio === undefined && <span style={{ color: 'var(--faint)', display: 'inline-flex', gap: 5, alignItems: 'center' }}><Loader2 size={10} className="animate-spin" />buscando o endereço do envio…</span>}
+                {envio !== undefined && <>
+                  <b>{destNome || p.comprador}</b>{!destLinha && p.uf ? ` · ${p.uf}` : ''}
+                  {destLinha && <><br />{destLinha}</>}
+                  <br /><span style={{ color: 'var(--faint)' }}>{(rastreioEnvio || p.rastreio) ? <>rastreio <span className="num">{rastreioEnvio || p.rastreio}</span></> : 'etiqueta/rastreio liberam com o envio'}</span>
+                </>}
               </div>}
+            <div style={{ display: 'flex', gap: 13, marginTop: 9, fontSize: 8.5, flexWrap: 'wrap' }}>
+              <div><div className="up" style={{ color: 'var(--faint)', fontSize: 6.5 }}>Previsão</div><b className="num">{prevEntrega || '—'}</b></div>
+              <div><div className="up" style={{ color: 'var(--faint)', fontSize: 6.5 }}>Limite p/ {canal === 'ml' ? 'despacho' : 'envio'}</div><b className="num" style={{ color: 'var(--warn)' }}>{limiteDespacho || '—'}</b></div>
+              <div><div className="up" style={{ color: 'var(--faint)', fontSize: 6.5 }}>Prazo comprador</div><b className="num">{prevEntrega || '—'}</b></div>
+              <div><div className="up" style={{ color: 'var(--faint)', fontSize: 6.5 }}>Modalidade</div><b>{modalidade}</b></div>
+            </div>
           </div>
           <div className="blk">
             <h4 style={{ color: d.cor }}><Box size={12} style={{ color: d.cor }} />Produtos</h4>
@@ -739,6 +801,17 @@ function UltraExpand({ p, d, canal, baixarEtiqueta, notify, agoraTs }) {
                 <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}><b className="num serif" style={{ fontSize: 14, color: 'var(--ok)' }}>{Math.round(p.margem)}%</b><span style={{ fontSize: 5.5, color: 'var(--faint)' }}>margem</span></div>
               </div>}
             </div>
+            {p.taxas != null && p.taxas > 0 && (
+              <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed var(--glass-border)' }}>
+                <div className="up" style={{ fontSize: 6.5, color: 'var(--faint)', marginBottom: 5 }}>composição da tarifa (billing)</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 8.5 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--dim)' }}>Comissão {canal === 'ml' ? '(categoria)' : '+ taxa de serviço'}</span><b className="num" style={{ color: 'var(--warn)' }}>− {brl(p.taxas * 0.72)}</b></div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--dim)' }}>Custo fixo por unidade</span><b className="num" style={{ color: 'var(--warn)' }}>− {brl(p.taxas * 0.18)}</b></div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--dim)' }}>{canal === 'ml' ? 'Financiamento do parcelado' : 'Taxa de transação'}</span><b className="num" style={{ color: 'var(--warn)' }}>− {brl(p.taxas * 0.10)}</b></div>
+                </div>
+                <div style={{ fontSize: 6.5, color: 'var(--faint)', marginTop: 3 }}>estimativa da composição sobre a tarifa real do pedido</div>
+              </div>
+            )}
             {p.liquido != null && !p.cancelado && <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, paddingTop: 7, borderTop: '1px solid var(--glass-border)' }}><CheckCheck size={11} style={{ color: 'var(--ok)' }} /><span style={{ fontSize: 8.5, color: 'var(--dim)' }}>Conciliação: repasse previsto bate com o extrato do canal.</span></div>}
           </div>
           <div className="blk risk">
@@ -752,7 +825,31 @@ function UltraExpand({ p, d, canal, baixarEtiqueta, notify, agoraTs }) {
                 <div style={{ fontSize: 8.5, color: 'var(--faint)', lineHeight: 1.5 }}>{p.cancelado ? 'pedido cancelado — não despache' : p.devolucao ? 'devolução aberta — responda em 48h' : (p.compras || 0) > 1 ? 'comprador recorrente · histórico limpo' : 'comprador novo'}</div></div>
             </div>
           </div>
-          {canal === 'ml' && (
+          {modalEtq && (
+        <div className="modal-bg" style={{ display: 'flex' }} onClick={() => setModalEtq(false)}>
+          <div className="modal" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+              <b className="serif" style={{ fontSize: 15 }}>Modelo da etiqueta</b><div style={{ flex: 1 }} />
+              <div className="btn" style={{ padding: '5px 9px' }} onClick={() => setModalEtq(false)}><X size={13} /></div>
+            </div>
+            <div className="paper" style={{ background: '#fff', color: '#111', borderRadius: 10, padding: 14, fontFamily: 'Arial' }}>
+              <div style={{ display: 'flex', gap: 5, marginBottom: 6 }}>
+                <div style={{ flex: 1, border: '2.5px solid #111', borderRadius: 4, textAlign: 'center', padding: '7px 4px' }}><div style={{ fontSize: 8, fontWeight: 800, letterSpacing: '.1em' }}>ESTAÇÃO</div><div style={{ fontSize: 26, fontWeight: 900, minHeight: 30 }}>{'\u00A0'}</div></div>
+                <div style={{ flex: 1, border: '2.5px solid #111', borderRadius: 4, textAlign: 'center', padding: '7px 4px', background: '#111', color: '#fff' }}><div style={{ fontSize: 8, fontWeight: 800, letterSpacing: '.1em' }}>ROTA</div><div style={{ fontSize: 26, fontWeight: 900, minHeight: 30 }}>{'\u00A0'}</div></div>
+              </div>
+              <div style={{ fontSize: 10, fontWeight: 700 }}>#{p.id}</div>
+              <div style={{ fontSize: 9 }}>{p.titulo.slice(0, 46)} · {p.qtd} un</div>
+              <div style={{ borderTop: '1px dashed #999', margin: '7px 0' }} />
+              <div style={{ fontSize: 8.5, color: '#444' }}>{canal === 'shopee' ? 'Nome e endereço completos: waybill oficial SPX' : (destNome || p.comprador)}</div>
+              <div style={{ marginTop: 7, height: 34, background: 'repeating-linear-gradient(90deg,#111 0 2px,transparent 2px 5px)' }} />
+              <div className="num" style={{ fontSize: 8, textAlign: 'center', marginTop: 3 }}>{p.rastreio || p.id}</div>
+            </div>
+            <div style={{ fontSize: 8.5, color: 'var(--faint)', marginTop: 9, lineHeight: 1.5 }}>O box ESTAÇÃO/ROTA imprime sempre — preenchido quando o dado existir, ou reservado para o CD marcar à mão.</div>
+            <div className="btn primary" style={{ marginTop: 10, justifyContent: 'center' }} onClick={() => { setModalEtq(false); baixarEtiqueta() }}><Tag size={12} color={d.txt} />Baixar etiqueta oficial</div>
+          </div>
+        </div>
+      )}
+      {canal === 'ml' && (
             <div className="blk">
               <h4 style={{ color: d.cor }}><Send size={12} style={{ color: d.cor }} />Mensagens com o comprador</h4>
               {msgs === undefined && <div style={{ fontSize: 9, color: 'var(--faint)', display: 'flex', gap: 6, alignItems: 'center' }}><Loader2 size={10} className="animate-spin" />carregando…</div>}
@@ -843,6 +940,148 @@ function UltraMesa({ fila, idx, setIdx, conf, setConf, onFechar, d }) {
               ))}
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, padding: '7px 10px', borderRadius: 9, background: 'rgba(255,122,122,.07)', border: '1px solid rgba(255,122,122,.3)' }}><AlertTriangle size={11} style={{ color: 'var(--danger)' }} /><span style={{ fontSize: 8, color: 'var(--dim)' }}>item errado bipado trava a mesa até corrigir</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ————— MODAL SEPARAÇÃO — paper com tabela real (BIN/SKU/PRODUTO/QTD/PEDIDOS/✓) —————
+function ModalSep({ filtrados, d, canal, onFechar, abrirMesa }) {
+  const [porPedido, setPorPedido] = useState(false)
+  const linhas = useMemo(() => {
+    if (porPedido) return filtrados.slice(0, 60).map((p) => ({ bin: p.itens[0]?.bin || '—', sku: `#${p.id.slice(-8)}`, nome: p.titulo, qtd: p.qtd, pedidos: 1 }))
+    const m = {}
+    for (const p of filtrados) for (const it of p.itens) {
+      const k = it.sku || it.nome
+      if (!m[k]) m[k] = { bin: it.bin || '—', sku: it.sku || '—', nome: it.nome, qtd: 0, ped: new Set() }
+      m[k].qtd += it.qtd; m[k].ped.add(p.id)
+    }
+    return Object.values(m).map((x) => ({ ...x, pedidos: x.ped.size })).sort((a, b) => String(a.bin).localeCompare(String(b.bin)))
+  }, [filtrados, porPedido])
+  const totUn = linhas.reduce((s, l) => s + l.qtd, 0)
+  const imprimir = () => {
+    const rows = linhas.map((l) => `<tr style="border-bottom:1px solid #ddd"><td class="num" style="padding:5px 2px">${l.bin}</td><td class="num">${l.sku}</td><td>${l.nome}</td><td style="text-align:center" class="num"><b>${l.qtd}</b></td><td style="text-align:center" class="num">${l.pedidos}</td><td style="text-align:center">☐</td></tr>`).join('')
+    const w = window.open('', '_blank')
+    w.document.write(`<html><head><title>Lista de separação</title><style>body{font-family:Arial;color:#111;padding:20px}table{width:100%;border-collapse:collapse;font-size:11px}.num{font-variant-numeric:tabular-nums}</style></head><body><h2 style="margin:0 0 4px">Lista de separação · ${d.nome}</h2><div style="font-size:10px;color:#555;margin-bottom:10px">${linhas.length} linha(s) · ${totUn} unidades · ${filtrados.length} pedidos · ${new Date().toLocaleString('pt-BR')}</div><table><tr style="border-bottom:1.5px solid #231c20;text-align:left"><th style="padding:4px 2px">BIN</th><th>SKU</th><th>PRODUTO</th><th style="text-align:center">QTD</th><th style="text-align:center">PEDIDOS</th><th style="text-align:center">✓</th></tr>${rows}</table><div style="display:flex;justify-content:space-between;margin-top:10px;padding-top:8px;border-top:2px solid #231c20;font-size:11px"><b>TOTAL: ${totUn} unidades · ${filtrados.length} pedidos</b><span>conferido por: __________</span></div><script>window.print()</scr` + `ipt></body></html>`)
+    w.document.close()
+  }
+  return (
+    <div className="modal-bg" style={{ display: 'flex' }} onClick={onFechar}>
+      <div className="modal" style={{ maxWidth: 620 }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+          <Layers size={17} style={{ color: d.cor }} />
+          <div style={{ flex: 1 }}><b className="serif" style={{ fontSize: 16 }}>Lista de separação</b><div style={{ fontSize: 9, color: 'var(--faint)' }}>agrupada por bin — o caminho único do estoque, sem zigue-zague</div></div>
+          <div className="btn" style={{ padding: '5px 9px' }} onClick={onFechar}><X size={13} /></div>
+        </div>
+        <div className="paper" style={{ background: '#fff', color: '#111', borderRadius: 10, padding: 14, maxHeight: '46vh', overflow: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}>
+            <thead><tr style={{ borderBottom: '1.5px solid #231c20', textAlign: 'left' }}><th style={{ padding: '4px 2px' }}>BIN</th><th>SKU</th><th>PRODUTO</th><th style={{ textAlign: 'center' }}>QTD</th><th style={{ textAlign: 'center' }}>PEDIDOS</th><th style={{ textAlign: 'center' }}>✓</th></tr></thead>
+            <tbody>{linhas.map((l, i) => (
+              <tr key={i} style={{ borderBottom: '1px solid #ddd' }}><td className="num" style={{ padding: '5px 2px' }}>{l.bin}</td><td className="num">{l.sku}</td><td>{l.nome}</td><td className="num" style={{ textAlign: 'center' }}><b>{l.qtd}</b></td><td className="num" style={{ textAlign: 'center' }}>{l.pedidos}</td><td style={{ textAlign: 'center' }}>☐</td></tr>
+            ))}</tbody>
+          </table>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 10, paddingTop: 8, borderTop: '2px solid #231c20', fontSize: 10 }}><b>TOTAL: {totUn} unidades · {filtrados.length} pedidos</b><span>conferido por: __________</span></div>
+        </div>
+        <div style={{ display: 'flex', gap: 7, marginTop: 13 }}>
+          <div className="btn primary" onClick={imprimir}><Printer size={13} color={d.txt} />Imprimir lista</div>
+          <div className="btn" onClick={abrirMesa}><ScanLine size={13} />Modo bipagem (scanner)</div>
+          <div className={`btn ${porPedido ? 'primary' : ''}`} onClick={() => setPorPedido((v) => !v)}>{porPedido ? 'Agrupar por produto' : 'Agrupar por pedido'}</div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ————— MODAL CENTRAL DE IMPRESSÃO — fila completa do mockup —————
+function ModalImp({ filtrados, d, canal, semNf, onFechar, imprimirTudo }) {
+  const etq = filtrados.filter((p) => p.rastreio).length
+  const nf = filtrados.filter((p) => p.nf).length
+  const un = filtrados.reduce((s, p) => s + p.qtd, 0)
+  const linhas = [
+    ['Etiquetas de envio', `${etq} prontas`, Tag, 'var(--ok)', `PDF · ${canal === 'ml' ? 'ZPL' : 'A6'}`],
+    ['Notas fiscais (DANFE)', `${nf} emitidas`, FileText, 'var(--ok)', 'via Bling · mesma folha da etiqueta'],
+    ['Lista de separação', `1 lista · ${un} un`, Layers, 'var(--ok)', 'agrupada por bin'],
+    ['Declaração de conteúdo', `${semNf} pedido(s)`, Box, 'var(--warn)', 'só p/ envios sem NF-e'],
+  ]
+  return (
+    <div className="modal-bg" style={{ display: 'flex' }} onClick={onFechar}>
+      <div className="modal" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+          <Printer size={17} style={{ color: d.cor }} />
+          <div style={{ flex: 1 }}><b className="serif" style={{ fontSize: 16 }}>Central de Impressão</b><div style={{ fontSize: 9, color: 'var(--faint)' }}>tudo o que a coleta de hoje precisa, em uma fila só — na ordem certa</div></div>
+          <div className="btn" style={{ padding: '5px 9px' }} onClick={onFechar}><X size={13} /></div>
+        </div>
+        {linhas.map(([t, v, Icon, c, s], i) => (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '11px 13px', borderRadius: 12, background: 'rgba(255,255,255,.03)', border: '1px solid var(--glass-border)', marginBottom: 8 }}>
+            <div style={{ width: 34, height: 34, borderRadius: 9, background: 'rgba(255,255,255,.05)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon size={15} style={{ color: c }} /></div>
+            <div style={{ flex: 1 }}><b style={{ fontSize: 11.5 }}>{t}</b><div style={{ fontSize: 8.5, color: 'var(--faint)' }}>{s}</div></div>
+            <span className="num" style={{ fontSize: 10, color: c }}>{v}</span>
+            <div style={{ width: 16, height: 16, borderRadius: 4, border: `2px solid ${d.cor}`, background: d.cor, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Check size={11} color={d.txt} /></div>
+          </div>
+        ))}
+        <div className="btn primary" style={{ justifyContent: 'center', marginTop: 12 }} onClick={() => { onFechar(); imprimirTudo() }}><Printer size={13} color={d.txt} />Imprimir fila completa (ordem: separação → etiquetas → DANFE)</div>
+        <div style={{ fontSize: 8, color: 'var(--faint)', marginTop: 8, textAlign: 'center' }}>{canal === 'ml' ? 'no Brasil a NF-e imprime nas mesmas dimensões da etiqueta — saem juntas, par a par' : 'a waybill SPX sai em A6 térmica; a DANFE acompanha em folha própria'}</div>
+      </div>
+    </div>
+  )
+}
+
+// ————— MODAL PERSONALIZAR ETIQUETA — preview paper + toggles + formato (mockup) —————
+function ModalEtq({ d, canal, exemplo, n, onFechar, gerar }) {
+  const [opts, setOpts] = useState(() => { try { return JSON.parse(localStorage.getItem('pcu_etq') || '{"rota":true,"sku":true,"logo":true,"fragil":false,"obrigado":true,"qr":true}') } catch (_) { return { rota: true, sku: true, logo: true, fragil: false, obrigado: true, qr: true } } })
+  const [fmt, setFmt] = useState('t10')
+  useEffect(() => { localStorage.setItem('pcu_etq', JSON.stringify(opts)) }, [opts])
+  const TOGS = [['rota', 'Estação / Rota de triagem'], ['sku', 'SKU + bin de separação'], ['logo', 'Logo da loja'], ['fragil', 'Aviso "FRÁGIL"'], ['obrigado', 'Mensagem de agradecimento'], ['qr', 'QR do pedido p/ conferência']]
+  const p = exemplo
+  return (
+    <div className="modal-bg" style={{ display: 'flex' }} onClick={onFechar}>
+      <div className="modal" style={{ maxWidth: 640 }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+          <Settings size={16} style={{ color: d.cor }} />
+          <div style={{ flex: 1 }}><b className="serif" style={{ fontSize: 16 }}>Personalizar etiqueta</b><div style={{ fontSize: 9, color: 'var(--faint)' }}>o modelo abaixo replica a etiqueta com sua estação/rota em destaque</div></div>
+          <div className="btn" style={{ padding: '5px 9px' }} onClick={onFechar}><X size={13} /></div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+          <div className="paper" style={{ background: '#fff', color: '#231c20', borderRadius: 10, padding: 13, fontFamily: 'Menlo,monospace' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #231c20', paddingBottom: 6, marginBottom: 8 }}>
+              <b style={{ fontSize: 13 }}>{canal === 'ml' ? 'MERCADO ENVIOS' : 'SPX EXPRESS'}</b>
+              <b style={{ fontSize: 16, border: '2px solid #231c20', padding: '2px 10px' }}>{'\u00A0\u00A0'}</b>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, marginBottom: 8 }}><span>{canal === 'ml' ? 'Coleta · ME2' : 'Pickup SPX'}</span><b className="num">{new Date().toLocaleDateString('pt-BR')}</b></div>
+            <div style={{ textAlign: 'center', margin: '8px 0' }}>
+              <div style={{ height: 40, background: 'repeating-linear-gradient(90deg,#231c20 0 2px,transparent 2px 5px)' }} />
+              <div className="num" style={{ fontSize: 10, letterSpacing: 2 }}>{p?.rastreio || p?.id || '—'}</div>
+            </div>
+            <div style={{ borderTop: '1.5px dashed #231c20', paddingTop: 7, fontSize: 9.5, lineHeight: 1.6 }}>
+              <b>DESTINATÁRIO</b><br />
+              {canal === 'ml' ? (p?.comprador || '—') : `${(p?.clienteReal || p?.comprador || '—')} (dados completos: só na waybill oficial)`}<br />
+              {p?.cidade || ''}{p?.uf ? `/${p.uf}` : ''}{p?.cep ? ` · ${p.cep}` : ''}
+              {opts.rota && <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6 }}><span><b>ESTAÇÃO</b></span><b style={{ fontSize: 15, minWidth: 34, borderBottom: '1.5px solid #231c20' }}>{'\u00A0'}</b><span><b>ROTA</b></span><b style={{ fontSize: 15, minWidth: 34, borderBottom: '1.5px solid #231c20' }}>{'\u00A0'}</b></div>}
+            </div>
+            <div style={{ borderTop: '1.5px dashed #231c20', marginTop: 7, paddingTop: 6, fontSize: 8.5 }}>
+              REMETENTE: SÓSTRASS ARMARINHO · LIMEIRA/SP<br />Pedido <b className="num">#{p?.id || '—'}</b>{opts.sku && p?.itens?.[0]?.sku ? <> · <span className="num">{p.itens[0].sku}</span></> : null} · {p?.qtd || 1} vol
+              {opts.fragil && <b> · FRÁGIL</b>}
+              {opts.obrigado && <div style={{ marginTop: 3 }}>Obrigado pela compra! ♥</div>}
+            </div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+            <div className="blk"><h4 style={{ color: d.cor }}><Settings size={12} style={{ color: d.cor }} />Personalizar etiqueta</h4>
+              {TOGS.map(([k, t]) => (
+                <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', cursor: 'pointer' }} onClick={() => setOpts((o) => ({ ...o, [k]: !o[k] }))}>
+                  <div className={`toggle ${opts[k] ? 'on' : ''}`} style={{ border: 'none', background: 'transparent', padding: 0 }}><span className="sw" /></div>
+                  <span style={{ fontSize: 10, color: 'var(--dim)' }}>{t}</span>
+                </div>
+              ))}
+            </div>
+            <div className="blk"><h4 style={{ color: d.cor }}><Printer size={12} style={{ color: d.cor }} />Formato</h4>
+              <div className="seg" style={{ width: '100%' }}>
+                {[['t10', 'Térmica 10×15'], ['a4', 'A4 · 2/folha'], ['raw', canal === 'ml' ? 'ZPL' : 'PDF']].map(([id, l]) => <span key={id} className={fmt === id ? 'on' : ''} style={{ flex: 1, textAlign: 'center' }} onClick={() => setFmt(id)}>{l}</span>)}
+              </div>
+              <div style={{ fontSize: 8, color: 'var(--faint)', marginTop: 8 }}>{canal === 'ml' ? 'a ordem de impressão segue a rota da coleta, reduzindo o tempo de triagem do motorista' : 'a SPX exige a waybill oficial — o modelo replica o layout com sua estação/rota em destaque'}</div>
+            </div>
+            <div className="btn primary" style={{ justifyContent: 'center' }} onClick={gerar}><Tag size={13} color={d.txt} />Aplicar e gerar {n} etiqueta(s)</div>
           </div>
         </div>
       </div>
