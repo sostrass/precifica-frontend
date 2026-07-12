@@ -2798,7 +2798,7 @@ function ToggleLinha({ on, onClick, label, escopo }) {
   )
 }
 
-function PainelImpressao({ onClose, onSalvo }) {
+export function PainelImpressao({ onClose, onSalvo }) {
   const notify = useToast()
   const [cfg, setCfg] = useState(null)
   const [porTipo, setPorTipo] = useState(null)   // { folha:{flags}, etiqueta:{flags} } — independente por tipo

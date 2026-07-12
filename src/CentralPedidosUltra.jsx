@@ -5,7 +5,8 @@ import {
   DollarSign, Send, Sparkles, Settings, RefreshCw, Loader2, User, Repeat, Star, CreditCard, Eye, Lock, CalendarDays,
 } from 'lucide-react'
 import { api } from './api.js'
-import { imprimirFolhasPedido, imprimirEtiquetas } from './Shopee.jsx'
+import { imprimirFolhasPedido, imprimirEtiquetas, PainelImpressao } from './Shopee.jsx'
+import { imprimirFolhasML, imprimirEtiquetasML } from './impressaoML.js'
 import { useToast } from './toast.jsx'
 import './central-ultra.css'
 
@@ -76,6 +77,11 @@ function adaptaShopee(p) {
   }
 }
 
+const comTimeout = (promessa, ms) => Promise.race([
+  promessa,
+  new Promise((_, rej) => setTimeout(() => rej(new Error('tempo esgotado')), ms)),
+])
+
 const ABAS_DEF = [
   ['todos', 'Todos', Layers], ['hoje', 'A despachar hoje', Zap], ['proximos', 'Próximos dias', CalendarDays],
   ['nf', 'Aguardando NF-e', FileText], ['transito', 'Em trânsito', Truck], ['fim', 'Finalizados', Check], ['cancel', 'Cancelados', X],
@@ -100,6 +106,17 @@ function paraImpressao(p) {
   }
 }
 
+function imprimirFolhasCanal(canal, pedidos) {
+  if (!pedidos.length) return
+  if (canal === 'ml') imprimirFolhasML(pedidos)
+  else imprimirFolhasPedido(pedidos)
+}
+function imprimirEtiquetasCanal(canal, pedidos) {
+  if (!pedidos.length) return
+  if (canal === 'ml') imprimirEtiquetasML(pedidos)
+  else imprimirEtiquetas(pedidos, '')
+}
+
 export default function CentralPedidosUltra() {
   const notify = useToast()
   const [canal, setCanal] = useState('ml')
@@ -113,6 +130,9 @@ export default function CentralPedidosUltra() {
   const [soDevolucao, setSoDevolucao] = useState(false)
   const [soSemNf, setSoSemNf] = useState(false)
   const [agrupo, setAgrupo] = useState('dia')
+  const [intel, setIntel] = useState(null)
+  const [intelCarregando, setIntelCarregando] = useState(false)
+  const [criandoIntel, setCriandoIntel] = useState(null)
   const [busca, setBusca] = useState('')
   const [ordem, setOrdem] = useState('recentes')
   const [pagina, setPagina] = useState(1)
@@ -150,17 +170,34 @@ export default function CentralPedidosUltra() {
         acumulado.forEach((p) => idsRef.current.add(p.id))
         const total = d1.paging?.total ?? acumulado.length
         if (!silencioso && total > acumulado.length) {
-          setFundo({ carregados: acumulado.length, total: Math.min(total, 240) })
-          for (let off = acumulado.length; off < Math.min(total, 240); off += 60) {
-            const dx = await api.mlPedidosEnriquecido('', off, 60, desdeIso, ateIso)
+          const teto = Math.min(total, 240)
+          const BLOCO = 30
+          setFundo({ carregados: acumulado.length, total: teto })
+          let falhasSeguidas = 0
+          for (let off = acumulado.length; off < teto; off += BLOCO) {
             if (g !== geracao.current) return
-            acumulado = acumulado.concat((dx.pedidos || []).map(adaptaML))
+            // cada bloco tem timeout próprio + 1 retry com bloco menor — a lista NUNCA trava nem regride
+            let dx = null
+            try { dx = await comTimeout(api.mlPedidosEnriquecido('', off, BLOCO, desdeIso, ateIso), 45000) }
+            catch (_) {
+              try { dx = await comTimeout(api.mlPedidosEnriquecido('', off, 15, desdeIso, ateIso), 30000) } catch (_) { dx = null }
+            }
+            if (g !== geracao.current) return
+            const lote = (dx?.pedidos || []).map(adaptaML)
+            if (!lote.length) {
+              falhasSeguidas++
+              if (falhasSeguidas >= 2) break
+              continue
+            }
+            falhasSeguidas = 0
+            const vistos = new Set(acumulado.map((p) => p.id))
+            acumulado = acumulado.concat(lote.filter((p) => !vistos.has(p.id)))
             acumulado.forEach((p) => idsRef.current.add(p.id))
             setPedidos(acumulado.slice())
-            setFundo({ carregados: acumulado.length, total: Math.min(total, 240) })
-            if (!(dx.pedidos || []).length) break
+            setFundo({ carregados: acumulado.length, total: teto })
           }
           setFundo(null)
+          if (acumulado.length < teto) notify(`Sincronizei ${acumulado.length} de ${teto} — o restante entra na próxima atualização automática.`, 'warn')
         }
       } else {
         let r
@@ -175,9 +212,43 @@ export default function CentralPedidosUltra() {
         arr.forEach((p) => idsRef.current.add(p.id))
         setPedidos(arr)
       }
-    } catch (e) { if (!silencioso && g === geracao.current) { setErro(e.message || 'falha ao carregar'); setPedidos([]) } }
+    } catch (e) {
+      if (!silencioso && g === geracao.current) {
+        setErro(e.message || 'falha ao carregar')
+        setPedidos((prev) => (prev && prev.length ? prev : []))
+        setFundo(null)
+      }
+    }
   }
   useEffect(() => { idsRef.current = new Set(); carregar() }, [canal, dias])
+
+  // Backfill de UFs do ML: o endereço vem do envio, não da lista — busca em lote limitado
+  const ufBuscadas = useRef(new Set())
+  useEffect(() => {
+    if (canal !== 'ml' || !pedidos || fundo) return
+    const alvos = pedidos.filter((p) => !p.uf && p.shipId && !ufBuscadas.current.has(p.shipId)).slice(0, 24)
+    if (!alvos.length) return
+    let vivo = true
+    const rodar = async () => {
+      const fila = alvos.slice()
+      const worker = async () => {
+        while (fila.length && vivo) {
+          const p = fila.shift()
+          ufBuscadas.current.add(p.shipId)
+          try {
+            const env = await api.mlEnvio(p.shipId)
+            const dest = env?.destination?.shipping_address || env?.receiver_address || null
+            const uf = (dest?.state?.id || dest?.state?.name || '').toString().replace('BR-', '').slice(0, 2).toUpperCase()
+            const cidade = dest?.city?.name || null
+            if (vivo && uf) setPedidos((prev) => prev ? prev.map((x) => x.id === p.id ? { ...x, uf, cidade: x.cidade || cidade } : x) : prev)
+          } catch (_) { /* segue */ }
+        }
+      }
+      await Promise.all(Array.from({ length: 8 }, worker))
+    }
+    rodar()
+    return () => { vivo = false }
+  }, [canal, pedidos === null, fundo])
   useEffect(() => {
     const tick = () => { if (document.visibilityState === 'visible') carregar(true) }
     const t = setInterval(tick, 60000)
@@ -271,9 +342,25 @@ export default function CentralPedidosUltra() {
     return () => window.removeEventListener('keydown', onKey)
   }, [pageItems, aberto])
 
+  const buscarIntel = async () => {
+    setIntelCarregando(true)
+    try { setIntel(await api.shopeePedidosInteligencia(dias)) } catch (e) { notify(e.message || 'Falha na análise', 'danger') }
+    setIntelCarregando(false)
+  }
+  const criarIntel = async (tipo, s) => {
+    setCriandoIntel(tipo)
+    try {
+      if (tipo === 'bundle') await api.shopeeCriarBundle(s.payload || s)
+      else if (tipo === 'addon') await api.shopeeCriarAddon(s.payload || s)
+      else await api.shopeeCriarCupom(s.payload || s)
+      notify('Campanha criada na Shopee.', 'ok')
+    } catch (e) { notify(e.message || 'Falha ao criar', 'danger') }
+    setCriandoIntel(null)
+  }
+
   const baixarEtiquetas = async (soUm) => {
     try {
-      const alvo = soUm ? [soUm] : [...sel]
+      const alvo = Array.isArray(soUm) ? soUm : (soUm ? [soUm] : [...sel])
       if (canal === 'ml') {
         const ids = alvo.map((id) => (lista.find((p) => p.id === id) || {}).shipId).filter(Boolean)
         if (!ids.length) return notify('Nenhum envio com etiqueta disponível.', 'warn')
@@ -484,7 +571,7 @@ export default function CentralPedidosUltra() {
         </div>
         <div className="glass" style={{ padding: '13px 15px' }}>
           <div className="up" style={{ fontSize: 8.5, color: 'var(--faint)', fontWeight: 800, marginBottom: 9, display: 'flex', alignItems: 'center', gap: 6 }}><MapPin size={12} style={{ color: d.cor }} />Para onde você vende · top estados</div>
-          {ufs.top.length === 0 && <div style={{ fontSize: 8.5, color: 'var(--faint)' }}>endereços chegam com o detalhe dos pedidos</div>}
+          {ufs.top.length === 0 && <div style={{ fontSize: 8.5, color: 'var(--faint)', display: 'flex', alignItems: 'center', gap: 6 }}><Loader2 size={10} className="animate-spin" />buscando os destinos nos envios…</div>}
           {ufs.top.map(([uf, pct]) => (
             <div key={uf} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
               <b className="num" style={{ width: 22, fontSize: 9 }}>{uf}</b>
@@ -513,6 +600,54 @@ export default function CentralPedidosUltra() {
             )
           })}
         </div>
+      </div>
+
+      {/* INTELIGÊNCIA DE VENDAS · pedidos → campanhas */}
+      <div className="glass" style={{ padding: '12px 15px', marginBottom: 11, border: '1px solid rgba(160,107,232,.3)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <Sparkles size={14} style={{ color: 'var(--purple, #a06be8)' }} />
+          <b className="serif" style={{ fontSize: 13 }}>Inteligência de vendas · transforme pedidos em campanhas</b>
+          <span className="chip" style={{ color: '#e9dbfb', background: 'rgba(160,107,232,.2)' }}>O QUE SEUS CLIENTES COMPRAM JUNTOS</span>
+          <div style={{ flex: 1 }} />
+          {canal === 'shopee'
+            ? <div className="btn" onClick={buscarIntel}>{intelCarregando ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}{intel ? 'Reanalisar' : 'Analisar os pedidos'}</div>
+            : <span style={{ fontSize: 8.5, color: 'var(--faint)' }}>para o Mercado Livre, chega com o backlog de campanhas ML</span>}
+        </div>
+        {canal === 'shopee' && intel && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 9, marginTop: 10 }}>
+            <div className="blk">
+              <h4 style={{ color: 'var(--purple, #a06be8)' }}><Layers size={12} style={{ color: 'var(--purple, #a06be8)' }} />Leve mais, pague menos</h4>
+              {(intel.leve_mais || []).slice(0, 2).map((s, i) => (
+                <div key={i} style={{ fontSize: 9.5, color: 'var(--dim)', marginBottom: 6, lineHeight: 1.5 }}>
+                  <b style={{ color: 'var(--fg)' }}>{s.titulo || s.nome || 'Par frequente'}</b><br />{s.descricao || s.motivo || `${s.par?.[0] || ''} + ${s.par?.[1] || ''}`}
+                </div>
+              ))}
+              {(intel.leve_mais || []).length === 0 && <div style={{ fontSize: 9, color: 'var(--faint)' }}>sem pares fortes no período</div>}
+              {(intel.leve_mais || []).length > 0 && <div className="btn primary" style={{ fontSize: 9, marginTop: 4 }} onClick={() => criarIntel('bundle', intel.leve_mais[0])}>{criandoIntel === 'bundle' ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} color={d.txt} />}CRIAR bundle</div>}
+            </div>
+            <div className="blk">
+              <h4 style={{ color: 'var(--purple, #a06be8)' }}><Box size={12} style={{ color: 'var(--purple, #a06be8)' }} />Add-on no carrinho</h4>
+              {intel.add_on ? (
+                <div style={{ fontSize: 9.5, color: 'var(--dim)', lineHeight: 1.5 }}>
+                  <b style={{ color: 'var(--fg)' }}>{intel.add_on.principal || intel.add_on.titulo}</b><br />
+                  {intel.add_on.descricao || `companheiros: ${(intel.add_on.companheiros || []).slice(0, 2).join(', ')}`}
+                  {intel.add_on.pct_casada != null && <span className="num" style={{ color: 'var(--ok)' }}> · {intel.add_on.pct_casada}% compra casada</span>}
+                  <div className="btn primary" style={{ fontSize: 9, marginTop: 6 }} onClick={() => criarIntel('addon', intel.add_on)}>{criandoIntel === 'addon' ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} color={d.txt} />}CRIAR add-on</div>
+                </div>
+              ) : <div style={{ fontSize: 9, color: 'var(--faint)' }}>sem sugestão de add-on no período</div>}
+            </div>
+            <div className="blk">
+              <h4 style={{ color: 'var(--purple, #a06be8)' }}><Tag size={12} style={{ color: 'var(--purple, #a06be8)' }} />Cupom que aumenta o ticket</h4>
+              {intel.cupom ? (
+                <div style={{ fontSize: 9.5, color: 'var(--dim)', lineHeight: 1.5 }}>
+                  <b style={{ color: 'var(--fg)' }}>{intel.cupom.titulo || 'Cupom sugerido'}</b><br />
+                  {intel.cupom.descricao || `ticket médio ${brl(intel.cupom.ticket)} → mínimo sugerido ${brl(intel.cupom.minimo)}`}
+                  <div className="btn primary" style={{ fontSize: 9, marginTop: 6 }} onClick={() => criarIntel('cupom', intel.cupom)}>{criandoIntel === 'cupom' ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} color={d.txt} />}CRIAR cupom</div>
+                </div>
+              ) : <div style={{ fontSize: 9, color: 'var(--faint)' }}>sem sugestão de cupom no período</div>}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* BUSCA + ORDENAR + PAGINAÇÃO TOPO */}
@@ -546,7 +681,7 @@ export default function CentralPedidosUltra() {
           <div className="btn primary" style={{ fontSize: 10 }} onClick={() => baixarEtiquetas()}><Tag size={12} color="#1a1008" />Etiquetas</div>
           <div className="btn" style={{ fontSize: 10 }} onClick={() => setAba('nf')}><FileText size={12} />NF-e</div>
           <div className="btn" style={{ fontSize: 10 }} onClick={() => setModal('sep')}><Layers size={12} />Separação</div>
-          <div className="btn" style={{ fontSize: 10 }} onClick={() => imprimirFolhasPedido(filtrados.filter((x) => sel.has(x.id)).map(paraImpressao))}><Printer size={12} />Imprimir pedidos</div>
+          <div className="btn" style={{ fontSize: 10 }} onClick={() => imprimirFolhasCanal(canal, filtrados.filter((x) => sel.has(x.id)).map(paraImpressao))}><Printer size={12} />Imprimir pedidos</div>
           <div className="btn" style={{ fontSize: 10 }} onClick={() => { setMesaIdx(0); setModal('mesa') }}><ScanLine size={12} />Mesa</div>
           <span style={{ fontSize: 8, color: 'var(--faint)' }}>esc limpa</span>
         </div>
@@ -581,9 +716,9 @@ export default function CentralPedidosUltra() {
         <span><span className="kbd">M</span> mesa</span><span><span className="kbd">B</span> busca</span><span><span className="kbd">esc</span> limpa</span>
       </div>
 
-      {modal === 'mesa' && <UltraMesa fila={filtrados.filter((p) => classifica(p) === 'hoje' || aba === 'todos').slice(0, 40)} idx={mesaIdx} setIdx={setMesaIdx} conf={mesaConf} setConf={setMesaConf} onFechar={() => setModal(null)} d={d} />}
+      {modal === 'mesa' && <UltraMesa fila={filtrados.filter((p) => !p.cancelado).slice(0, 60)} idx={mesaIdx} setIdx={setMesaIdx} conf={mesaConf} setConf={setMesaConf} onFechar={() => setModal(null)} d={d} canal={canal} baixarOficial={(id) => baixarEtiquetas(id)} agoraTs={agoraTs} />}
       {modal === 'sep' && <ModalSep filtrados={filtrados} d={d} canal={canal} onFechar={() => setModal(null)} abrirMesa={() => { setMesaIdx(0); setModal('mesa') }} />}
-      {modal === 'imp' && <ModalImp filtrados={filtrados} d={d} canal={canal} semNf={semNf} onFechar={() => setModal(null)} imprimirTudo={() => baixarEtiquetas()} />}
+      {modal === 'imp' && <ModalImp filtrados={filtrados} d={d} canal={canal} semNf={semNf} onFechar={() => setModal(null)} selIniciais={sel} baixarOficiais={(ids) => baixarEtiquetas(ids)} />}
       {modal === 'etq' && <ModalEtq d={d} canal={canal} exemplo={filtrados[0]} n={sel.size || aDespachar || filtrados.length} onFechar={() => setModal(null)} gerar={() => { setModal(null); baixarEtiquetas() }} />}
     </div>
   )
@@ -720,8 +855,8 @@ function UltraExpand({ p, d, canal, baixarEtiqueta, notify, agoraTs }) {
     <div style={{ borderTop: '1px solid var(--glass-border)', background: 'linear-gradient(180deg,rgba(214,0,127,.04),transparent)', padding: '14px 15px 15px 19px' }}>
       <div style={{ display: 'flex', gap: 7, marginBottom: 12, flexWrap: 'wrap' }}>
         <div className="btn primary" style={{ fontSize: 10 }} onClick={baixarEtiqueta}><Tag size={12} color={d.txt} />Baixar etiqueta</div>
-        <div className="btn" style={{ fontSize: 10 }} onClick={() => imprimirEtiquetas([paraImpressao(p)], '')}><Eye size={12} />Etiqueta da transportadora</div>
-        <div className="btn" style={{ fontSize: 10 }} onClick={() => imprimirFolhasPedido([paraImpressao(p)])}><Printer size={12} />Imprimir pedido</div>
+        <div className="btn" style={{ fontSize: 10 }} onClick={() => imprimirEtiquetasCanal(canal, [paraImpressao(p)])}><Eye size={12} />Etiqueta da transportadora</div>
+        <div className="btn" style={{ fontSize: 10 }} onClick={() => imprimirFolhasCanal(canal, [paraImpressao(p)])}><Printer size={12} />Imprimir pedido</div>
         <div className="btn" style={{ fontSize: 10 }} onClick={() => window.open(canal === 'ml' ? `https://www.mercadolivre.com.br/vendas/${p.id}/detalhe` : `https://seller.shopee.com.br/portal/sale/order/${p.id}`, '_blank')}><Box size={12} />Abrir no canal</div>
         <div style={{ flex: 1 }} />
         {!p.cancelado && !p.devolucao && <span className="chip" style={{ color: 'var(--ok)', background: 'rgba(47,217,141,.12)' }}><ShieldCheck size={9} style={{ color: 'var(--ok)' }} />SLA NO PRAZO</span>}
@@ -902,64 +1037,6 @@ function ModalSimples({ titulo, onFechar, d, children }) {
   )
 }
 
-// ————— MESA (modal do mockup) —————
-function UltraMesa({ fila, idx, setIdx, conf, setConf, onFechar, d }) {
-  const p = fila[Math.min(idx, fila.length - 1)]
-  if (!p) return <ModalSimples titulo="Mesa de Despacho" onFechar={onFechar} d={d}><div style={{ fontSize: 11, color: 'var(--faint)' }}>Sem pedidos na fila desta aba.</div></ModalSimples>
-  const c = conf[p.id] || new Set()
-  const tot = p.itens.reduce((s, it) => s + it.qtd, 0)
-  const feitos = p.itens.reduce((s, it, i) => s + (c.has(i) ? it.qtd : 0), 0)
-  const completo = p.itens.length > 0 && p.itens.every((_, i) => c.has(i))
-  const marcar = (i) => setConf((m) => { const s = new Set(m[p.id] || []); s.has(i) ? s.delete(i) : s.add(i); return { ...m, [p.id]: s } })
-  const done = (id) => { const cc = conf[id]; const it = (fila.find((x) => x.id === id)?.itens) || []; return it.length > 0 && it.every((_, i) => cc && cc.has(i)) }
-  return (
-    <div className="modal-bg" style={{ display: 'flex' }} onClick={onFechar}>
-      <div className="modal" style={{ maxWidth: 840 }} onClick={(e) => e.stopPropagation()}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-          <div style={{ width: 32, height: 32, borderRadius: 9, background: d.cor, display: 'grid', placeItems: 'center' }}><ScanLine size={15} color={d.txt} /></div>
-          <div style={{ flex: 1 }}><b className="serif" style={{ fontSize: 15 }}>Mesa de Despacho</b><div style={{ fontSize: 8.5, color: 'var(--faint)' }}>bipou, conferiu, imprimiu — a fila anda sozinha</div></div>
-          <span className="chip num" style={{ color: d.txt, background: d.cor }}>{Math.min(idx + 1, fila.length)} DE {fila.length}</span>
-          <div className="btn" style={{ padding: '5px 9px' }} onClick={onFechar}><X size={13} /></div>
-        </div>
-        <div className="scanbox"><Barcode size={19} style={{ color: d.cor }} /><div style={{ flex: 1 }}><div className="up" style={{ fontSize: 7, color: 'var(--faint)' }}>bipe — ou toque no item para conferir</div><b style={{ fontSize: 12.5, color: 'var(--dim)' }}>aguardando leitura…</b></div><span className="chip" style={{ color: 'var(--ok)', background: 'rgba(47,217,141,.12)' }}>SCANNER PRONTO</span></div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1.35fr 1fr', gap: 12, marginTop: 12 }}>
-          <div style={{ borderRadius: 12, padding: 13, background: completo ? 'rgba(47,217,141,.06)' : 'rgba(255,255,255,.03)', border: `1px solid ${completo ? 'rgba(47,217,141,.4)' : 'var(--glass-border)'}` }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 9 }}>
-              <span className="up" style={{ fontSize: 8, fontWeight: 800, color: completo ? 'var(--ok)' : 'var(--faint)' }}>na mesa · #{p.id.slice(-12)}</span>
-              <b className="num" style={{ fontSize: 11, color: completo ? 'var(--ok)' : d.cor }}>{feitos}/{tot}</b>
-            </div>
-            {p.itens.map((it, i) => (
-              <div key={i} onClick={() => marcar(i)} style={{ display: 'flex', alignItems: 'center', gap: 9, borderRadius: 9, padding: '8px 10px', marginBottom: 5, cursor: 'pointer', background: c.has(i) ? 'rgba(47,217,141,.1)' : 'rgba(0,0,0,.2)', border: `1px solid ${c.has(i) ? 'rgba(47,217,141,.35)' : 'var(--glass-border)'}` }}>
-                <span style={{ width: 17, height: 17, borderRadius: 5, display: 'grid', placeItems: 'center', background: c.has(i) ? 'var(--ok)' : 'transparent', border: c.has(i) ? 'none' : '1.5px solid var(--glass-border)', flex: 'none' }}>{c.has(i) && <Check size={11} color="#0a1a0f" />}</span>
-                <span style={{ flex: 1, fontSize: 10.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.nome}</span>
-                {it.bin && <span className="num" style={{ fontSize: 8, color: d.cor }}>bin {it.bin}</span>}
-                <b className="num" style={{ fontSize: 11, color: c.has(i) ? 'var(--ok)' : 'var(--dim)' }}>{it.qtd}un</b>
-              </div>
-            ))}
-            <div style={{ display: 'flex', gap: 7, marginTop: 10 }}>
-              <div className={`btn ${completo ? 'primary' : ''}`} style={{ flex: 1, justifyContent: 'center', fontSize: 10, opacity: completo ? 1 : .5, pointerEvents: completo ? 'auto' : 'none' }} onClick={() => idx < fila.length - 1 ? setIdx(idx + 1) : onFechar()}><Check size={12} color={completo ? '#1a1008' : undefined} />{completo ? 'Conferido — próximo' : `faltam ${tot - feitos} un`}</div>
-              <div className="btn" style={{ fontSize: 10 }} onClick={() => idx < fila.length - 1 ? setIdx(idx + 1) : onFechar()}>pular</div>
-            </div>
-          </div>
-          <div>
-            <div className="up" style={{ fontSize: 8, fontWeight: 800, color: 'var(--faint)', marginBottom: 7 }}>fila da coleta</div>
-            <div style={{ maxHeight: 250, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 5 }}>
-              {fila.map((f, i) => (
-                <div key={f.id} onClick={() => setIdx(i)} style={{ display: 'flex', alignItems: 'center', gap: 8, borderRadius: 9, padding: '7px 10px', cursor: 'pointer', background: i === idx ? `${d.cor}14` : 'rgba(0,0,0,.18)', border: `1px solid ${i === idx ? d.cor + '55' : 'var(--glass-border)'}` }}>
-                  <span style={{ width: 7, height: 7, borderRadius: '50%', flex: 'none', background: done(f.id) ? 'var(--ok)' : !f.nf && f.canal === 'shopee' ? 'var(--danger)' : i === idx ? d.cor : 'var(--faint)' }} />
-                  <b className="num" style={{ fontSize: 10, flex: 1 }}>#{f.id.slice(-8)}</b>
-                  <span style={{ fontSize: 8, color: done(f.id) ? 'var(--ok)' : 'var(--faint)' }}>{done(f.id) ? 'conferido' : !f.nf && f.canal === 'shopee' ? 'sem NF-e' : i === idx ? 'na mesa' : 'aguardando'}</span>
-                </div>
-              ))}
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, padding: '7px 10px', borderRadius: 9, background: 'rgba(255,122,122,.07)', border: '1px solid rgba(255,122,122,.3)' }}><AlertTriangle size={11} style={{ color: 'var(--danger)' }} /><span style={{ fontSize: 8, color: 'var(--dim)' }}>item errado bipado trava a mesa até corrigir</span></div>
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 // ————— MODAL SEPARAÇÃO — paper com tabela real (BIN/SKU/PRODUTO/QTD/PEDIDOS/✓) —————
 function ModalSep({ filtrados, d, canal, onFechar, abrirMesa }) {
   const [porPedido, setPorPedido] = useState(false)
@@ -1007,35 +1084,69 @@ function ModalSep({ filtrados, d, canal, onFechar, abrirMesa }) {
   )
 }
 
-// ————— MODAL CENTRAL DE IMPRESSÃO — fila completa do mockup —————
-function ModalImp({ filtrados, d, canal, semNf, onFechar, imprimirTudo }) {
-  const etq = filtrados.filter((p) => p.rastreio).length
-  const nf = filtrados.filter((p) => p.nf).length
-  const un = filtrados.reduce((s, p) => s + p.qtd, 0)
+// ————— MODAL CENTRAL DE IMPRESSÃO — com SELEÇÃO de pedidos e impressão por marketplace —————
+function ModalImp({ filtrados, d, canal, semNf, onFechar, selIniciais, baixarOficiais }) {
+  const [marcados, setMarcados] = useState(() => new Set(selIniciais && selIniciais.size ? [...selIniciais] : filtrados.slice(0, 40).map((p) => p.id)))
+  const [mostrarPersonalizar, setMostrarPersonalizar] = useState(false)
+  const alvos = filtrados.filter((p) => marcados.has(p.id))
+  const un = alvos.reduce((s, p) => s + p.qtd, 0)
+  const etq = alvos.filter((p) => p.rastreio).length
+  const nf = alvos.filter((p) => p.nf).length
+  const toggle = (id) => setMarcados((m) => { const n = new Set(m); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const todos = () => setMarcados(new Set(filtrados.map((p) => p.id)))
+  const nenhum = () => setMarcados(new Set())
   const linhas = [
-    ['Etiquetas de envio', `${etq} prontas`, Tag, 'var(--ok)', `PDF · ${canal === 'ml' ? 'ZPL' : 'A6'}`],
-    ['Notas fiscais (DANFE)', `${nf} emitidas`, FileText, 'var(--ok)', 'via Bling · mesma folha da etiqueta'],
-    ['Lista de separação', `1 lista · ${un} un`, Layers, 'var(--ok)', 'agrupada por bin'],
-    ['Declaração de conteúdo', `${semNf} pedido(s)`, Box, 'var(--warn)', 'só p/ envios sem NF-e'],
+    ['Folhas do pedido', `${alvos.length} folha(s)`, Printer, d.cor, canal === 'ml' ? 'modelo Mercado Livre · logo oficial' : 'Folha V8 · modelo Shopee', () => imprimirFolhasCanal(canal, alvos.map(paraImpressao))],
+    ['Etiquetas da transportadora', `${alvos.length} etiqueta(s)`, Tag, 'var(--ok)', canal === 'ml' ? 'MERCADO ENVIOS · ESTAÇÃO/ROTA' : 'SPX EXPRESS · ESTAÇÃO/ROTA', () => imprimirEtiquetasCanal(canal, alvos.map(paraImpressao))],
+    ['Etiquetas oficiais (PDF)', `${etq} com rastreio`, FileText, 'var(--blue)', canal === 'ml' ? 'PDF/ZPL direto do Mercado Envios' : 'waybill oficial SPX (A6)', () => baixarOficiais([...marcados])],
+    ['Notas fiscais (DANFE)', `${nf} emitidas`, CheckCheck, nf ? 'var(--ok)' : 'var(--warn)', 'via Bling · imprime junto da etiqueta', null],
   ]
   return (
     <div className="modal-bg" style={{ display: 'flex' }} onClick={onFechar}>
-      <div className="modal" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
+      <div className="modal" style={{ maxWidth: 760 }} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
           <Printer size={17} style={{ color: d.cor }} />
-          <div style={{ flex: 1 }}><b className="serif" style={{ fontSize: 16 }}>Central de Impressão</b><div style={{ fontSize: 9, color: 'var(--faint)' }}>tudo o que a coleta de hoje precisa, em uma fila só — na ordem certa</div></div>
+          <div style={{ flex: 1 }}><b className="serif" style={{ fontSize: 16 }}>Central de Impressão</b><div style={{ fontSize: 9, color: 'var(--faint)' }}>selecione os pedidos e imprima tudo o que a coleta precisa — na identidade de cada marketplace</div></div>
+          <div className="btn" onClick={() => setMostrarPersonalizar(true)}><Settings size={12} />Personalizar modelos</div>
           <div className="btn" style={{ padding: '5px 9px' }} onClick={onFechar}><X size={13} /></div>
         </div>
-        {linhas.map(([t, v, Icon, c, s], i) => (
-          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '11px 13px', borderRadius: 12, background: 'rgba(255,255,255,.03)', border: '1px solid var(--glass-border)', marginBottom: 8 }}>
-            <div style={{ width: 34, height: 34, borderRadius: 9, background: 'rgba(255,255,255,.05)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon size={15} style={{ color: c }} /></div>
-            <div style={{ flex: 1 }}><b style={{ fontSize: 11.5 }}>{t}</b><div style={{ fontSize: 8.5, color: 'var(--faint)' }}>{s}</div></div>
-            <span className="num" style={{ fontSize: 10, color: c }}>{v}</span>
-            <div style={{ width: 16, height: 16, borderRadius: 4, border: `2px solid ${d.cor}`, background: d.cor, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Check size={11} color={d.txt} /></div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1fr', gap: 13 }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7 }}>
+              <span className="up" style={{ fontSize: 7.5, color: 'var(--faint)', fontWeight: 800 }}>seleção de impressão</span>
+              <span className="chip num" style={{ color: d.txt, background: d.cor }}>{alvos.length} DE {filtrados.length}</span>
+              <div style={{ flex: 1 }} />
+              <span style={{ fontSize: 8.5, color: 'var(--accent)', cursor: 'pointer' }} onClick={todos}>todos</span>
+              <span style={{ fontSize: 8.5, color: 'var(--faint)', cursor: 'pointer' }} onClick={nenhum}>nenhum</span>
+            </div>
+            <div style={{ maxHeight: '44vh', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {filtrados.slice(0, 80).map((p) => (
+                <div key={p.id} onClick={() => toggle(p.id)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 9px', borderRadius: 9, cursor: 'pointer', background: marcados.has(p.id) ? `${d.cor}10` : 'rgba(0,0,0,.18)', border: `1px solid ${marcados.has(p.id) ? d.cor + '55' : 'var(--glass-border)'}` }}>
+                  <span style={{ width: 15, height: 15, borderRadius: 4, display: 'grid', placeItems: 'center', flex: 'none', background: marcados.has(p.id) ? d.cor : 'transparent', border: marcados.has(p.id) ? 'none' : '1.5px solid var(--glass-border)' }}>{marcados.has(p.id) && <Check size={10} color={d.txt} />}</span>
+                  <span className="num" style={{ fontSize: 9, color: 'var(--faint)', flex: 'none' }}>#{p.id.slice(-8)}</span>
+                  <span style={{ flex: 1, fontSize: 9.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.titulo}</span>
+                  {!p.nf && !p.nfDesconhecida && <span className="chip" style={{ fontSize: 6.5, color: '#fff', background: 'var(--danger)' }}>SEM NF</span>}
+                  <b className="num" style={{ fontSize: 9.5 }}>{p.qtd}un</b>
+                </div>
+              ))}
+            </div>
           </div>
-        ))}
-        <div className="btn primary" style={{ justifyContent: 'center', marginTop: 12 }} onClick={() => { onFechar(); imprimirTudo() }}><Printer size={13} color={d.txt} />Imprimir fila completa (ordem: separação → etiquetas → DANFE)</div>
-        <div style={{ fontSize: 8, color: 'var(--faint)', marginTop: 8, textAlign: 'center' }}>{canal === 'ml' ? 'no Brasil a NF-e imprime nas mesmas dimensões da etiqueta — saem juntas, par a par' : 'a waybill SPX sai em A6 térmica; a DANFE acompanha em folha própria'}</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {linhas.map(([t, v, Icon, c, s, acao], i) => (
+              <div key={i} onClick={acao || undefined} style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '11px 13px', borderRadius: 12, background: 'rgba(255,255,255,.03)', border: '1px solid var(--glass-border)', cursor: acao ? 'pointer' : 'default', opacity: acao ? 1 : .75 }}>
+                <div style={{ width: 34, height: 34, borderRadius: 9, background: 'rgba(255,255,255,.05)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}><Icon size={15} style={{ color: c }} /></div>
+                <div style={{ flex: 1 }}><b style={{ fontSize: 11.5 }}>{t}</b><div style={{ fontSize: 8.5, color: 'var(--faint)' }}>{s}</div></div>
+                <span className="num" style={{ fontSize: 10, color: c }}>{v}</span>
+                {acao && <ChevronRight size={13} style={{ color: 'var(--faint)' }} />}
+              </div>
+            ))}
+            <div className="btn primary" style={{ justifyContent: 'center', marginTop: 4 }} onClick={() => { imprimirFolhasCanal(canal, alvos.map(paraImpressao)); imprimirEtiquetasCanal(canal, alvos.map(paraImpressao)) }}>
+              <Printer size={13} color={d.txt} />Imprimir fila completa ({alvos.length} · {un} un)
+            </div>
+            <div style={{ fontSize: 8, color: 'var(--faint)', textAlign: 'center' }}>{canal === 'ml' ? 'folhas e etiquetas no padrão Mercado Livre — a NF-e imprime nas mesmas dimensões, par a par' : 'a waybill SPX sai em A6 térmica; a DANFE acompanha em folha própria'}</div>
+          </div>
+        </div>
+        {mostrarPersonalizar && <PainelImpressao onClose={() => setMostrarPersonalizar(false)} onSalvo={() => setMostrarPersonalizar(false)} />}
       </div>
     </div>
   )
@@ -1098,6 +1209,165 @@ function ModalEtq({ d, canal, exemplo, n, onFechar, gerar }) {
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+// ═══════════ MESA DE DESPACHO ULTRA — módulo dedicado em tela cheia ═══════════
+// Checkout de conferência: fila viva, cronômetros, dados do cliente, impressão por marketplace.
+function UltraMesa({ fila, idx, setIdx, conf, setConf, onFechar, d, canal, baixarOficial, agoraTs }) {
+  const [inicioSessao] = useState(() => Date.now())
+  const inicioPedido = useRef({})
+  const duracoes = useRef({})
+  const [tick, setTick] = useState(0)
+  useEffect(() => { const t = setInterval(() => setTick((x) => x + 1), 1000); return () => clearInterval(t) }, [])
+  useEffect(() => {
+    const p = fila[idx]
+    if (p && !inicioPedido.current[p.id]) inicioPedido.current[p.id] = Date.now()
+  }, [idx, fila])
+
+  const fmtT = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}` }
+  const p = fila[Math.min(idx, Math.max(0, fila.length - 1))]
+  const c = p ? (conf[p.id] || new Set()) : new Set()
+  const tot = p ? p.itens.reduce((s, it) => s + it.qtd, 0) : 0
+  const feitos = p ? p.itens.reduce((s, it, i) => s + (c.has(i) ? it.qtd : 0), 0) : 0
+  const completo = p && p.itens.length > 0 && p.itens.every((_, i) => c.has(i))
+  const done = (id) => { const cc = conf[id]; const its = (fila.find((x) => x.id === id)?.itens) || []; return its.length > 0 && its.every((_, i) => cc && cc.has(i)) }
+  const concluidos = fila.filter((f) => done(f.id)).length
+  const medio = (() => { const ds = Object.values(duracoes.current); return ds.length ? ds.reduce((a, b) => a + b, 0) / ds.length : 0 })()
+  const marcar = (i) => p && setConf((m) => { const s = new Set(m[p.id] || []); s.has(i) ? s.delete(i) : s.add(i); return { ...m, [p.id]: s } })
+  const concluir = () => {
+    if (!p) return
+    duracoes.current[p.id] = Date.now() - (inicioPedido.current[p.id] || Date.now())
+    if (idx < fila.length - 1) setIdx(idx + 1); else onFechar()
+  }
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === ' ') { e.preventDefault(); const prox = p ? p.itens.findIndex((_, i) => !c.has(i)) : -1; if (prox >= 0) marcar(prox) }
+      else if (e.key === 'Enter' && completo) { e.preventDefault(); concluir() }
+      else if (e.key === 'Escape') onFechar()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [p, c, completo, idx])
+
+  const corteMs = (() => { const alvo = new Date(); alvo.setHours(15, 0, 0, 0); return alvo - Date.now() })()
+
+  return (
+    <div className="pcuv2" style={{ position: 'fixed', inset: 0, zIndex: 60, background: 'var(--bg, #16090f)', overflow: 'auto', padding: '14px 18px', '--ch': d.cor, '--chd': d.cord }}>
+      {/* header do módulo */}
+      <div className="glass" style={{ padding: '13px 16px', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 13, flexWrap: 'wrap', border: '1px solid transparent', background: `linear-gradient(var(--surface),var(--surface)) padding-box, linear-gradient(110deg, ${d.cor}88, rgba(214,0,127,.4), ${d.cor}44) border-box` }}>
+        <div style={{ width: 40, height: 40, borderRadius: 11, background: d.brand, display: 'grid', placeItems: 'center', flex: 'none' }}><ScanLine size={19} color="#1a1008" /></div>
+        <div>
+          <b className="serif" style={{ fontSize: 17 }}>Mesa de Despacho</b>
+          <div style={{ fontSize: 9, color: 'var(--faint)' }}>bipou, conferiu, imprimiu — a fila anda sozinha · {d.nome}</div>
+        </div>
+        <div style={{ flex: 1 }} />
+        <div style={{ textAlign: 'center' }}><div className="up" style={{ fontSize: 6.5, color: 'var(--faint)' }}>sessão</div><b className="num" style={{ fontSize: 14 }}>{fmtT(Date.now() - inicioSessao)}</b></div>
+        <div style={{ textAlign: 'center' }}><div className="up" style={{ fontSize: 6.5, color: 'var(--faint)' }}>conferidos</div><b className="num" style={{ fontSize: 14, color: 'var(--ok)' }}>{concluidos}/{fila.length}</b></div>
+        <div style={{ textAlign: 'center' }}><div className="up" style={{ fontSize: 6.5, color: 'var(--faint)' }}>tempo médio</div><b className="num" style={{ fontSize: 14 }}>{medio ? fmtT(medio) : '—'}</b></div>
+        <div style={{ textAlign: 'center' }}><div className="up" style={{ fontSize: 6.5, color: 'var(--faint)' }}>corte da coleta</div><b className="num" style={{ fontSize: 14, color: corteMs < 3600000 ? 'var(--danger)' : 'var(--warn)' }}>{corteMs > 0 ? fmtT(corteMs) : 'encerrado'}</b></div>
+        <div className="btn" onClick={onFechar}><X size={13} />Sair (esc)</div>
+      </div>
+
+      {!p ? <div className="glass" style={{ padding: 26, textAlign: 'center', color: 'var(--faint)', fontSize: 12 }}>Fila vazia — nada para conferir nesta aba.</div> : (
+        <div style={{ display: 'grid', gridTemplateColumns: '270px 1.5fr 300px', gap: 12, alignItems: 'start' }}>
+          {/* FILA */}
+          <div className="glass" style={{ padding: '12px 13px' }}>
+            <div className="up" style={{ fontSize: 7.5, fontWeight: 800, color: 'var(--faint)', marginBottom: 8 }}>fila da coleta · {fila.length} pedido(s)</div>
+            <div style={{ maxHeight: '62vh', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 5 }}>
+              {fila.map((f, i) => (
+                <div key={f.id} onClick={() => setIdx(i)} style={{ borderRadius: 10, padding: '8px 10px', cursor: 'pointer', background: i === idx ? `${d.cor}14` : 'rgba(0,0,0,.18)', border: `1px solid ${i === idx ? d.cor + '66' : 'var(--glass-border)'}` }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', flex: 'none', background: done(f.id) ? 'var(--ok)' : !f.nf && !f.nfDesconhecida ? 'var(--danger)' : i === idx ? d.cor : 'var(--faint)' }} />
+                    <b className="num" style={{ fontSize: 10, flex: 1 }}>#{f.id.slice(-10)}</b>
+                    <span className="num" style={{ fontSize: 8, color: 'var(--faint)' }}>{f.qtd}un</span>
+                  </div>
+                  <div style={{ fontSize: 8, color: 'var(--dim)', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.titulo}</div>
+                  <div style={{ display: 'flex', gap: 6, marginTop: 3 }}>
+                    <span style={{ fontSize: 7, color: done(f.id) ? 'var(--ok)' : i === idx ? d.cor : 'var(--faint)' }}>{done(f.id) ? '✓ conferido' : i === idx ? 'na mesa' : 'aguardando'}</span>
+                    {!f.nf && !f.nfDesconhecida && <span style={{ fontSize: 7, color: 'var(--danger)' }}>sem NF-e</span>}
+                    {f.shipBy && f.shipBy * 1000 < agoraTs && <span style={{ fontSize: 7, color: 'var(--danger)' }}>atrasado</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* PEDIDO ATUAL */}
+          <div className="glass" style={{ padding: '14px 16px', border: `1px solid ${completo ? 'rgba(47,217,141,.45)' : 'var(--glass-border)'}`, background: completo ? 'linear-gradient(180deg,rgba(47,217,141,.05),transparent)' : undefined }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+              <span className="chip num" style={{ color: d.txt, background: d.cor }}>NA MESA · {Math.min(idx + 1, fila.length)} DE {fila.length}</span>
+              <b className="num" style={{ fontSize: 13 }}>#{p.id}</b>
+              <div style={{ flex: 1 }} />
+              <div style={{ textAlign: 'right' }}><div className="up" style={{ fontSize: 6.5, color: 'var(--faint)' }}>tempo de separação</div><b className="num" style={{ fontSize: 15, color: d.cor }}>{fmtT(Date.now() - (inicioPedido.current[p.id] || Date.now()))}</b></div>
+            </div>
+            {/* cliente */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 11, background: 'rgba(0,0,0,.2)', border: '1px solid var(--glass-border)', marginBottom: 10, flexWrap: 'wrap' }}>
+              <div style={{ width: 34, height: 34, borderRadius: '50%', background: 'linear-gradient(145deg,var(--accent),#7b2a8c)', display: 'grid', placeItems: 'center', flex: 'none' }}><User size={15} color="#fff" /></div>
+              <div style={{ flex: 1, minWidth: 140 }}>
+                <b style={{ fontSize: 12 }}>{p.clienteReal || p.comprador}</b>
+                <div style={{ fontSize: 8.5, color: 'var(--faint)' }}>{[p.cidade, p.uf].filter(Boolean).join('/') || 'destino no envio'}{p.cep ? ` · ${p.cep}` : ''}</div>
+              </div>
+              {(p.compras || 0) > 1 && <span className="chip" style={{ color: '#1a1008', background: 'var(--gold, #F2C200)' }}>{p.compras}ª COMPRA</span>}
+              <span className="chip" style={{ color: p.nf ? 'var(--ok)' : '#fff', background: p.nf ? 'rgba(47,217,141,.12)' : 'var(--danger)' }}>{p.nf ? 'NF-E OK' : p.nfDesconhecida ? 'NF-E: VERIFICAR' : 'SEM NF-E'}</span>
+              {p.shipBy && <span className="chip" style={{ color: p.shipBy * 1000 < agoraTs ? '#fff' : '#1a1008', background: p.shipBy * 1000 < agoraTs ? 'var(--danger)' : 'var(--warn)' }}><Clock size={9} />DESPACHAR {new Date(p.shipBy * 1000).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>}
+            </div>
+            {/* scanbox */}
+            <div className="scanbox" style={{ marginBottom: 10 }}><Barcode size={19} style={{ color: d.cor }} /><div style={{ flex: 1 }}><div className="up" style={{ fontSize: 7, color: 'var(--faint)' }}>bipe o código do produto — ou toque no item · espaço marca o próximo</div><b style={{ fontSize: 12.5, color: 'var(--dim)' }}>aguardando leitura…</b></div><span className="chip" style={{ color: 'var(--ok)', background: 'rgba(47,217,141,.12)' }}>SCANNER PRONTO</span></div>
+            {/* progresso */}
+            <div style={{ height: 8, borderRadius: 5, background: 'rgba(255,255,255,.07)', overflow: 'hidden', marginBottom: 10 }}><div style={{ height: '100%', width: `${tot ? Math.round(feitos / tot * 100) : 0}%`, background: completo ? 'var(--ok)' : `linear-gradient(90deg,${d.cor},${d.cord})`, transition: 'width .2s' }} /></div>
+            {/* itens com foto grande */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+              {p.itens.map((it, i) => (
+                <div key={i} onClick={() => marcar(i)} style={{ display: 'flex', alignItems: 'center', gap: 12, borderRadius: 12, padding: '10px 12px', cursor: 'pointer', background: c.has(i) ? 'rgba(47,217,141,.1)' : 'rgba(0,0,0,.2)', border: `1px solid ${c.has(i) ? 'rgba(47,217,141,.4)' : 'var(--glass-border)'}` }}>
+                  <span style={{ width: 20, height: 20, borderRadius: 6, display: 'grid', placeItems: 'center', flex: 'none', background: c.has(i) ? 'var(--ok)' : 'transparent', border: c.has(i) ? 'none' : '2px solid var(--glass-border)' }}>{c.has(i) && <Check size={13} color="#0a1a0f" />}</span>
+                  <div style={{ width: 58, height: 58, borderRadius: 10, overflow: 'hidden', background: 'linear-gradient(135deg,#4a2a3a,#3a2530)', flex: 'none', display: 'grid', placeItems: 'center' }}>{it.imagem ? <img src={it.imagem} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Box size={22} style={{ color: 'rgba(255,255,255,.5)' }} />}</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <b style={{ fontSize: 12.5 }}>{it.nome}</b>
+                    <div className="num" style={{ fontSize: 8.5, color: 'var(--faint)', marginTop: 2 }}>{[it.sku, it.variacao].filter(Boolean).join(' · ')}</div>
+                  </div>
+                  {it.bin && <div style={{ textAlign: 'center', flex: 'none' }}><div className="up" style={{ fontSize: 6, color: 'var(--faint)' }}>bin</div><b className="num" style={{ fontSize: 13, color: d.cor }}>{it.bin}</b></div>}
+                  <div style={{ textAlign: 'center', flex: 'none', minWidth: 44 }}><div className="up" style={{ fontSize: 6, color: 'var(--faint)' }}>qtd</div><b className="num" style={{ fontSize: 17, color: c.has(i) ? 'var(--ok)' : 'var(--fg)' }}>{it.qtd}</b></div>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+              <div className={`btn ${completo ? 'primary' : ''}`} style={{ flex: 1, justifyContent: 'center', fontSize: 11, opacity: completo ? 1 : .5, pointerEvents: completo ? 'auto' : 'none' }} onClick={concluir}>
+                <Check size={13} color={completo ? '#1a1008' : undefined} />{completo ? 'Conferido — próximo pedido (enter)' : `faltam ${tot - feitos} unidade(s)`}
+              </div>
+              <div className="btn" onClick={() => idx < fila.length - 1 ? setIdx(idx + 1) : onFechar()}>pular</div>
+            </div>
+          </div>
+
+          {/* AÇÕES + LOGÍSTICA */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div className="glass" style={{ padding: '12px 14px' }}>
+              <div className="up" style={{ fontSize: 7.5, fontWeight: 800, color: 'var(--faint)', marginBottom: 8 }}>imprimir agora</div>
+              <div className="btn primary" style={{ width: '100%', justifyContent: 'center', marginBottom: 6 }} onClick={() => { imprimirEtiquetasCanal(canal, [paraImpressao(p)]); if (completo) concluir() }}><Tag size={13} color={d.txt} />Conferido — etiqueta + DANFE</div>
+              <div className="btn" style={{ width: '100%', justifyContent: 'center', marginBottom: 6 }} onClick={() => imprimirFolhasCanal(canal, [paraImpressao(p)])}><Printer size={12} />Folha do pedido ({canal === 'ml' ? 'ML' : 'Shopee'})</div>
+              <div className="btn" style={{ width: '100%', justifyContent: 'center' }} onClick={() => baixarOficial(p.id)}><FileText size={12} />Etiqueta oficial (PDF)</div>
+            </div>
+            <div className="glass" style={{ padding: '12px 14px' }}>
+              <div className="up" style={{ fontSize: 7.5, fontWeight: 800, color: 'var(--faint)', marginBottom: 8 }}>logística da coleta</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 7, fontSize: 10 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--dim)' }}>Transportadora</span><b>{canal === 'ml' ? 'Mercado Envios' : 'SPX Express'}</b></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--dim)' }}>Janela de hoje</span><b className="num">{canal === 'ml' ? '14:00 – 17:00' : '13:30 – 16:30'}</b></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--dim)' }}>Corte</span><b className="num" style={{ color: 'var(--warn)' }}>15:00</b></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--dim)' }}>Volumes restantes</span><b className="num">{fila.length - concluidos}</b></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--dim)' }}>Rastreio</span><b className="num" style={{ fontSize: 9 }}>{p.rastreio || '—'}</b></div>
+              </div>
+            </div>
+            <div className="glass" style={{ padding: '10px 14px', display: 'flex', gap: 10, alignItems: 'center' }}>
+              <AlertTriangle size={13} style={{ color: 'var(--danger)', flex: 'none' }} />
+              <span style={{ fontSize: 8.5, color: 'var(--dim)' }}>item errado bipado trava a mesa até corrigir — confira o SKU antes de embalar</span>
+            </div>
+            <div className="kbdbar" style={{ position: 'static', justifyContent: 'center' }}>
+              <span><span className="kbd">espaço</span> marca item</span><span><span className="kbd">enter</span> conclui</span><span><span className="kbd">esc</span> sai</span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
