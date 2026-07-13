@@ -40,7 +40,9 @@ function adaptaML(p) {
     qtd: (p.itens || []).reduce((s, i) => s + (i.qtd || i.quantidade || 1), 0),
     itens: (p.itens || []).map((i) => ({ nome: i.titulo || i.nome, sku: i.sku, qtd: i.qtd || i.quantidade || 1, imagem: i.imagem, preco: i.unit_price ?? i.preco })),
     comprador: p.buyer?.nickname || '—', compras: p.buyer?.compras || 0, buyerId: p.buyer?.id, packId: p.pack_id,
-    status: p.status || '', criado: p.date_created, pago: p.date_paid || p.aprovado_em || p.date_created,
+    status: p.envio_status || p.status || '', pedidoStatus: p.status || '', envioStatus: p.envio_status || '',
+    isFull: !!p.is_full, logistic: p.logistic_type || null,
+    criado: p.date_created, pago: p.pago_em || p.aprovado_em || p.date_created,
     receita: r.receita ?? p.valor, taxas: r.taxas ?? r.taxas_mkt, frete: r.tarifa ?? r.frete, liquido: r.liquido, margem: r.margem, alvo: p.preco_bling,
     rastreio: p.rastreio || p.tracking, shipId: p.shipping_id || p.shipment_id || p.envio_id || p.envio?.id,
     uf: (p.uf || p.envio?.uf || '').toUpperCase() || ((p.endereco || '').match(UF_RE) || [])[0],
@@ -88,9 +90,11 @@ const ABAS_DEF = [
 ]
 function classifica(p) {
   if (p.cancelado) return 'cancel'
-  if (/deliver|entreg|complet|finaliz/i.test(p.status)) return 'fim'
-  if (/shipped|enviado|transit|transito/i.test(p.status)) return 'transito'
+  const ref = p.canal === 'ml' ? (p.envioStatus || p.status) : p.status
+  if (/deliver|entreg|complet|finaliz/i.test(ref)) return 'fim'
+  if (/shipped|enviado|transit|transito/i.test(ref)) return 'transito'
   if (!p.nf && !p.nfDesconhecida && p.canal === 'shopee') return 'nf'
+  if (p.canal === 'ml' && p.isFull) return 'proximos' // Full: o ML expede, não entra na sua coleta de hoje
   const sb = p.shipBy ? p.shipBy * 1000 : null
   if (sb && sb - Date.now() > 36 * 3600000) return 'proximos'
   return 'hoje'
@@ -165,7 +169,17 @@ export default function CentralPedidosUltra() {
         if (silencioso) {
           const chegaram = acumulado.filter((p) => !idsRef.current.has(p.id)).length
           if (chegaram > 0) setNovos((n) => n + chegaram)
-          setPedidos((prev) => { if (!prev) return acumulado; const ids = new Set(acumulado.map((p) => p.id)); return acumulado.concat(prev.filter((p) => !ids.has(p.id))) })
+          setPedidos((prev) => {
+            if (!prev) return acumulado
+            const antigos = new Map(prev.map((p) => [p.id, p]))
+            // preserva o que o backfill já enriqueceu (uf, prazo, cidade, rastreio)
+            const atualizados = acumulado.map((n) => {
+              const a = antigos.get(n.id)
+              return a ? { ...n, uf: n.uf || a.uf, cidade: n.cidade || a.cidade, shipBy: n.shipBy || a.shipBy, rastreio: n.rastreio || a.rastreio } : n
+            })
+            const ids = new Set(atualizados.map((p) => p.id))
+            return atualizados.concat(prev.filter((p) => !ids.has(p.id)))
+          })
         } else setPedidos(acumulado)
         acumulado.forEach((p) => idsRef.current.add(p.id))
         const total = d1.paging?.total ?? acumulado.length
@@ -201,7 +215,8 @@ export default function CentralPedidosUltra() {
           }
           setFundo(null)
           if (acumulado.length < teto) notify(`Sincronizei ${acumulado.length} de ${teto} — o restante entra na próxima atualização automática.`, 'warn')
-        }
+          backfillML(g)
+        } else if (!silencioso) backfillML(g)
       } else {
         let r
         try { r = await api.shopeePedidosPainel('TODOS', dias, { page: 1, page_size: 50 }) }
@@ -225,33 +240,38 @@ export default function CentralPedidosUltra() {
   }
   useEffect(() => { idsRef.current = new Set(); carregar() }, [canal, dias])
 
-  // Backfill de UFs do ML: o endereço vem do envio, não da lista — busca em lote limitado
+  // Backfill ML (roda SÓ depois da sincronização, nunca competindo com ela):
+  // busca envios em série controlada e preenche UF + prazo de despacho (shipBy) + cidade + rastreio
   const ufBuscadas = useRef(new Set())
-  useEffect(() => {
-    if (canal !== 'ml' || !pedidos || fundo) return
-    const alvos = pedidos.filter((p) => !p.uf && p.shipId && !ufBuscadas.current.has(p.shipId)).slice(0, 24)
-    if (!alvos.length) return
-    let vivo = true
-    const rodar = async () => {
-      const fila = alvos.slice()
-      const worker = async () => {
-        while (fila.length && vivo) {
-          const p = fila.shift()
+  const backfillAtivo = useRef(false)
+  const backfillML = async (g) => {
+    if (backfillAtivo.current) return
+    backfillAtivo.current = true
+    try {
+      while (g === geracao.current) {
+        const atual = pedidosRef.current || []
+        const alvos = atual.filter((p) => p.canal === 'ml' && p.shipId && (!p.uf || !p.shipBy) && !ufBuscadas.current.has(p.shipId)).slice(0, 12)
+        if (!alvos.length) break
+        for (const p of alvos) {
+          if (g !== geracao.current) return
           ufBuscadas.current.add(p.shipId)
           try {
-            const env = await api.mlEnvio(p.shipId)
+            const env = await comTimeout(api.mlEnvio(p.shipId), 20000)
             const dest = env?.destination?.shipping_address || env?.receiver_address || null
-            const uf = (dest?.state?.id || dest?.state?.name || '').toString().replace('BR-', '').slice(0, 2).toUpperCase()
+            const uf = (dest?.state?.id || dest?.state?.name || '').toString().replace('BR-', '').slice(0, 2).toUpperCase() || null
             const cidade = dest?.city?.name || null
-            if (vivo && uf) setPedidos((prev) => prev ? prev.map((x) => x.id === p.id ? { ...x, uf, cidade: x.cidade || cidade } : x) : prev)
-          } catch (_) { /* segue */ }
+            const limite = env?.lead_time?.estimated_handling_limit?.date || env?.estimated_handling_limit?.date || null
+            const shipBy = limite ? Math.floor(new Date(limite).getTime() / 1000) : null
+            const rastreio = env?.tracking_number || null
+            setPedidos((prev) => prev ? prev.map((x) => x.id === p.id ? { ...x, uf: uf || x.uf, cidade: x.cidade || cidade, shipBy: x.shipBy || shipBy, rastreio: x.rastreio || rastreio } : x) : prev)
+          } catch (_) { /* segue para o próximo */ }
+          await new Promise((r) => setTimeout(r, 250)) // respiro entre envios: o backend fica livre p/ você
         }
       }
-      await Promise.all(Array.from({ length: 8 }, worker))
-    }
-    rodar()
-    return () => { vivo = false }
-  }, [canal, pedidos === null, fundo])
+    } finally { backfillAtivo.current = false }
+  }
+  const pedidosRef = useRef(null)
+  useEffect(() => { pedidosRef.current = pedidos }, [pedidos])
   useEffect(() => {
     const tick = () => { if (document.visibilityState === 'visible') carregar(true) }
     const t = setInterval(tick, 60000)
@@ -786,6 +806,7 @@ function UltraCard({ p, d, canal, exp, densidade, onToggle, sel, onSel, baixarEt
               <b style={{ fontSize: 12.5 }}>{p.titulo}</b>
               <span className="chip" style={{ fontSize: 7.5, color: 'var(--faint)', background: 'rgba(255,255,255,.05)' }}>{p.qtd} un</span>
               {(p.compras || 0) > 1 && chip(`${p.compras}ª COMPRA`, '#1a1008', 'var(--gold, #F2C200)')}
+              {p.isFull && chip('FULL · ML EXPEDE', '#1a1008', 'var(--teal, #2dd4bf)')}
               {!p.nf && !p.nfDesconhecida && !p.cancelado && chip('SEM NF-E', '#fff', 'var(--danger)')}
               {p.prejuizo && chip('PREJUÍZO', '#fff', 'var(--danger)')}
               {!p.prejuizo && p.abaixoMeta && chip('ABAIXO DA META', '#1a1008', 'var(--warn)')}
