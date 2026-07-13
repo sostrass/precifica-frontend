@@ -40,14 +40,18 @@ function adaptaML(p) {
     qtd: (p.itens || []).reduce((s, i) => s + (i.qtd || i.quantidade || 1), 0),
     itens: (p.itens || []).map((i) => ({ nome: i.titulo || i.nome, sku: i.sku, qtd: i.qtd || i.quantidade || 1, imagem: i.imagem, preco: i.unit_price ?? i.preco })),
     comprador: p.buyer?.nickname || '—', compras: p.buyer?.compras || 0, buyerId: p.buyer?.id, packId: p.pack_id,
-    status: p.envio_status || p.status || '', pedidoStatus: p.status || '', envioStatus: p.envio_status || '',
+    status: (Array.isArray(p.tags) && p.tags.includes('delivered') ? 'delivered' : '') || p.envio_status || p.status || '',
+    pedidoStatus: p.status || '',
+    envioStatus: (Array.isArray(p.tags) && p.tags.includes('delivered') ? 'delivered' : '') || p.envio_status || '',
     isFull: !!p.is_full, logistic: p.logistic_type || null,
+    shipBy: p.ship_by || null, clienteReal: p.cliente || null, cidade: p.cidade || null, cep: p.cep || null, enderecoLinha: p.endereco || null,
     criado: p.date_created, pago: p.pago_em || p.aprovado_em || p.date_created,
-    receita: r.receita ?? p.valor, taxas: r.taxas ?? r.taxas_mkt, frete: r.tarifa ?? r.frete, liquido: r.liquido, margem: r.margem, alvo: p.preco_bling,
-    rastreio: p.rastreio || p.tracking, shipId: p.shipping_id || p.shipment_id || p.envio_id || p.envio?.id,
+    receita: r.receita ?? p.valor, taxas: r.taxas ?? r.taxas_mkt, liquido: r.liquido, margem: r.margem, alvo: p.preco_bling,
+    rastreio: p.rastreio || p.tracking || null, shipId: p.shipping_id || p.shipment_id || p.envio_id || p.envio?.id,
+    frete: (p.resumo?.tarifa ?? p.frete_vendedor ?? null),
     uf: (p.uf || p.envio?.uf || '').toUpperCase() || ((p.endereco || '').match(UF_RE) || [])[0],
     nf: !!(p.nfe || p.nf), nfDesconhecida: !(p.nfe || p.nf), cancelado: /cancel/i.test(String(p.status || '')),
-    devolucao: /return|devolu|claim|mediac/i.test(String(p.status || '')) || !!p.claim_id, bruto: p,
+    devolucao: /return|devolu|claim|mediac/i.test(String(p.status || '')) || !!p.claim_id || !!p.devolucao_envio, bruto: p,
   }
 }
 function adaptaShopee(p) {
@@ -258,8 +262,9 @@ export default function CentralPedidosUltra() {
           setFundo(null)
           if (acumulado.length < teto) notify(`Sincronizei ${acumulado.length} de ${teto} — recarregue ou aguarde a atualização automática para completar.`, 'warn')
           await nfeStatusML(acumulado, g)
+          await sincronizarEnviosML(acumulado, g, desdeIso, ateIso)
           backfillML(g)
-        } else if (!silencioso) { await nfeStatusML(acumulado, g); backfillML(g) }
+        } else if (!silencioso) { await nfeStatusML(acumulado, g); await sincronizarEnviosML(acumulado, g, desdeIso, ateIso); backfillML(g) }
       } else {
         let r
         try { r = await api.shopeePedidosPainel('TODOS', dias, { page: 1, page_size: 50 }) }
@@ -418,6 +423,28 @@ export default function CentralPedidosUltra() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [pageItems, aberto])
+
+  // Envios pré-despacho/sem cache → sincroniza (bounded) e refaz UMA leitura: os baldes se corrigem
+  const sincronizarEnviosML = async (arr, g, desdeIso, ateIso) => {
+    try {
+      const sids = arr.filter((p) => p.canal === 'ml' && p.shipId && (!p.envioStatus || /ready_to_ship|handling|pending/.test(p.envioStatus))).map((p) => String(p.shipId))
+      if (!sids.length) return
+      await comTimeout(api.mlEnviosSincronizar(sids.slice(0, 120), 60), 90000)
+      if (g !== geracao.current) return
+      const fresco = await comTimeout(api.mlPedidosEnriquecido('', 0, Math.min(arr.length + 20, 400), desdeIso, ateIso), 150000)
+      if (g !== geracao.current) return
+      const arr2 = (fresco?.pedidos || []).map(adaptaML)
+      if (arr2.length) {
+        const agrupados = agrupaPacksML(arr2)
+        setPedidos((prev) => {
+          if (!prev) return agrupados
+          const antigos = new Map(prev.map((p) => [p.id, p]))
+          return agrupados.map((n) => { const a = antigos.get(n.id); return a ? { ...n, nf: n.nf || a.nf, nfDesconhecida: n.nfDesconhecida && a.nfDesconhecida, nfInfo: n.nfInfo || a.nfInfo, uf: n.uf || a.uf, cidade: n.cidade || a.cidade, shipBy: n.shipBy || a.shipBy, rastreio: n.rastreio || a.rastreio } : n })
+        })
+        arr2.forEach((p) => idsRef.current.add(p.id))
+      }
+    } catch (_) { /* o backfill individual cobre o resto */ }
+  }
 
   const nfeStatusML = async (arr, g) => {
     try {
@@ -795,6 +822,29 @@ export default function CentralPedidosUltra() {
               baixarEtiqueta={() => baixarEtiquetas(p.id)} agoraTs={agoraTs} notify={notify} />)}
           </div>}
 
+      {/* DRAWER LATERAL — detalhe do pedido */}
+      {(() => {
+        const pAberto = aberto && filtrados.find((x) => x.id === aberto)
+        if (!pAberto) return null
+        return (
+          <>
+            <div onClick={() => setAberto(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(10,4,8,.55)', backdropFilter: 'blur(2px)', zIndex: 54 }} />
+            <div className="pcuv2" style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: 'min(640px, 94vw)', zIndex: 55, background: 'var(--surface, #1d0f16)', borderLeft: `2px solid ${d.cor}55`, boxShadow: '-18px 0 50px rgba(0,0,0,.5)', overflow: 'auto', padding: '14px 16px', '--ch': d.cor, '--chd': d.cord }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4, position: 'sticky', top: -14, background: 'var(--surface, #1d0f16)', padding: '14px 0 10px', zIndex: 2, borderBottom: '1px solid var(--glass-border)' }}>
+                <div style={{ width: 40, height: 40, borderRadius: 9, overflow: 'hidden', background: 'linear-gradient(135deg,#4a2a3a,#3a2530)', flex: 'none' }}>{pAberto.itens[0]?.imagem && <img src={pAberto.itens[0].imagem} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <b style={{ fontSize: 12.5, display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{pAberto.titulo}</b>
+                  <span className="num" style={{ fontSize: 9, color: 'var(--faint)' }}>#{pAberto.id} · {statusPt(pAberto.status)}</span>
+                </div>
+                <b className="num serif" style={{ fontSize: 16 }}>{brl(pAberto.receita)}</b>
+                <div className="btn" style={{ padding: '5px 9px' }} onClick={() => setAberto(null)}><X size={13} /></div>
+              </div>
+              <UltraExpand p={pAberto} d={d} canal={canal} baixarEtiqueta={() => baixarEtiquetas(pAberto.id)} notify={notify} agoraTs={agoraTs} />
+            </div>
+          </>
+        )
+      })()}
+
       {/* MASSBAR */}
       {sel.size > 0 && (
         <div className="massbar">
@@ -913,7 +963,6 @@ function UltraCard({ p, d, canal, exp, densidade, onToggle, sel, onSel, baixarEt
           <KpiMiniMargem val={brl(p.liquido)} m={p.margem != null ? Math.round(p.margem) : null} />
         </div>
       </div>
-      {exp && <UltraExpand p={p} d={d} canal={canal} baixarEtiqueta={baixarEtiqueta} notify={notify} agoraTs={agoraTs} />}
     </div>
   )
 }
@@ -984,7 +1033,7 @@ function UltraExpand({ p, d, canal, baixarEtiqueta, notify, agoraTs }) {
         <div style={{ flex: 1 }} />
         {!p.cancelado && !p.devolucao && <span className="chip" style={{ color: 'var(--ok)', background: 'rgba(47,217,141,.12)' }}><ShieldCheck size={9} style={{ color: 'var(--ok)' }} />SLA NO PRAZO</span>}
       </div>
-      <div className="exp-grid">
+      <div className="exp-grid" style={{ gridTemplateColumns: '1fr' }}>
         {/* coluna esquerda */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div className="blk">
