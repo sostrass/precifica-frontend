@@ -46,7 +46,7 @@ function adaptaML(p) {
     receita: r.receita ?? p.valor, taxas: r.taxas ?? r.taxas_mkt, frete: r.tarifa ?? r.frete, liquido: r.liquido, margem: r.margem, alvo: p.preco_bling,
     rastreio: p.rastreio || p.tracking, shipId: p.shipping_id || p.shipment_id || p.envio_id || p.envio?.id,
     uf: (p.uf || p.envio?.uf || '').toUpperCase() || ((p.endereco || '').match(UF_RE) || [])[0],
-    nf: !!(p.nfe || p.nf), cancelado: /cancel/i.test(String(p.status || '')),
+    nf: !!(p.nfe || p.nf), nfDesconhecida: !(p.nfe || p.nf), cancelado: /cancel/i.test(String(p.status || '')),
     devolucao: /return|devolu|claim|mediac/i.test(String(p.status || '')) || !!p.claim_id, bruto: p,
   }
 }
@@ -79,6 +79,35 @@ function adaptaShopee(p) {
   }
 }
 
+// ML: compras multi-produto chegam como várias orders do mesmo pack — agrupamos num card único
+function agrupaPacksML(arr) {
+  const m = new Map()
+  const somaN = (a, b) => (a == null && b == null ? null : (a || 0) + (b || 0))
+  for (const p of arr) {
+    // pack_id é a chave oficial; shipping_id cobre quando o pack vem nulo (mesmo envio = mesma compra)
+    const k = p.packId ? `pk${p.packId}` : (p.shipId ? `sh${p.shipId}` : p.id)
+    const g = m.get(k)
+    if (!g) { m.set(k, { ...p, orderIds: [p.id] }); continue }
+    g.orderIds.push(p.id)
+    g.itens = g.itens.concat(p.itens)
+    g.qtd += p.qtd
+    g.receita = somaN(g.receita, p.receita)
+    g.taxas = somaN(g.taxas, p.taxas)
+    g.frete = somaN(g.frete, p.frete)
+    g.liquido = somaN(g.liquido, p.liquido)
+    g.margem = (g.liquido != null && g.receita > 0) ? (g.liquido / g.receita * 100) : g.margem
+    g.nf = g.nf || p.nf
+    g.nfDesconhecida = g.nfDesconhecida && p.nfDesconhecida
+    g.shipBy = g.shipBy || p.shipBy
+    g.uf = g.uf || p.uf; g.cidade = g.cidade || p.cidade
+    g.rastreio = g.rastreio || p.rastreio
+    g.shipId = g.shipId || p.shipId
+    g.devolucao = g.devolucao || p.devolucao
+    g.cancelado = g.cancelado && p.cancelado
+  }
+  return [...m.values()]
+}
+
 const comTimeout = (promessa, ms) => Promise.race([
   promessa,
   new Promise((_, rej) => setTimeout(() => rej(new Error('tempo esgotado')), ms)),
@@ -93,7 +122,7 @@ function classifica(p) {
   const ref = p.canal === 'ml' ? (p.envioStatus || p.status) : p.status
   if (/deliver|entreg|complet|finaliz/i.test(ref)) return 'fim'
   if (/shipped|enviado|transit|transito/i.test(ref)) return 'transito'
-  if (!p.nf && !p.nfDesconhecida && p.canal === 'shopee') return 'nf'
+  if (!p.nf && !p.nfDesconhecida) return 'nf'
   if (p.canal === 'ml' && p.isFull) return 'proximos' // Full: o ML expede, não entra na sua coleta de hoje
   const sb = p.shipBy ? p.shipBy * 1000 : null
   if (sb && sb - Date.now() > 36 * 3600000) return 'proximos'
@@ -149,6 +178,7 @@ export default function CentralPedidosUltra() {
   const [regras, setRegras] = useState(() => { try { return JSON.parse(localStorage.getItem('pcu_regras') || '{"nf_imprime":true,"risco_segura":true,"presente_selo":false}') } catch (_) { return { nf_imprime: true, risco_segura: true, presente_selo: false } } })
   const [agoraTs, setAgoraTs] = useState(Date.now())
   const geracao = useRef(0)
+  const fundoRef = useRef(null)
   const idsRef = useRef(new Set())
   const POR_PAG = 10
   const d = CH[canal]
@@ -162,61 +192,74 @@ export default function CentralPedidosUltra() {
     try {
       if (canal === 'ml') {
         const dd = new Date(); dd.setDate(dd.getDate() - dias); dd.setHours(0, 0, 0, 0)
-        const iso = (x) => x, desdeIso = dd.toISOString(), ateIso = ''
+        const desdeIso = dd.toISOString(), ateIso = ''
+        // 1ª leva instantânea para a tela não esperar
         const d1 = await api.mlPedidosEnriquecido('', 0, 25, desdeIso, ateIso)
         if (g !== geracao.current) return
         let acumulado = (d1.pedidos || []).map(adaptaML)
-        if (silencioso) {
-          const chegaram = acumulado.filter((p) => !idsRef.current.has(p.id)).length
-          if (chegaram > 0) setNovos((n) => n + chegaram)
-          setPedidos((prev) => {
-            if (!prev) return acumulado
-            const antigos = new Map(prev.map((p) => [p.id, p]))
-            // preserva o que o backfill já enriqueceu (uf, prazo, cidade, rastreio)
-            const atualizados = acumulado.map((n) => {
-              const a = antigos.get(n.id)
-              return a ? { ...n, uf: n.uf || a.uf, cidade: n.cidade || a.cidade, shipBy: n.shipBy || a.shipBy, rastreio: n.rastreio || a.rastreio } : n
+        const publicar = (arr) => {
+          const agrupados = agrupaPacksML(arr)
+          if (silencioso) {
+            const chegaram = arr.filter((p) => !idsRef.current.has(p.id)).length
+            if (chegaram > 0) setNovos((n) => n + chegaram)
+            setPedidos((prev) => {
+              if (!prev) return agrupados
+              const antigos = new Map(prev.map((p) => [p.id, p]))
+              const atualizados = agrupados.map((n) => {
+                const a = antigos.get(n.id)
+                return a ? { ...n, uf: n.uf || a.uf, cidade: n.cidade || a.cidade, shipBy: n.shipBy || a.shipBy, rastreio: n.rastreio || a.rastreio, nf: n.nf || a.nf, nfDesconhecida: n.nfDesconhecida && a.nfDesconhecida, nfInfo: n.nfInfo || a.nfInfo } : n
+              })
+              const ids = new Set(atualizados.map((p) => p.id))
+              return atualizados.concat(prev.filter((p) => !ids.has(p.id)))
             })
-            const ids = new Set(atualizados.map((p) => p.id))
-            return atualizados.concat(prev.filter((p) => !ids.has(p.id)))
-          })
-        } else setPedidos(acumulado)
-        acumulado.forEach((p) => idsRef.current.add(p.id))
+          } else setPedidos(agrupados)
+          arr.forEach((p) => idsRef.current.add(p.id))
+        }
+        publicar(acumulado)
         const total = d1.paging?.total ?? acumulado.length
-        if (!silencioso && total > acumulado.length) {
-          const teto = Math.min(total, 240)
+        const teto = Math.min(total, 400)
+        if (!silencioso && teto > acumulado.length) {
           setFundo({ carregados: acumulado.length, total: teto })
-          let falhasSeguidas = 0
-          // offset sempre = quantos já temos: nunca pula pedidos, nunca duplica, nunca trava
-          while (acumulado.length < teto && falhasSeguidas < 3) {
-            if (g !== geracao.current) return
-            const off = acumulado.length
-            let dx = null
-            try { dx = await comTimeout(api.mlPedidosEnriquecido('', off, 20, desdeIso, ateIso), 60000) }
-            catch (_) {
-              try { dx = await comTimeout(api.mlPedidosEnriquecido('', off, 10, desdeIso, ateIso), 40000) } catch (_) { dx = null }
-            }
-            if (g !== geracao.current) return
-            const lote = (dx?.pedidos || []).map(adaptaML)
-            if (!lote.length) {
-              if (dx && Array.isArray(dx.pedidos)) break // resposta válida vazia: fim real da janela
-              falhasSeguidas++
-              await new Promise((r) => setTimeout(r, 1500 * falhasSeguidas)) // respiro antes de insistir
-              continue
-            }
-            falhasSeguidas = 0
-            const vistos = new Set(acumulado.map((p) => p.id))
-            const novos = lote.filter((p) => !vistos.has(p.id))
-            if (!novos.length) break // página repetida: janela esgotada
-            acumulado = acumulado.concat(novos)
-            acumulado.forEach((p) => idsRef.current.add(p.id))
-            setPedidos(acumulado.slice())
+          // PLANO A: o servidor pagina em paralelo — UMA chamada traz a janela inteira
+          let completo = null
+          try { completo = await comTimeout(api.mlPedidosEnriquecido('', 0, teto, desdeIso, ateIso), 150000) } catch (_) { completo = null }
+          if (g !== geracao.current) return
+          if (completo && (completo.pedidos || []).length > acumulado.length) {
+            acumulado = (completo.pedidos || []).map(adaptaML)
+            publicar(acumulado)
             setFundo({ carregados: acumulado.length, total: teto })
+          } else {
+            // PLANO B: blocos resilientes (fila com tentativas por bloco)
+            const BLOCO = 20
+            const fila = []
+            for (let off = acumulado.length; off < teto; off += BLOCO) fila.push({ off, tent: 0 })
+            const porId = new Map(acumulado.map((p) => [p.id, p]))
+            const worker = async () => {
+              while (fila.length && g === geracao.current) {
+                const b = fila.shift()
+                let dx = null
+                try { dx = await comTimeout(api.mlPedidosEnriquecido('', b.off, BLOCO, desdeIso, ateIso), 60000) } catch (_) { dx = null }
+                if (g !== geracao.current) return
+                const lote = (dx?.pedidos || []).map(adaptaML)
+                if (!lote.length) {
+                  if (dx && Array.isArray(dx.pedidos)) continue
+                  b.tent++
+                  if (b.tent < 3) { fila.push(b); await new Promise((r) => setTimeout(r, 1200 * b.tent)) }
+                  continue
+                }
+                for (const p of lote) if (!porId.has(p.id)) porId.set(p.id, p)
+                acumulado = [...porId.values()]
+                publicar(acumulado)
+                setFundo({ carregados: acumulado.length, total: teto })
+              }
+            }
+            await Promise.all([worker(), worker()])
           }
           setFundo(null)
-          if (acumulado.length < teto) notify(`Sincronizei ${acumulado.length} de ${teto} — o restante entra na próxima atualização automática.`, 'warn')
+          if (acumulado.length < teto) notify(`Sincronizei ${acumulado.length} de ${teto} — recarregue ou aguarde a atualização automática para completar.`, 'warn')
+          await nfeStatusML(acumulado, g)
           backfillML(g)
-        } else if (!silencioso) backfillML(g)
+        } else if (!silencioso) { await nfeStatusML(acumulado, g); backfillML(g) }
       } else {
         let r
         try { r = await api.shopeePedidosPainel('TODOS', dias, { page: 1, page_size: 50 }) }
@@ -272,8 +315,9 @@ export default function CentralPedidosUltra() {
   }
   const pedidosRef = useRef(null)
   useEffect(() => { pedidosRef.current = pedidos }, [pedidos])
+  useEffect(() => { fundoRef.current = fundo }, [fundo])
   useEffect(() => {
-    const tick = () => { if (document.visibilityState === 'visible') carregar(true) }
+    const tick = () => { if (document.visibilityState === 'visible' && !fundoRef.current) carregar(true) }
     const t = setInterval(tick, 60000)
     return () => clearInterval(t)
   }, [canal, dias])
@@ -375,6 +419,34 @@ export default function CentralPedidosUltra() {
     return () => window.removeEventListener('keydown', onKey)
   }, [pageItems, aberto])
 
+  const nfeStatusML = async (arr, g) => {
+    try {
+      const grupos = agrupaPacksML(arr.filter((p) => p.canal === 'ml'))
+      const ids = grupos.flatMap((p) => p.orderIds || [p.id])
+      const donoDe = new Map()
+      for (const gpo of grupos) for (const oid of (gpo.orderIds || [gpo.id])) donoDe.set(oid, gpo.id)
+      for (let i = 0; i < ids.length; i += 150) {
+        if (g !== geracao.current) return
+        const slice = ids.slice(i, i + 150)
+        const r = await comTimeout(api.mlNfeStatus(slice), 30000)
+        const mapa = r?.mapa || {}
+        const consultados = new Set(slice)
+        const notaDoCard = new Map()
+        const cardsConsultados = new Set()
+        for (const oid of slice) {
+          const card = donoDe.get(oid) || oid
+          cardsConsultados.add(card)
+          if (mapa[oid] && !notaDoCard.has(card)) notaDoCard.set(card, mapa[oid])
+        }
+        setPedidos((prev) => prev ? prev.map((p) => {
+          if (!cardsConsultados.has(p.id)) return p
+          const m = notaDoCard.get(p.id)
+          return m ? { ...p, nf: true, nfDesconhecida: false, nfInfo: m } : { ...p, nf: false, nfDesconhecida: false }
+        }) : prev)
+      }
+    } catch (_) { /* NF-e chega na próxima rodada */ }
+  }
+
   const buscarIntel = async () => {
     setIntelCarregando(true)
     try { setIntel(await api.shopeePedidosInteligencia(dias)) } catch (e) { notify(e.message || 'Falha na análise', 'danger') }
@@ -472,8 +544,15 @@ export default function CentralPedidosUltra() {
           {filaChip(AlertTriangle, 'Despacho atrasado', lista.filter((p) => p.shipBy && p.shipBy * 1000 < agoraTs && classifica(p) === 'hoje').length, 'var(--danger)')}
           {filaChip(Box, 'Volumes · peso da coleta', `${lista.filter((p) => classifica(p) === 'hoje').reduce((s, p) => s + p.qtd, 0)} · ${pesoEstim}kg`, 'var(--blue)')}
           <div style={{ flex: 1 }} />
-          <span style={{ fontSize: 8.5, color: 'var(--faint)', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-            {fundo ? <><Loader2 size={10} className="animate-spin" />sincronizando {fundo.carregados} de {fundo.total} — pode trabalhar</> : <><RefreshCw size={10} />sincronizado agora</>}
+          <span style={{ fontSize: 8.5, color: 'var(--faint)', display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+            {fundo ? <>
+              <Loader2 size={10} className="animate-spin" />
+              <span className="num">sincronizando {fundo.carregados} de {fundo.total}</span>
+              <span style={{ width: 90, height: 5, borderRadius: 3, background: 'rgba(255,255,255,.08)', overflow: 'hidden', display: 'inline-block' }}>
+                <span style={{ display: 'block', height: '100%', width: `${Math.round(fundo.carregados / Math.max(1, fundo.total) * 100)}%`, background: `linear-gradient(90deg,${d.cor},var(--ok))`, transition: 'width .3s' }} />
+              </span>
+              <span>pode trabalhar</span>
+            </> : <><RefreshCw size={10} />sincronizado agora</>}
           </span>
         </div>
       </div>
@@ -807,6 +886,7 @@ function UltraCard({ p, d, canal, exp, densidade, onToggle, sel, onSel, baixarEt
               <span className="chip" style={{ fontSize: 7.5, color: 'var(--faint)', background: 'rgba(255,255,255,.05)' }}>{p.qtd} un</span>
               {(p.compras || 0) > 1 && chip(`${p.compras}ª COMPRA`, '#1a1008', 'var(--gold, #F2C200)')}
               {p.isFull && chip('FULL · ML EXPEDE', '#1a1008', 'var(--teal, #2dd4bf)')}
+              {p.itens.length > 1 && chip(`${p.itens.length} PRODUTOS`, '#e9dbfb', 'rgba(160,107,232,.3)')}
               {!p.nf && !p.nfDesconhecida && !p.cancelado && chip('SEM NF-E', '#fff', 'var(--danger)')}
               {p.prejuizo && chip('PREJUÍZO', '#fff', 'var(--danger)')}
               {!p.prejuizo && p.abaixoMeta && chip('ABAIXO DA META', '#1a1008', 'var(--warn)')}
@@ -956,8 +1036,8 @@ function UltraExpand({ p, d, canal, baixarEtiqueta, notify, agoraTs }) {
           <div className="blk">
             <h4 style={{ color: p.nf ? d.cor : 'var(--danger)' }}><FileText size={12} style={{ color: p.nf ? d.cor : 'var(--danger)' }} />Nota fiscal</h4>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              <span className="chip" style={{ color: p.nf ? 'var(--ok)' : '#fff', background: p.nf ? 'rgba(47,217,141,.12)' : 'var(--danger)' }}>{p.nf ? 'NF-E EMITIDA' : 'NF-E PENDENTE'}</span>
-              <span style={{ fontSize: 8.5, color: 'var(--faint)' }}>{p.nf ? 'vinculada ao pedido via Bling' : 'emitir no Bling para liberar o envio'}</span>
+              <span className="chip" style={{ color: p.nf ? 'var(--ok)' : '#fff', background: p.nf ? 'rgba(47,217,141,.12)' : 'var(--danger)' }}>{p.nf ? 'NF-E EMITIDA' : p.nfDesconhecida ? 'NF-E: CONSULTANDO' : 'NF-E PENDENTE'}</span>
+              <span className="num" style={{ fontSize: 8.5, color: 'var(--faint)' }}>{p.nfInfo?.numero ? `nº ${p.nfInfo.numero}${p.nfInfo.serie ? ` · série ${p.nfInfo.serie}` : ''}${p.nfInfo.situacao_label ? ` · ${p.nfInfo.situacao_label}` : ''}` : (p.nf ? 'vinculada ao pedido via Bling' : 'emitir no Bling para liberar o envio')}</span>
             </div>
           </div>
         </div>
