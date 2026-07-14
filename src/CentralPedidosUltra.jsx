@@ -243,7 +243,7 @@ export default function CentralPedidosUltra() {
   const geracao = useRef(0)
   const fundoRef = useRef(null)
   const idsRef = useRef(new Set())
-  const PCU_BUILD = 'v3.5 · 14/07'
+  const PCU_BUILD = 'v3.6 · 14/07'
 const POR_PAG = 10
   const d = CH[canal]
 
@@ -290,72 +290,30 @@ const POR_PAG = 10
           } else setPedidos(agrupados)
           arr.forEach((p) => idsRef.current.add(p.id))
         }
-        publicar(acumulado)
-        const totalInformado = d1s.paging?.total ?? 0
-        // blindagem: 1ª página cheia com total <= carregados = total suspeito → sondar blocos mesmo assim
-        const suspeito = acumulado.length >= 25 && totalInformado <= acumulado.length
-        const teto = Math.min(Math.max(totalInformado, suspeito ? 400 : acumulado.length), 400)
-        if (!silencioso && teto > acumulado.length) {
-          setFundo({ carregados: acumulado.length, total: teto, fase: 'carregando pedidos' })
-          // PLANO A adaptativo: se a última carga precisou do Plano B, vai direto aos blocos
-          let completo = null
-          if (localStorage.getItem('pcu_planoB') !== '1') {
-            try { completo = await comTimeout(api.mlPedidosEnriquecido('', 0, teto, desdeIso, ateIso), 60000) } catch (_) { completo = null }
-            if (g !== geracao.current) return
-          }
-          if (completo && (completo.pedidos || []).length > acumulado.length) {
-            localStorage.removeItem('pcu_planoB')
-            acumulado = (completo.pedidos || []).map(adaptaML)
+        // ARQUITETURA DE BANCO: uma leitura ampla do banco (instantânea) + acompanhamento
+        // incremental enquanto a varredura de fundo grava. Fim da paginação client-side (Plano A/B),
+        // que multiplicava chamadas de 60s e causava cargas de 1h.
+        const totalInformado = d1s.paging?.total ?? acumulado.length
+        const teto = Math.min(Math.max(totalInformado, 100), 400)
+        if (!silencioso) {
+          setFundo({ carregados: acumulado.length, total: teto, fase: "carregando pedidos" })
+          let amplo = null
+          try { amplo = await comTimeout(api.mlPedidosEnriquecido("", 0, teto, desdeIso, ateIso), 90000) } catch (_) { amplo = null }
+          if (g !== geracao.current) return
+          if (amplo && (amplo.pedidos || []).length) {
+            acumulado = agrupaPacksML((amplo.pedidos || []).map(adaptaML))
             publicar(acumulado)
-            setFundo({ carregados: acumulado.length, total: Math.max(teto, acumulado.length), fase: 'carregando pedidos' })
-          } else {
-            localStorage.setItem('pcu_planoB', '1')
-            // PLANO B: blocos resilientes (fila com tentativas por bloco)
-            const BLOCO = 20
-            const fila = []
-            for (let off = acumulado.length; off < teto; off += BLOCO) fila.push({ off, tent: 0 })
-            const porId = new Map(acumulado.map((p) => [p.id, p]))
-            const worker = async () => {
-              while (fila.length && g === geracao.current) {
-                const b = fila.shift()
-                let dx = null
-                try { dx = await comTimeout(api.mlPedidosEnriquecido('', b.off, BLOCO, desdeIso, ateIso), 60000) } catch (_) { dx = null }
-                if (g !== geracao.current) return
-                const lote = (dx?.pedidos || []).map(adaptaML)
-                if (!lote.length) {
-                  if (dx && Array.isArray(dx.pedidos)) { fila.length = 0; break } // página vazia legítima = fim real da janela
-                  b.tent++
-                  if (b.tent < 3) { fila.push(b); await new Promise((r) => setTimeout(r, 1200 * b.tent)) }
-                  continue
-                }
-                for (const p of lote) if (!porId.has(p.id)) porId.set(p.id, p)
-                acumulado = [...porId.values()]
-                publicar(acumulado)
-                setFundo({ carregados: acumulado.length, total: teto, fase: 'carregando pedidos' })
-              }
-            }
-            await Promise.all([worker(), worker()])
+            d1s = amplo
           }
-          if (!suspeito && acumulado.length < teto) notify(`Sincronizei ${acumulado.length} de ${teto} — recarregue ou aguarde a atualização automática para completar.`, 'warn')
-          setFundo({ carregados: acumulado.length, total: acumulado.length, fase: 'consultando NF-e no Bling' })
+          setFundo({ carregados: acumulado.length, total: Math.max(teto, acumulado.length), fase: "consultando NF-e no Bling" })
           await nfeStatusML(acumulado, g)
           if (g !== geracao.current) return
-          setFundo({ carregados: acumulado.length, total: acumulado.length, fase: 'sincronizando envios' })
+          setFundo({ carregados: acumulado.length, total: acumulado.length, fase: "sincronizando envios" })
           await sincronizarEnviosML(acumulado, g, desdeIso, ateIso)
           if (g !== geracao.current) return
           setFundo(null); setUltimaSync(Date.now())
           backfillML(g)
           if (d1s.paging?.sync?.rodando) acompanharSyncServidor(g, desdeIso, ateIso, teto)
-        } else if (!silencioso) {
-          setFundo({ carregados: acumulado.length, total: acumulado.length, fase: 'consultando NF-e no Bling' })
-          await nfeStatusML(acumulado, g)
-          if (g !== geracao.current) return
-          setFundo({ carregados: acumulado.length, total: acumulado.length, fase: 'sincronizando envios' })
-          await sincronizarEnviosML(acumulado, g, desdeIso, ateIso)
-          if (g !== geracao.current) return
-          setFundo(null); setUltimaSync(Date.now())
-          backfillML(g)
-          if (d1s.paging?.sync?.rodando) acompanharSyncServidor(g, desdeIso, ateIso, Math.max(acumulado.length, 100))
         }
       } else {
         let r
