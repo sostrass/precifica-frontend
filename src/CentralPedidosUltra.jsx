@@ -243,7 +243,7 @@ export default function CentralPedidosUltra() {
   const geracao = useRef(0)
   const fundoRef = useRef(null)
   const idsRef = useRef(new Set())
-  const PCU_BUILD = 'v3.6 · 14/07'
+  const PCU_BUILD = 'v3.7 · 14/07'
 const POR_PAG = 10
   const d = CH[canal]
 
@@ -257,10 +257,14 @@ const POR_PAG = 10
       if (canal === 'ml') {
         const dd = new Date(); dd.setDate(dd.getDate() - dias); dd.setHours(0, 0, 0, 0)
         const desdeIso = dd.toISOString(), ateIso = ''
-        // 1ª leva instantânea para a tela não esperar
-        const d1 = await api.mlPedidosEnriquecido('', 0, 25, desdeIso, ateIso)
+        // 1ª leva instantânea para a tela não esperar (com timeout — nunca pendura o loading)
+        let d1
+        try { d1 = await comTimeout(api.mlPedidosEnriquecido('', 0, 25, desdeIso, ateIso), 30000) }
+        catch (e) { if (g !== geracao.current) return; setErro('Não consegui falar com o servidor agora. Recarregue a página.'); setPedidos([]); return }
         if (g !== geracao.current) return
-        let d1v = d1
+        if (d1 && (d1.pedidos || []).length) { setPedidos(agrupaPacksML((d1.pedidos || []).map(adaptaML))) }
+        try { console.log('[PCU] 1a leva:', (d1?.pedidos || []).length, 'pedidos · sync:', d1?.paging?.sync) } catch (_) {}
+        let d1v = d1 || { pedidos: [], paging: {} }
         let acumulado = (d1v.pedidos || []).map(adaptaML)
         let esperas = 0
         while (!silencioso && g === geracao.current && acumulado.length === 0 && d1v.paging?.sync?.rodando && esperas < 24) {
