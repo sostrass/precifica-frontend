@@ -243,7 +243,7 @@ export default function CentralPedidosUltra() {
   const geracao = useRef(0)
   const fundoRef = useRef(null)
   const idsRef = useRef(new Set())
-  const PCU_BUILD = 'v3.2 · 14/07'
+  const PCU_BUILD = 'v3.3 · 14/07'
 const POR_PAG = 10
   const d = CH[canal]
 
@@ -385,12 +385,14 @@ const POR_PAG = 10
           const limite = env?.lead_time?.estimated_handling_limit?.date || env?.estimated_handling_limit?.date || null
           const shipBy = limite ? Math.floor(new Date(limite).getTime() / 1000) : null
           const rastreio = env?.tracking_number || null
-          setPedidos((prev) => prev ? prev.map((x) => x.id === p.id ? { ...x, uf: uf || x.uf, cidade: x.cidade || cidade, shipBy: x.shipBy || shipBy, rastreio: x.rastreio || rastreio } : x) : prev)
+          const stEnv = String(env?.status || ''), subEnv = String(env?.substatus || '')
+          setPedidos((prev) => prev ? prev.map((x) => x.id === p.id ? { ...x, uf: uf || x.uf, cidade: x.cidade || cidade, shipBy: x.shipBy || shipBy, rastreio: x.rastreio || rastreio, envioStatus: stEnv || x.envioStatus, envioSubstatus: subEnv || x.envioSubstatus, nfDesconhecida: /invoice_pending|waiting_for_invoice/i.test(subEnv) ? false : x.nfDesconhecida } : x) : prev)
         } catch (_) { /* segue para o próximo */ }
       }
       while (g === geracao.current) {
         const atual = pedidosRef.current || []
-        const pend = atual.filter((p) => p.canal === 'ml' && p.shipId && (!p.uf || !p.shipBy) && !ufBuscadas.current.has(p.shipId))
+        const preDespacho = (p) => !p.cancelado && !/deliver|shipped|entreg|transit/i.test(String(p.envioStatus || p.status || ''))
+        const pend = atual.filter((p) => p.canal === 'ml' && p.shipId && (!p.uf || !p.shipBy || (!p.envioSubstatus && preDespacho(p))) && !ufBuscadas.current.has(p.shipId))
         if (!pend.length) break
         // o que está na tela destrava primeiro (Enviar em / Destino da página atual)
         const vis = visiveisRef.current || new Set()
@@ -522,7 +524,9 @@ const POR_PAG = 10
     try {
       const sids = arr.filter((p) => p.canal === 'ml' && p.shipId && (!p.envioStatus || /ready_to_ship|handling|pending/.test(p.envioStatus))).map((p) => String(p.shipId))
       if (!sids.length) return
-      await comTimeout(api.mlEnviosSincronizar(sids.slice(0, 120), 60), 90000)
+      for (let i = 0; i < Math.min(sids.length, 360) && g === geracao.current; i += 120) {
+        await comTimeout(api.mlEnviosSincronizar(sids.slice(i, i + 120), 120), 90000)
+      }
       if (g !== geracao.current) return
       const fresco = await comTimeout(api.mlPedidosEnriquecido('', 0, Math.min(arr.length + 20, 400), desdeIso, ateIso), 150000)
       if (g !== geracao.current) return
