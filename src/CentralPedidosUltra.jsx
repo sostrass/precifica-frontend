@@ -243,7 +243,7 @@ export default function CentralPedidosUltra() {
   const geracao = useRef(0)
   const fundoRef = useRef(null)
   const idsRef = useRef(new Set())
-  const PCU_BUILD = 'v3.3 · 14/07'
+  const PCU_BUILD = 'v3.5 · 14/07'
 const POR_PAG = 10
   const d = CH[canal]
 
@@ -260,7 +260,18 @@ const POR_PAG = 10
         // 1ª leva instantânea para a tela não esperar
         const d1 = await api.mlPedidosEnriquecido('', 0, 25, desdeIso, ateIso)
         if (g !== geracao.current) return
-        let acumulado = (d1.pedidos || []).map(adaptaML)
+        let d1v = d1
+        let acumulado = (d1v.pedidos || []).map(adaptaML)
+        let esperas = 0
+        while (!silencioso && g === geracao.current && acumulado.length === 0 && d1v.paging?.sync?.rodando && esperas < 24) {
+          setFundo({ carregados: d1v.paging?.sync?.progresso || 0, total: Math.max(d1v.paging?.sync?.alvo || 0, d1v.paging?.sync?.progresso || 0), fase: 'primeira sincronização · gravando pedidos no banco' })
+          await new Promise((r) => setTimeout(r, 5000))
+          try { d1v = await comTimeout(api.mlPedidosEnriquecido('', 0, 25, desdeIso, ateIso), 30000) } catch (_) { /* tenta de novo */ }
+          if (g !== geracao.current) return
+          acumulado = (d1v.pedidos || []).map(adaptaML)
+          esperas++
+        }
+        const d1s = d1v
         const publicar = (arr) => {
           const agrupados = agrupaPacksML(arr)
           if (silencioso) {
@@ -280,7 +291,7 @@ const POR_PAG = 10
           arr.forEach((p) => idsRef.current.add(p.id))
         }
         publicar(acumulado)
-        const totalInformado = d1.paging?.total ?? 0
+        const totalInformado = d1s.paging?.total ?? 0
         // blindagem: 1ª página cheia com total <= carregados = total suspeito → sondar blocos mesmo assim
         const suspeito = acumulado.length >= 25 && totalInformado <= acumulado.length
         const teto = Math.min(Math.max(totalInformado, suspeito ? 400 : acumulado.length), 400)
@@ -334,6 +345,7 @@ const POR_PAG = 10
           if (g !== geracao.current) return
           setFundo(null); setUltimaSync(Date.now())
           backfillML(g)
+          if (d1s.paging?.sync?.rodando) acompanharSyncServidor(g, desdeIso, ateIso, teto)
         } else if (!silencioso) {
           setFundo({ carregados: acumulado.length, total: acumulado.length, fase: 'consultando NF-e no Bling' })
           await nfeStatusML(acumulado, g)
@@ -343,6 +355,7 @@ const POR_PAG = 10
           if (g !== geracao.current) return
           setFundo(null); setUltimaSync(Date.now())
           backfillML(g)
+          if (d1s.paging?.sync?.rodando) acompanharSyncServidor(g, desdeIso, ateIso, Math.max(acumulado.length, 100))
         }
       } else {
         let r
@@ -372,6 +385,30 @@ const POR_PAG = 10
   // busca envios em série controlada e preenche UF + prazo de despacho (shipBy) + cidade + rastreio
   const ufBuscadas = useRef(new Set())
   const backfillAtivo = useRef(false)
+  const acompanharSyncServidor = async (g, desdeIso, ateIso, tetoIni) => {
+    for (let i = 0; i < 30 && g === geracao.current; i++) {
+      await new Promise((r) => setTimeout(r, 8000))
+      let r = null
+      try { r = await comTimeout(api.mlPedidosEnriquecido('', 0, Math.min(Math.max(tetoIni || 100, 100), 400), desdeIso, ateIso), 30000) } catch (_) { r = null }
+      if (g !== geracao.current) return
+      if (r && (r.pedidos || []).length) {
+        const arr2 = agrupaPacksML((r.pedidos || []).map(adaptaML))
+        setPedidos((prev) => {
+          if (!prev) return arr2
+          const antigos = new Map(prev.map((p) => [p.id, p]))
+          const novos = arr2.map((n) => { const a = antigos.get(n.id); return a ? { ...n, nf: n.nf || a.nf, nfDesconhecida: n.nfDesconhecida && a.nfDesconhecida, nfInfo: n.nfInfo || a.nfInfo, uf: n.uf || a.uf, cidade: n.cidade || a.cidade, shipBy: n.shipBy || a.shipBy, rastreio: n.rastreio || a.rastreio, envioStatus: n.envioStatus || a.envioStatus, envioSubstatus: n.envioSubstatus || a.envioSubstatus } : n })
+          const ids = new Set(novos.map((p) => p.id))
+          return novos.concat(prev.filter((p) => !ids.has(p.id)))
+        })
+        arr2.forEach((p) => idsRef.current.add(p.id))
+      }
+      const rodando = !!(r && r.paging?.sync?.rodando)
+      setFundo(rodando ? { carregados: r?.paging?.sync?.progresso || 0, total: Math.max(r?.paging?.sync?.alvo || 0, r?.paging?.sync?.progresso || 0), fase: 'gravando pedidos no banco' } : null)
+      if (!rodando) { setUltimaSync(Date.now()); backfillML(g); return }
+    }
+    setFundo(null)
+  }
+
   const backfillML = async (g) => {
     if (backfillAtivo.current) return
     backfillAtivo.current = true
@@ -524,9 +561,8 @@ const POR_PAG = 10
     try {
       const sids = arr.filter((p) => p.canal === 'ml' && p.shipId && (!p.envioStatus || /ready_to_ship|handling|pending/.test(p.envioStatus))).map((p) => String(p.shipId))
       if (!sids.length) return
-      for (let i = 0; i < Math.min(sids.length, 360) && g === geracao.current; i += 120) {
-        await comTimeout(api.mlEnviosSincronizar(sids.slice(i, i + 120), 120), 90000)
-      }
+      // 1 onda rápida de 60 — desde a v3.3 o backfill grava cada envio no cache e cura o resto sozinho
+      if (g === geracao.current) await comTimeout(api.mlEnviosSincronizar(sids.slice(0, 60), 60), 90000)
       if (g !== geracao.current) return
       const fresco = await comTimeout(api.mlPedidosEnriquecido('', 0, Math.min(arr.length + 20, 400), desdeIso, ateIso), 150000)
       if (g !== geracao.current) return
