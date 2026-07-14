@@ -219,6 +219,7 @@ export default function CentralPedidosUltra() {
   const [pedidos, setPedidos] = useState(null)
   const [erro, setErro] = useState(null)
   const [fundo, setFundo] = useState(null)
+  const [ultimaSync, setUltimaSync] = useState(null)
   const [aba, setAba] = useState('todos')
   const [pgto, setPgto] = useState('todos')
   const [densidade, setDensidade] = useState('conf')
@@ -278,19 +279,25 @@ export default function CentralPedidosUltra() {
           arr.forEach((p) => idsRef.current.add(p.id))
         }
         publicar(acumulado)
-        const total = d1.paging?.total ?? acumulado.length
-        const teto = Math.min(total, 400)
+        const totalInformado = d1.paging?.total ?? 0
+        // blindagem: 1ª página cheia com total <= carregados = total suspeito → sondar blocos mesmo assim
+        const suspeito = acumulado.length >= 25 && totalInformado <= acumulado.length
+        const teto = Math.min(Math.max(totalInformado, suspeito ? 400 : acumulado.length), 400)
         if (!silencioso && teto > acumulado.length) {
-          setFundo({ carregados: acumulado.length, total: teto })
-          // PLANO A: o servidor pagina em paralelo — UMA chamada traz a janela inteira
+          setFundo({ carregados: acumulado.length, total: teto, fase: 'carregando pedidos' })
+          // PLANO A adaptativo: se a última carga precisou do Plano B, vai direto aos blocos
           let completo = null
-          try { completo = await comTimeout(api.mlPedidosEnriquecido('', 0, teto, desdeIso, ateIso), 150000) } catch (_) { completo = null }
-          if (g !== geracao.current) return
+          if (localStorage.getItem('pcu_planoB') !== '1') {
+            try { completo = await comTimeout(api.mlPedidosEnriquecido('', 0, teto, desdeIso, ateIso), 60000) } catch (_) { completo = null }
+            if (g !== geracao.current) return
+          }
           if (completo && (completo.pedidos || []).length > acumulado.length) {
+            localStorage.removeItem('pcu_planoB')
             acumulado = (completo.pedidos || []).map(adaptaML)
             publicar(acumulado)
-            setFundo({ carregados: acumulado.length, total: teto })
+            setFundo({ carregados: acumulado.length, total: Math.max(teto, acumulado.length), fase: 'carregando pedidos' })
           } else {
+            localStorage.setItem('pcu_planoB', '1')
             // PLANO B: blocos resilientes (fila com tentativas por bloco)
             const BLOCO = 20
             const fila = []
@@ -304,7 +311,7 @@ export default function CentralPedidosUltra() {
                 if (g !== geracao.current) return
                 const lote = (dx?.pedidos || []).map(adaptaML)
                 if (!lote.length) {
-                  if (dx && Array.isArray(dx.pedidos)) continue
+                  if (dx && Array.isArray(dx.pedidos)) { fila.length = 0; break } // página vazia legítima = fim real da janela
                   b.tent++
                   if (b.tent < 3) { fila.push(b); await new Promise((r) => setTimeout(r, 1200 * b.tent)) }
                   continue
@@ -312,17 +319,30 @@ export default function CentralPedidosUltra() {
                 for (const p of lote) if (!porId.has(p.id)) porId.set(p.id, p)
                 acumulado = [...porId.values()]
                 publicar(acumulado)
-                setFundo({ carregados: acumulado.length, total: teto })
+                setFundo({ carregados: acumulado.length, total: teto, fase: 'carregando pedidos' })
               }
             }
             await Promise.all([worker(), worker()])
           }
-          setFundo(null)
-          if (acumulado.length < teto) notify(`Sincronizei ${acumulado.length} de ${teto} — recarregue ou aguarde a atualização automática para completar.`, 'warn')
+          if (!suspeito && acumulado.length < teto) notify(`Sincronizei ${acumulado.length} de ${teto} — recarregue ou aguarde a atualização automática para completar.`, 'warn')
+          setFundo({ carregados: acumulado.length, total: acumulado.length, fase: 'consultando NF-e no Bling' })
           await nfeStatusML(acumulado, g)
+          if (g !== geracao.current) return
+          setFundo({ carregados: acumulado.length, total: acumulado.length, fase: 'sincronizando envios' })
           await sincronizarEnviosML(acumulado, g, desdeIso, ateIso)
+          if (g !== geracao.current) return
+          setFundo(null); setUltimaSync(Date.now())
           backfillML(g)
-        } else if (!silencioso) { await nfeStatusML(acumulado, g); await sincronizarEnviosML(acumulado, g, desdeIso, ateIso); backfillML(g) }
+        } else if (!silencioso) {
+          setFundo({ carregados: acumulado.length, total: acumulado.length, fase: 'consultando NF-e no Bling' })
+          await nfeStatusML(acumulado, g)
+          if (g !== geracao.current) return
+          setFundo({ carregados: acumulado.length, total: acumulado.length, fase: 'sincronizando envios' })
+          await sincronizarEnviosML(acumulado, g, desdeIso, ateIso)
+          if (g !== geracao.current) return
+          setFundo(null); setUltimaSync(Date.now())
+          backfillML(g)
+        }
       } else {
         let r
         try { r = await api.shopeePedidosPainel('TODOS', dias, { page: 1, page_size: 50 }) }
@@ -335,6 +355,7 @@ export default function CentralPedidosUltra() {
         }
         arr.forEach((p) => idsRef.current.add(p.id))
         setPedidos(arr)
+        if (!silencioso) setUltimaSync(Date.now())
       }
     } catch (e) {
       if (!silencioso && g === geracao.current) {
@@ -354,28 +375,40 @@ export default function CentralPedidosUltra() {
     if (backfillAtivo.current) return
     backfillAtivo.current = true
     try {
+      const umEnvio = async (p) => {
+        try {
+          const env = await comTimeout(api.mlEnvio(p.shipId), 15000)
+          const dest = env?.destination?.shipping_address || env?.receiver_address || null
+          const uf = (dest?.state?.id || dest?.state?.name || '').toString().replace('BR-', '').slice(0, 2).toUpperCase() || null
+          const cidade = dest?.city?.name || null
+          const limite = env?.lead_time?.estimated_handling_limit?.date || env?.estimated_handling_limit?.date || null
+          const shipBy = limite ? Math.floor(new Date(limite).getTime() / 1000) : null
+          const rastreio = env?.tracking_number || null
+          setPedidos((prev) => prev ? prev.map((x) => x.id === p.id ? { ...x, uf: uf || x.uf, cidade: x.cidade || cidade, shipBy: x.shipBy || shipBy, rastreio: x.rastreio || rastreio } : x) : prev)
+        } catch (_) { /* segue para o próximo */ }
+      }
       while (g === geracao.current) {
         const atual = pedidosRef.current || []
-        const alvos = atual.filter((p) => p.canal === 'ml' && p.shipId && (!p.uf || !p.shipBy) && !ufBuscadas.current.has(p.shipId)).slice(0, 12)
-        if (!alvos.length) break
-        for (const p of alvos) {
-          if (g !== geracao.current) return
-          ufBuscadas.current.add(p.shipId)
-          try {
-            const env = await comTimeout(api.mlEnvio(p.shipId), 20000)
-            const dest = env?.destination?.shipping_address || env?.receiver_address || null
-            const uf = (dest?.state?.id || dest?.state?.name || '').toString().replace('BR-', '').slice(0, 2).toUpperCase() || null
-            const cidade = dest?.city?.name || null
-            const limite = env?.lead_time?.estimated_handling_limit?.date || env?.estimated_handling_limit?.date || null
-            const shipBy = limite ? Math.floor(new Date(limite).getTime() / 1000) : null
-            const rastreio = env?.tracking_number || null
-            setPedidos((prev) => prev ? prev.map((x) => x.id === p.id ? { ...x, uf: uf || x.uf, cidade: x.cidade || cidade, shipBy: x.shipBy || shipBy, rastreio: x.rastreio || rastreio } : x) : prev)
-          } catch (_) { /* segue para o próximo */ }
-          await new Promise((r) => setTimeout(r, 250)) // respiro entre envios: o backend fica livre p/ você
+        const pend = atual.filter((p) => p.canal === 'ml' && p.shipId && (!p.uf || !p.shipBy) && !ufBuscadas.current.has(p.shipId))
+        if (!pend.length) break
+        // o que está na tela destrava primeiro (Enviar em / Destino da página atual)
+        const vis = visiveisRef.current || new Set()
+        pend.sort((a, b) => (vis.has(b.shipId) ? 1 : 0) - (vis.has(a.shipId) ? 1 : 0))
+        const alvos = pend.slice(0, 24)
+        alvos.forEach((p) => ufBuscadas.current.add(p.shipId))
+        let i = 0
+        const worker = async () => {
+          while (i < alvos.length && g === geracao.current) {
+            const p = alvos[i++]
+            await umEnvio(p)
+            await new Promise((r) => setTimeout(r, 120)) // respiro curto — 4 vias em paralelo
+          }
         }
+        await Promise.all([worker(), worker(), worker(), worker()])
       }
     } finally { backfillAtivo.current = false }
   }
+  const visiveisRef = useRef(new Set())
   const pedidosRef = useRef(null)
   useEffect(() => { pedidosRef.current = pedidos }, [pedidos])
   useEffect(() => { fundoRef.current = fundo }, [fundo])
@@ -454,6 +487,7 @@ export default function CentralPedidosUltra() {
   }, [pedidos, aba, pgto, busca, ordem, soDevolucao, soSemNf])
   const nPag = Math.max(1, Math.ceil(filtrados.length / POR_PAG))
   const pageItems = filtrados.slice((pagina - 1) * POR_PAG, pagina * POR_PAG)
+  useEffect(() => { visiveisRef.current = new Set(pageItems.map((p) => p.shipId).filter(Boolean)) }, [pageItems])
   useEffect(() => { setPagina(1) }, [busca, ordem, aba, pgto, soDevolucao, soSemNf])
 
   const mix = useMemo(() => {
@@ -640,12 +674,12 @@ export default function CentralPedidosUltra() {
           <span style={{ fontSize: 8.5, color: 'var(--faint)', display: 'inline-flex', alignItems: 'center', gap: 7 }}>
             {fundo ? <>
               <Loader2 size={10} className="animate-spin" />
-              <span className="num">sincronizando {fundo.carregados} de {fundo.total}</span>
+              <span className="num">{fundo.fase || 'sincronizando'} · {fundo.carregados}{fundo.total > fundo.carregados ? ` de ${fundo.total}` : ''}</span>
               <span style={{ width: 90, height: 5, borderRadius: 3, background: 'rgba(255,255,255,.08)', overflow: 'hidden', display: 'inline-block' }}>
                 <span style={{ display: 'block', height: '100%', width: `${Math.round(fundo.carregados / Math.max(1, fundo.total) * 100)}%`, background: `linear-gradient(90deg,${d.cor},var(--ok))`, transition: 'width .3s' }} />
               </span>
               <span>pode trabalhar</span>
-            </> : <><RefreshCw size={10} />sincronizado agora</>}
+            </> : <><RefreshCw size={10} />{(() => { if (!ultimaSync) return 'sincronizando…'; const m = Math.round((agoraTs - ultimaSync) / 60000); return m <= 0 ? 'sincronizado agora' : `sincronizado há ${m} min` })()}</>}
           </span>
         </div>
       </div>
@@ -825,8 +859,57 @@ export default function CentralPedidosUltra() {
           <div style={{ flex: 1 }} />
           {canal === 'shopee'
             ? <div className="btn" onClick={buscarIntel}>{intelCarregando ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}{intel ? 'Reanalisar' : 'Analisar os pedidos'}</div>
-            : <span style={{ fontSize: 8.5, color: 'var(--faint)' }}>para o Mercado Livre, chega com o backlog de campanhas ML</span>}
+            : <span style={{ fontSize: 8.5, color: 'var(--faint)' }}>análise em tempo real dos {lista.length} pedidos carregados · criação nativa chega com o backlog de campanhas ML</span>}
         </div>
+        {canal === 'ml' && (() => {
+          // análise local: pares comprados juntos (packs), recompra e ticket — dados reais da janela
+          const pares = new Map()
+          lista.forEach((p) => {
+            const nomes = [...new Set((p.itens || []).map((i) => i.nome))].slice(0, 4)
+            for (let a = 0; a < nomes.length; a++) for (let b = a + 1; b < nomes.length; b++) {
+              const k = [nomes[a], nomes[b]].sort().join('|')
+              pares.set(k, (pares.get(k) || 0) + 1)
+            }
+          })
+          const topPares = [...pares.entries()].filter(([, n]) => n >= 2).sort((a, b) => b[1] - a[1]).slice(0, 2)
+          const recompra = lista.filter((p) => (p.compras || 0) > 1).length
+          const clientes = new Set(lista.map((p) => p.comprador)).size || 1
+          const tickets = lista.map((p) => p.receita || 0).filter(Boolean).sort((a, b) => a - b)
+          const tMed = tickets.length ? tickets.reduce((s, v) => s + v, 0) / tickets.length : 0
+          const minimoCupom = tMed ? Math.ceil((tMed * 1.35) / 5) * 5 : 0
+          const copiar = (txt) => { try { navigator.clipboard.writeText(txt); notify('Briefing copiado — cole em Campanhas para criar.', 'ok') } catch (_) { notify(txt, 'ok') } }
+          if (!lista.length) return <div style={{ fontSize: 9, color: 'var(--faint)', marginTop: 8 }}>aguardando os pedidos carregarem…</div>
+          return (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 9, marginTop: 10 }}>
+              <div className="blk">
+                <h4 style={{ color: 'var(--purple, #a06be8)' }}><Layers size={12} style={{ color: 'var(--purple, #a06be8)' }} />Comprados juntos · bundle</h4>
+                {topPares.length ? topPares.map(([k, n], i) => (
+                  <div key={i} style={{ fontSize: 9.5, color: 'var(--dim)', marginBottom: 6, lineHeight: 1.5 }}>
+                    <b style={{ color: 'var(--fg)' }}>{k.split('|')[0].slice(0, 34)}</b> + <b style={{ color: 'var(--fg)' }}>{k.split('|')[1].slice(0, 34)}</b>
+                    <span className="num" style={{ color: 'var(--ok)' }}> · juntos {n}x na janela</span>
+                  </div>
+                )) : <div style={{ fontSize: 9, color: 'var(--faint)' }}>sem pares fortes ainda — a análise refina conforme a carga completa</div>}
+                {topPares.length > 0 && <div className="btn primary" style={{ fontSize: 9, marginTop: 4 }} onClick={() => copiar(`Bundle ML: ${topPares[0][0].replace('|', ' + ')} (comprados juntos ${topPares[0][1]}x nos últimos ${dias} dias)`)}><Check size={11} color={d.txt} />Copiar briefing do bundle</div>}
+              </div>
+              <div className="blk">
+                <h4 style={{ color: 'var(--purple, #a06be8)' }}><Box size={12} style={{ color: 'var(--purple, #a06be8)' }} />Recompra · fidelidade</h4>
+                <div style={{ fontSize: 9.5, color: 'var(--dim)', lineHeight: 1.5 }}>
+                  <b className="num" style={{ color: 'var(--fg)', fontSize: 13 }}>{Math.round((recompra / Math.max(1, lista.length)) * 100)}%</b> dos pedidos são de quem já comprou antes ({recompra} de {lista.length})
+                  <br /><span style={{ color: 'var(--faint)', fontSize: 8.5 }}>{clientes} compradores únicos na janela</span>
+                </div>
+                <div className="btn primary" style={{ fontSize: 9, marginTop: 6 }} onClick={() => copiar(`Campanha de recompra ML: ${recompra} pedidos de clientes recorrentes em ${dias} dias — cupom pós-venda para a 2ª compra`)}><Check size={11} color={d.txt} />Copiar briefing de recompra</div>
+              </div>
+              <div className="blk">
+                <h4 style={{ color: 'var(--purple, #a06be8)' }}><Tag size={12} style={{ color: 'var(--purple, #a06be8)' }} />Cupom que aumenta o ticket</h4>
+                <div style={{ fontSize: 9.5, color: 'var(--dim)', lineHeight: 1.5 }}>
+                  ticket médio <b className="num" style={{ color: 'var(--fg)' }}>{brl(tMed)}</b> → mínimo sugerido <b className="num" style={{ color: 'var(--ok)' }}>{brl(minimoCupom)}</b>
+                  <br /><span style={{ color: 'var(--faint)', fontSize: 8.5 }}>puxa o carrinho ~35% acima do padrão atual</span>
+                </div>
+                <div className="btn primary" style={{ fontSize: 9, marginTop: 6 }} onClick={() => copiar(`Cupom ML: mínimo ${brl(minimoCupom)} (ticket médio atual ${brl(tMed)} em ${dias} dias)`)}><Check size={11} color={d.txt} />Copiar briefing do cupom</div>
+              </div>
+            </div>
+          )
+        })()}
         {canal === 'shopee' && intel && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 9, marginTop: 10 }}>
             <div className="blk">
@@ -918,7 +1001,7 @@ export default function CentralPedidosUltra() {
                 {pAberto && (() => {
                   const m = mancheteDe(pAberto, canal)
                   return (
-                    <div className="painel" style={{ '--ch': d.cor, '--chd': d.cord }}>
+                    <div className="painel" key={pAberto.id} style={{ '--ch': d.cor, '--chd': d.cord }}>
                       <div className="p-hd">
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
