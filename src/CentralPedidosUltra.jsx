@@ -51,7 +51,9 @@ function adaptaML(p) {
     rastreio: p.rastreio || p.tracking || null, shipId: p.shipping_id || p.shipment_id || p.envio_id || p.envio?.id,
     frete: (p.resumo?.tarifa ?? p.frete_vendedor ?? null),
     uf: (p.uf || p.envio?.uf || '').toUpperCase() || ((p.endereco || '').match(UF_RE) || [])[0],
-    nf: !!(p.nfe || p.nf), nfDesconhecida: !(p.nfe || p.nf), cancelado: /cancel/i.test(String(p.status || '')),
+    nf: !!(p.nfe || p.nf),
+    nfDesconhecida: !(p.nfe || p.nf) && !/invoice_pending|waiting_for_invoice/i.test(String(p.envio_substatus || '')),
+    cancelado: /cancel/i.test(String(p.status || '')),
     devolucao: /return|devolu|claim|mediac/i.test(String(p.status || '')) || !!p.claim_id || !!p.devolucao_envio, bruto: p,
   }
 }
@@ -144,6 +146,11 @@ function grupoDe(p) {
 function mancheteDe(p, canal) {
   if (p.cancelado) return { cls: 'a-fis', tit: 'Pedido cancelado · não despache', sub: 'o canal cancelou/estornou — retire o volume da fila de separação', acao: null }
   if (p.devolucao) return { cls: 'a-fis', tit: 'Devolução aberta · responda em 48h', sub: 'sem resposta, a disputa fecha automaticamente contra a loja', acao: 'painel', label: 'Ver detalhes' }
+  const subCedo = String(p.envioSubstatus || '')
+  if (/invoice_pending|waiting_for_invoice/i.test(subCedo)) {
+    if (p.nf) return { cls: 'a-nf', tit: 'NF-e emitida · aguardando o ML receber a nota', sub: `o Bling transmite a NF-e${p.nfInfo?.numero ? ` nº ${p.nfInfo.numero}` : ''} ao ML — a etiqueta libera em seguida, sem ação sua`, acao: null }
+    return { cls: 'a-nf', tit: 'Pronta para emitir NF-e de venda', sub: 'o ML segura a etiqueta até receber a nota — emitindo no Bling, ela libera em seguida', acao: 'bling', label: 'Emitir NF-e no Bling' }
+  }
   if (!p.nf && !p.nfDesconhecida) return { cls: 'a-nf', tit: 'Pronta para emitir NF-e de venda', sub: 'dados fiscais liberados — emitindo no Bling, a etiqueta libera em seguida', acao: 'bling', label: 'Emitir NF-e no Bling' }
   const ref = String(canal === 'ml' ? (p.envioStatus || p.status) : p.status)
   const sub = String(p.envioSubstatus || '')
@@ -545,12 +552,20 @@ export default function CentralPedidosUltra() {
     try {
       const alvo = Array.isArray(soUm) ? soUm : (soUm ? [soUm] : [...sel])
       if (canal === 'ml') {
-        const ids = alvo.map((id) => (lista.find((p) => p.id === id) || {}).shipId).filter(Boolean)
+        const peds = alvo.map((id) => lista.find((p) => p.id === id) || {})
+        const bloqueados = peds.filter((p) => /invoice_pending|waiting_for_invoice/i.test(String(p.envioSubstatus || '')))
+        const ids = peds.filter((p) => p.shipId && !bloqueados.includes(p)).map((p) => p.shipId)
+        if (bloqueados.length && !ids.length) return notify(`O ML ainda segura ${bloqueados.length > 1 ? 'estas etiquetas' : 'esta etiqueta'}: emita a NF-e no Bling primeiro — ela libera em seguida.`, 'warn')
         if (!ids.length) return notify('Nenhum envio com etiqueta disponível.', 'warn')
         await api.mlEtiqueta(ids.join(','))
-      } else await api.shopeeEtiquetaOficial(alvo, 'auto')
-      notify('Etiqueta(s) geradas.', 'ok')
-    } catch (e) { notify(e.message || 'Falha na etiqueta', 'danger') }
+        if (bloqueados.length) notify(`${ids.length} etiqueta(s) geradas · ${bloqueados.length} aguardando NF-e (o ML libera após a nota).`, 'warn')
+        else notify('Etiqueta(s) geradas.', 'ok')
+      } else { await api.shopeeEtiquetaOficial(alvo, 'auto'); notify('Etiqueta(s) geradas.', 'ok') }
+    } catch (e) {
+      const msg = String(e.message || '')
+      if (/invoice_pending|SHPLAB0200/i.test(msg)) notify('O ML bloqueou a etiqueta: falta a NF-e deste pedido. Emita no Bling que ela libera em seguida.', 'warn')
+      else notify(msg || 'Falha na etiqueta', 'danger')
+    }
   }
 
   const filaChip = (Icon, lab, val, c) => (
