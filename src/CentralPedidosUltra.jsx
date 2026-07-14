@@ -241,9 +241,10 @@ export default function CentralPedidosUltra() {
   const [regras, setRegras] = useState(() => { try { return JSON.parse(localStorage.getItem('pcu_regras') || '{"nf_imprime":true,"risco_segura":true,"presente_selo":false}') } catch (_) { return { nf_imprime: true, risco_segura: true, presente_selo: false } } })
   const [agoraTs, setAgoraTs] = useState(Date.now())
   const geracao = useRef(0)
+  const cargaEmCurso = useRef(null)
   const fundoRef = useRef(null)
   const idsRef = useRef(new Set())
-  const PCU_BUILD = 'v3.7 · 14/07'
+  const PCU_BUILD = 'v3.8 · 14/07'
 const POR_PAG = 10
   const d = CH[canal]
 
@@ -251,8 +252,14 @@ const POR_PAG = 10
   useEffect(() => { localStorage.setItem('pcu_regras', JSON.stringify(regras)) }, [regras])
 
   const carregar = async (silencioso) => {
-    const g = ++geracao.current
-    if (!silencioso) { setPedidos(null); setErro(null); setSel(new Set()); setAberto(null); setPagina(1); setFundo(null); setNovos(0) }
+    const g = `${canal}|${dias}`          // guard estável: NÃO muda na remontagem do StrictMode
+    geracao.current = g
+    // se já há uma carga real (não-silenciosa) em curso para esta mesma chave, não duplica
+    if (!silencioso) {
+      if (cargaEmCurso.current === g) return
+      cargaEmCurso.current = g
+      setPedidos(null); setErro(null); setSel(new Set()); setAberto(null); setPagina(1); setFundo(null); setNovos(0)
+    }
     try {
       if (canal === 'ml') {
         const dd = new Date(); dd.setDate(dd.getDate() - dias); dd.setHours(0, 0, 0, 0)
@@ -275,7 +282,7 @@ const POR_PAG = 10
           acumulado = (d1v.pedidos || []).map(adaptaML)
           esperas++
         }
-        const d1s = d1v
+        let d1s = d1v
         const publicar = (arr) => {
           const agrupados = agrupaPacksML(arr)
           if (silencioso) {
@@ -339,9 +346,14 @@ const POR_PAG = 10
         setPedidos((prev) => (prev && prev.length ? prev : []))
         setFundo(null)
       }
+    } finally {
+      if (!silencioso && cargaEmCurso.current === g) cargaEmCurso.current = null
     }
   }
-  useEffect(() => { idsRef.current = new Set(); carregar() }, [canal, dias])
+  useEffect(() => {
+    idsRef.current = new Set()
+    carregar()   // o guard por chave dentro de carregar() já neutraliza a dupla montagem do StrictMode
+  }, [canal, dias])
 
   // Backfill ML (roda SÓ depois da sincronização, nunca competindo com ela):
   // busca envios em série controlada e preenche UF + prazo de despacho (shipBy) + cidade + rastreio
