@@ -243,7 +243,8 @@ export default function CentralPedidosUltra() {
   const geracao = useRef(0)
   const fundoRef = useRef(null)
   const idsRef = useRef(new Set())
-  const POR_PAG = 10
+  const PCU_BUILD = 'v3.2 · 14/07'
+const POR_PAG = 10
   const d = CH[canal]
 
   useEffect(() => { const t = setInterval(() => setAgoraTs(Date.now()), 30000); return () => clearInterval(t) }, [])
@@ -646,6 +647,7 @@ export default function CentralPedidosUltra() {
               {chip(d.nome.toUpperCase(), '#1a1008', d.cor)}
               {chip('HUB BLING · NF-e', '#e9dbfb', 'rgba(160,107,232,.2)')}
               {chip('TEMPO REAL', 'var(--ok)', 'rgba(47,217,141,.12)', Zap)}
+              {chip(PCU_BUILD, 'var(--faint)', 'rgba(255,255,255,.06)')}
             </div>
             <div style={{ fontSize: 10.5, color: 'var(--dim)' }}>Do pagamento à entrega — separação, etiquetas, NF-e, repasse com margem e o perfil de quem compra</div>
           </div>
