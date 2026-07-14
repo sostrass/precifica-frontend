@@ -43,6 +43,7 @@ function adaptaML(p) {
     status: (Array.isArray(p.tags) && p.tags.includes('delivered') ? 'delivered' : '') || p.envio_status || p.status || '',
     pedidoStatus: p.status || '',
     envioStatus: (Array.isArray(p.tags) && p.tags.includes('delivered') ? 'delivered' : '') || p.envio_status || '',
+    envioSubstatus: p.envio_substatus || null,
     isFull: !!p.is_full, logistic: p.logistic_type || null,
     shipBy: p.ship_by || null, clienteReal: p.cliente || null, cidade: p.cidade || null, cep: p.cep || null, enderecoLinha: p.endereco || null,
     criado: p.date_created, pago: p.pago_em || p.aprovado_em || p.date_created,
@@ -131,6 +132,56 @@ function classifica(p) {
   const sb = p.shipBy ? p.shipBy * 1000 : null
   if (sb && sb - Date.now() > 36 * 3600000) return 'proximos'
   return 'hoje'
+}
+
+// ————— v3: grupo de coleta, manchete de ação, "enviar em" e rateio por item —————
+function grupoDe(p) {
+  const c = classifica(p)
+  if (c === 'cancel' || c === 'transito' || c === 'fim' || p.devolucao) return 'tra'
+  if (c === 'proximos' || /buffered|dropped/i.test(String(p.envioSubstatus || ''))) return 'fut'
+  return 'hoje' // inclui NF-e pendente — bloqueia a coleta de hoje
+}
+function mancheteDe(p, canal) {
+  if (p.cancelado) return { cls: 'a-fis', tit: 'Pedido cancelado · não despache', sub: 'o canal cancelou/estornou — retire o volume da fila de separação', acao: null }
+  if (p.devolucao) return { cls: 'a-fis', tit: 'Devolução aberta · responda em 48h', sub: 'sem resposta, a disputa fecha automaticamente contra a loja', acao: 'painel', label: 'Ver detalhes' }
+  if (!p.nf && !p.nfDesconhecida) return { cls: 'a-nf', tit: 'Pronta para emitir NF-e de venda', sub: 'dados fiscais liberados — emitindo no Bling, a etiqueta libera em seguida', acao: 'bling', label: 'Emitir NF-e no Bling' }
+  const ref = String(canal === 'ml' ? (p.envioStatus || p.status) : p.status)
+  const sub = String(p.envioSubstatus || '')
+  if (/deliver|entreg|complet|finaliz/i.test(ref)) return { cls: 'a-etq', tit: 'Entregue ao comprador', sub: p.rastreio ? `rastreio ${p.rastreio}` : 'pedido concluído', acao: null }
+  if (/shipped|enviado|transit/i.test(ref)) return { cls: 'a-tra', tit: 'A caminho do comprador', sub: p.rastreio ? `rastreio ${p.rastreio}` : 'rastreio ativo no canal', acao: 'canal', label: 'Rastrear no canal' }
+  if (/buffered|dropped/i.test(sub)) return { cls: 'a-buf', tit: 'Etiqueta libera depois · aguardando a coleta abrir', sub: 'o canal segura a etiqueta (buffered) — libera sozinha e o painel te avisa', acao: 'painel', label: 'Detalhes' }
+  if (/printed/i.test(sub)) return { cls: 'a-etq', tit: 'Etiqueta impressa · levar para a coleta', sub: 'volume pronto — confira na Mesa de Despacho', acao: 'etiqueta', label: 'Reimprimir etiqueta' }
+  if (canal === 'shopee' && /PROCESSED/i.test(ref)) return { cls: 'a-etq', tit: 'Etiqueta emitida · levar para a coleta', sub: 'waybill SPX gerada — volume pronto para a coleta ou drop-off', acao: 'etiqueta', label: 'Reimprimir etiqueta' }
+  if (canal === 'shopee' && /RETRY_SHIP/i.test(ref)) return { cls: 'a-fis', tit: 'Reenviar · o despacho anterior falhou', sub: 'a SPX pediu novo agendamento — gere a etiqueta de novo', acao: 'etiqueta', label: 'Gerar etiqueta de novo' }
+  if (canal === 'ml' && p.isFull) return { cls: 'a-buf', tit: 'Full · o ML expede por você', sub: 'estoque no fulfillment — nenhuma ação na sua coleta', acao: null }
+  if (p.nfDesconhecida) return { cls: 'a-etq', tit: 'Etiqueta pronta para imprimir', sub: 'consultando a NF-e no Bling — despacho autorizado pelo canal', acao: 'etiqueta', label: 'Baixar etiqueta' }
+  return { cls: 'a-etq', tit: 'Etiqueta pronta para imprimir', sub: p.nfInfo?.numero ? `NF-e nº ${p.nfInfo.numero} emitida e vinculada · despacho autorizado` : 'NF-e emitida · despacho autorizado pelo canal', acao: 'etiqueta', label: 'Baixar etiqueta' }
+}
+function enviarEmDe(p, agoraTs) {
+  const c = classifica(p)
+  if (p.cancelado) return ['—', 'var(--faint)']
+  if (c === 'fim') return ['entregue', 'var(--ok)']
+  if (c === 'transito') return ['já enviado', 'var(--dim)']
+  if (!p.nf && !p.nfDesconhecida) return ['bloqueado pela NF-e', 'var(--danger)']
+  if (!p.shipBy) return ['a definir pelo canal', 'var(--faint)']
+  const sb = p.shipBy * 1000
+  const hh = new Date(sb).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+  if (sb < agoraTs) return [`ATRASADO · era ${new Date(sb).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}`, 'var(--danger)']
+  const d0 = new Date(agoraTs); d0.setHours(0, 0, 0, 0)
+  const dias = Math.floor((sb - d0.getTime()) / 86400000)
+  if (dias === 0) return [`HOJE · até ${hh}`, 'var(--warn)']
+  if (dias === 1) return [`AMANHÃ · até ${hh}`, '#9cc8ff']
+  return [`${new Date(sb).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} · até ${hh}`, '#9cc8ff']
+}
+function rateiaItens(p) {
+  const its = p.itens || []
+  const totais = its.map((i) => (i.preco != null ? i.preco * (i.qtd || 1) : null))
+  const soma = totais.reduce((s, v) => s + (v || 0), 0)
+  return its.map((i, ix) => {
+    const val = totais[ix] != null ? totais[ix] : (its.length ? (p.receita || 0) / its.length : p.receita)
+    const share = soma > 0 && totais[ix] != null ? totais[ix] / soma : (its.length ? 1 / its.length : 1)
+    return { ...i, val, tx: p.taxas != null ? p.taxas * share : null, liq: p.liquido != null ? p.liquido * share : null }
+  })
 }
 
 function paraImpressao(p) {
@@ -412,7 +463,7 @@ export default function CentralPedidosUltra() {
     const onKey = (e) => {
       const tag = (e.target && e.target.tagName) || ''
       if (tag === 'INPUT' || tag === 'TEXTAREA') { if (e.key === 'Escape') e.target.blur(); return }
-      const ids = pageItems.map((p) => p.id); const idx = ids.indexOf(aberto)
+      const ids = ['hoje', 'fut', 'tra'].flatMap((g) => pageItems.filter((p) => grupoDe(p) === g)).map((p) => p.id); const idx = ids.indexOf(aberto)
       if (e.key === 'j' || e.key === 'ArrowDown') { e.preventDefault(); setAberto(ids[Math.min(ids.length - 1, idx < 0 ? 0 : idx + 1)] || null) }
       else if (e.key === 'k' || e.key === 'ArrowUp') { e.preventDefault(); setAberto(ids[Math.max(0, idx < 0 ? 0 : idx - 1)] || null) }
       else if (e.key === 'e') { e.preventDefault(); setAberto(null) }
@@ -816,34 +867,65 @@ export default function CentralPedidosUltra() {
       {erro && <div className="glass" style={{ padding: 16, fontSize: 11, color: 'var(--dim)', display: 'flex', gap: 8, alignItems: 'center' }}><AlertTriangle size={14} style={{ color: 'var(--danger)' }} /> {erro} <span className="btn" onClick={() => carregar()}>tentar de novo</span></div>}
       {pedidos === null ? <div className="glass" style={{ padding: 24, display: 'flex', gap: 8, alignItems: 'center', color: 'var(--dim)', fontSize: 12 }}><Loader2 size={15} className="animate-spin" /> carregando os pedidos…</div>
         : pageItems.length === 0 ? <div className="glass" style={{ padding: 24, textAlign: 'center', fontSize: 11, color: 'var(--faint)' }}>Nenhum pedido {busca ? 'para esta busca' : 'nesta aba'}.</div>
-          : <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
-            {pageItems.map((p) => <UltraCard key={p.id} p={p} d={d} canal={canal} exp={aberto === p.id} densidade={densidade}
+          : (() => {
+            const pAberto = aberto && filtrados.find((x) => x.id === aberto)
+            const GRUPOS = [
+              ['hoje', Truck, 'Despachar hoje · coleta 14:00 – 17:00 · corte 15:00', `${d.nome} · a fila de agora — NF-e pendente bloqueia a coleta`, corteTxt, corteCor === 'var(--faint)' ? 'var(--warn)' : corteCor],
+              ['fut', CalendarDays, 'Coleta programada · etiqueta libera depois', 'sem urgência agora — o painel promove para "hoje" quando a janela abrir', 'SEM AÇÃO AGORA', '#9cc8ff'],
+              ['tra', Truck, 'Em trânsito e pós-venda', 'rastreio, entregas, devoluções e cancelados aparecem aqui primeiro', 'ACOMPANHAMENTO', 'var(--purple, #a06be8)'],
+            ]
+            const renderCard = (p) => <UltraCard key={p.id} p={p} d={d} canal={canal} exp={aberto === p.id} densidade={densidade}
               onToggle={() => setAberto(aberto === p.id ? null : p.id)} sel={sel.has(p.id)} onSel={() => toggleSel(p.id)}
-              baixarEtiqueta={() => baixarEtiquetas(p.id)} agoraTs={agoraTs} notify={notify} />)}
-          </div>}
-
-      {/* DRAWER LATERAL — detalhe do pedido */}
-      {(() => {
-        const pAberto = aberto && filtrados.find((x) => x.id === aberto)
-        if (!pAberto) return null
-        return (
-          <>
-            <div onClick={() => setAberto(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(10,4,8,.55)', backdropFilter: 'blur(2px)', zIndex: 54 }} />
-            <div className="pcuv2" style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: 'min(640px, 94vw)', zIndex: 55, background: 'var(--surface, #1d0f16)', borderLeft: `2px solid ${d.cor}55`, boxShadow: '-18px 0 50px rgba(0,0,0,.5)', overflow: 'auto', padding: '14px 16px', '--ch': d.cor, '--chd': d.cord }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4, position: 'sticky', top: -14, background: 'var(--surface, #1d0f16)', padding: '14px 0 10px', zIndex: 2, borderBottom: '1px solid var(--glass-border)' }}>
-                <div style={{ width: 40, height: 40, borderRadius: 9, overflow: 'hidden', background: 'linear-gradient(135deg,#4a2a3a,#3a2530)', flex: 'none' }}>{pAberto.itens[0]?.imagem && <img src={pAberto.itens[0].imagem} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}</div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <b style={{ fontSize: 12.5, display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{pAberto.titulo}</b>
-                  <span className="num" style={{ fontSize: 9, color: 'var(--faint)' }}>#{pAberto.id} · {statusPt(pAberto.status)}</span>
+              baixarEtiqueta={() => baixarEtiquetas(p.id)} agoraTs={agoraTs} notify={notify} />
+            return (
+              <div className={`split ${pAberto ? 'aberto' : ''}`}>
+                <div style={{ minWidth: 0 }}>
+                  {GRUPOS.map(([g, Icone, tit, sub, ctx, cor]) => {
+                    const its = pageItems.filter((p) => grupoDe(p) === g)
+                    if (!its.length) return null
+                    return (
+                      <div key={g}>
+                        <div className={`grp-col ${g === 'fut' ? 'fut' : g === 'tra' ? 'tra' : ''}`}>
+                          <Icone size={15} style={{ color: 'var(--ch, ' + d.cor + ')', flex: 'none' }} />
+                          <div style={{ minWidth: 0 }}>
+                            <div className="t">{tit}</div>
+                            <div className="s">{sub}</div>
+                          </div>
+                          <div style={{ flex: 1 }} />
+                          <span className="chip" style={{ color: 'var(--dim)', background: 'rgba(255,255,255,.06)' }}>{its.length} PEDIDO{its.length > 1 ? 'S' : ''}</span>
+                          <span className="chip" style={{ color: g === 'hoje' ? '#1a1008' : cor, background: g === 'hoje' ? cor : 'rgba(255,255,255,.07)' }}>{ctx}</span>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 9, marginBottom: 6 }}>{its.map(renderCard)}</div>
+                      </div>
+                    )
+                  })}
                 </div>
-                <b className="num serif" style={{ fontSize: 16 }}>{brl(pAberto.receita)}</b>
-                <div className="btn" style={{ padding: '5px 9px' }} onClick={() => setAberto(null)}><X size={13} /></div>
+                {pAberto && (() => {
+                  const m = mancheteDe(pAberto, canal)
+                  return (
+                    <div className="painel" style={{ '--ch': d.cor, '--chd': d.cord }}>
+                      <div className="p-hd">
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                            <span className="canal-bdg" style={{ background: d.cor, color: canal === 'ml' ? '#1a1008' : '#fff' }}>{canal === 'ml' ? 'ML' : 'SP'}</span>
+                            <b className="serif" style={{ fontSize: 14 }}>Pedido <span className="num">#{pAberto.id}</span></b>
+                            <b className="num serif" style={{ fontSize: 13 }}>{brl(pAberto.receita)}</b>
+                          </div>
+                          <div style={{ fontSize: 8.5, color: 'var(--faint)', marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {pAberto.comprador} · {pAberto.criado ? new Date(pAberto.criado).toLocaleDateString('pt-BR') : '—'} · <span style={{ color: m.cls === 'a-etq' ? 'var(--ok)' : m.cls === 'a-nf' ? '#ffcf7d' : m.cls === 'a-buf' || m.cls === 'a-tra' ? '#9cc8ff' : '#ffb8c5' }}>{m.tit}</span>
+                          </div>
+                        </div>
+                        <div className="btn" style={{ padding: '6px 8px', flex: 'none' }} onClick={() => setAberto(null)}><X size={13} /></div>
+                      </div>
+                      <div style={{ padding: '2px 4px 10px' }}>
+                        <UltraExpand p={pAberto} d={d} canal={canal} baixarEtiqueta={() => baixarEtiquetas(pAberto.id)} notify={notify} agoraTs={agoraTs} />
+                      </div>
+                    </div>
+                  )
+                })()}
               </div>
-              <UltraExpand p={pAberto} d={d} canal={canal} baixarEtiqueta={() => baixarEtiquetas(pAberto.id)} notify={notify} agoraTs={agoraTs} />
-            </div>
-          </>
-        )
-      })()}
+            )
+          })()}
 
       {/* MASSBAR */}
       {sel.size > 0 && (
@@ -895,14 +977,25 @@ export default function CentralPedidosUltra() {
   )
 }
 
-// ————— CARD fiel ao cardHTML/cardCompacto do mockup —————
+// ————— CARD v3 pedido-cêntrico (contrato: pedidos_central_ultra_v3.html) —————
+// O card decide (manchete de ação + enviar em + NF-e); o painel inline detalha. Sem duplicação.
 function UltraCard({ p, d, canal, exp, densidade, onToggle, sel, onSel, baixarEtiqueta, agoraTs, notify }) {
-  const rail = p.cancelado ? 'var(--danger)' : p.devolucao ? 'var(--warn)' : classifica(p) === 'fim' ? 'var(--ok)' : d.cor
-  const estado = p.cancelado ? 'CANCELADO' : p.devolucao ? 'DEVOLUÇÃO' : statusPt(p.status).toUpperCase().slice(0, 24)
-  const estadoCor = p.cancelado ? 'var(--danger)' : p.devolucao ? 'var(--warn)' : classifica(p) === 'fim' ? 'var(--ok)' : d.cor
-  const conta = p.shipBy ? (p.shipBy * 1000 < agoraTs ? 'despacho atrasado' : `despachar até ${new Date(p.shipBy * 1000).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`) : (p.criado ? new Date(p.criado).toLocaleDateString('pt-BR') : '')
-  const contaCor = p.shipBy && p.shipBy * 1000 < agoraTs ? 'var(--danger)' : 'var(--dim)'
+  const m = mancheteDe(p, canal)
+  const env = enviarEmDe(p, agoraTs)
+  const rail = p.cancelado ? 'var(--danger)' : p.devolucao ? 'var(--warn)' : m.cls === 'a-nf' ? 'var(--warn)' : m.cls === 'a-fis' ? 'var(--danger)' : m.cls === 'a-buf' || m.cls === 'a-tra' ? '#5b8def' : classifica(p) === 'fim' ? 'var(--ok)' : d.cor
   const chip = (txt, c, bg) => <span className="chip" style={{ color: c, background: bg }}>{txt}</span>
+  const abrirCanal = () => window.open(canal === 'ml' ? `https://www.mercadolivre.com.br/vendas/${p.id}/detalhe` : `https://seller.shopee.com.br/portal/sale/order/${p.id}`, '_blank')
+  const agir = (e) => {
+    e.stopPropagation()
+    if (m.acao === 'etiqueta') baixarEtiqueta()
+    else if (m.acao === 'bling') window.open('https://www.bling.com.br/vendas.php', '_blank')
+    else if (m.acao === 'canal') abrirCanal()
+    else onToggle()
+  }
+  const nfTxt = p.nf ? `EMITIDA${p.nfInfo?.numero ? ` · nº ${p.nfInfo.numero}` : ''}` : p.nfDesconhecida ? 'CONSULTANDO' : 'PENDENTE'
+  const nfCor = p.nf ? 'var(--ok)' : p.nfDesconhecida ? 'var(--faint)' : 'var(--danger)'
+  const dataTxt = p.criado ? new Date(p.criado).toLocaleString('pt-BR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'
+  const titCor = m.cls === 'a-etq' ? 'var(--ok)' : m.cls === 'a-nf' ? '#ffcf7d' : m.cls === 'a-fis' ? '#ffb8c5' : '#9cc8ff'
 
   if (densidade === 'comp' && !exp) {
     return (
@@ -910,10 +1003,12 @@ function UltraCard({ p, d, canal, exp, densidade, onToggle, sel, onSel, baixarEt
         <div className="rail" style={{ background: rail }} />
         <div style={{ padding: '9px 14px 9px 18px', display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }} onClick={onToggle}>
           <div onClick={(e) => { e.stopPropagation(); onSel() }} style={{ width: 14, height: 14, borderRadius: 4, border: sel ? 'none' : '2px solid var(--glass-border)', background: sel ? 'var(--accent)' : 'transparent', flex: 'none', display: 'grid', placeItems: 'center' }}>{sel && <Check size={10} color="#fff" />}</div>
-          <div style={{ width: 30, height: 30, borderRadius: 7, overflow: 'hidden', background: 'rgba(255,255,255,.06)', flex: 'none' }}>{p.itens[0]?.imagem && <img src={p.itens[0].imagem} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}</div>
-          <b style={{ fontSize: 11, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.titulo}</b>
-          {chip(estado, estadoCor === 'var(--ok)' || estadoCor === 'var(--danger)' ? '#1a1008' : '#fff', estadoCor)}
-          {p.taxas != null && <span className="num" style={{ fontSize: 8.5, color: 'var(--warn)' }}>tx − {brl(p.taxas)}</span>}
+          <span className="canal-bdg" style={{ background: d.cor, color: canal === 'ml' ? '#1a1008' : '#fff' }}>{canal === 'ml' ? 'ML' : 'SP'}</span>
+          <b className="num" style={{ fontSize: 10, flex: 'none' }}>#{String(p.id).slice(-8)}</b>
+          <span style={{ fontSize: 9.5, color: 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 130 }}>{p.comprador}</span>
+          <span className="chip" style={{ color: titCor, background: 'rgba(255,255,255,.06)' }}>{m.tit.split('·')[0].trim().toUpperCase().slice(0, 26)}</span>
+          <span className="num" style={{ fontSize: 8.5, color: env[1] }}>{env[0]}</span>
+          <span style={{ flex: 1, minWidth: 0, fontSize: 9, color: 'var(--faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.titulo}</span>
           {p.liquido != null && <span className="num" style={{ fontSize: 8.5, color: 'var(--ok)' }}>sobra {brl(p.liquido)}{p.margem != null ? ` · ${Math.round(p.margem)}%` : ''}</span>}
           <b className="num" style={{ fontSize: 12, flex: 'none' }}>{brl(p.receita)}</b>
         </div>
@@ -922,45 +1017,59 @@ function UltraCard({ p, d, canal, exp, densidade, onToggle, sel, onSel, baixarEt
   }
 
   return (
-    <div className={`card glass ${exp ? 'exp' : ''}`} style={{ padding: 0 }}>
+    <div className={`card glass ${exp ? 'ativo' : ''}`} style={{ padding: 0 }}>
       <div className="rail" style={{ background: rail }} />
-      <div style={{ padding: '12px 15px 12px 19px', cursor: 'pointer' }} onClick={onToggle}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
-          <div onClick={(e) => { e.stopPropagation(); onSel() }} style={{ width: 16, height: 16, borderRadius: 4, border: sel ? 'none' : '2px solid var(--glass-border)', background: sel ? 'var(--accent)' : 'transparent', flex: 'none', display: 'grid', placeItems: 'center' }}>{sel && <Check size={11} color="#fff" />}</div>
-          <div style={{ width: 48, height: 48, borderRadius: 10, overflow: 'hidden', background: 'linear-gradient(135deg,#4a2a3a,#3a2530)', flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            {p.itens[0]?.imagem ? <img src={p.itens[0].imagem} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Box size={19} style={{ color: 'rgba(255,255,255,.55)' }} />}
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-              <b style={{ fontSize: 12.5 }}>{p.titulo}</b>
-              <span className="chip" style={{ fontSize: 7.5, color: 'var(--faint)', background: 'rgba(255,255,255,.05)' }}>{p.qtd} un</span>
-              {(p.compras || 0) > 1 && chip(`${p.compras}ª COMPRA`, '#1a1008', 'var(--gold, #F2C200)')}
-              {p.isFull && chip('FULL · ML EXPEDE', '#1a1008', 'var(--teal, #2dd4bf)')}
-              {p.itens.length > 1 && chip(`${p.itens.length} PRODUTOS`, '#e9dbfb', 'rgba(160,107,232,.3)')}
-              {!p.nf && !p.nfDesconhecida && !p.cancelado && chip('SEM NF-E', '#fff', 'var(--danger)')}
-              {p.prejuizo && chip('PREJUÍZO', '#fff', 'var(--danger)')}
-              {!p.prejuizo && p.abaixoMeta && chip('ABAIXO DA META', '#1a1008', 'var(--warn)')}
-            </div>
-            <div style={{ fontSize: 9, color: 'var(--faint)', marginTop: 3 }}>#{p.id} · {p.criado ? new Date(p.criado).toLocaleDateString('pt-BR') : '—'} · {p.comprador} · <span style={{ color: 'var(--dim)' }}>{p.itens[0]?.sku || ''}</span></div>
-          </div>
+      <div style={{ cursor: 'pointer' }} onClick={onToggle}>
+        {/* cabeçalho do PEDIDO */}
+        <div style={{ padding: '10px 15px 8px 19px', display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
+          <div onClick={(e) => { e.stopPropagation(); onSel() }} style={{ width: 15, height: 15, borderRadius: 4, border: sel ? 'none' : '2px solid var(--glass-border)', background: sel ? 'var(--accent)' : 'transparent', flex: 'none', display: 'grid', placeItems: 'center' }}>{sel && <Check size={10} color="#fff" />}</div>
+          <span className="canal-bdg" style={{ background: d.cor, color: canal === 'ml' ? '#1a1008' : '#fff' }}>{canal === 'ml' ? 'ML' : 'SP'}</span>
+          <b className="num" style={{ fontSize: 11 }}>#{p.id}</b>
+          {p.packId && chip('PACK · COMPRA ÚNICA', '#e9dbfb', 'rgba(160,107,232,.28)')}
+          <span className="num" style={{ fontSize: 9, color: 'var(--faint)' }}>{dataTxt}</span>
+          <span style={{ fontSize: 10, color: 'var(--dim)' }}>para <b style={{ color: 'var(--fg)' }}>{p.clienteReal || p.comprador}</b></span>
+          {(p.compras || 0) > 1 && chip(`${p.compras}ª COMPRA`, '#1a1008', 'var(--gold, #F2C200)')}
+          {p.isFull && chip('FULL · ML EXPEDE', '#1a1008', 'var(--teal, #2dd4bf)')}
+          {p.itens.length > 1 && chip(`${p.itens.length} PRODUTOS`, '#e9dbfb', 'rgba(160,107,232,.3)')}
+          {p.prejuizo && chip('PREJUÍZO', '#fff', 'var(--danger)')}
+          {!p.prejuizo && p.abaixoMeta && chip('ABAIXO DA META', '#1a1008', 'var(--warn)')}
+          <div style={{ flex: 1 }} />
           <div style={{ textAlign: 'right', flex: 'none' }}>
             <div className="up" style={{ fontSize: 7, color: 'var(--faint)' }}>Vendido</div>
-            <b className="num serif" style={{ fontSize: 16 }}>{brl(p.receita)}</b>
+            <b className="num serif" style={{ fontSize: 15 }}>{brl(p.receita)}</b>
           </div>
-          <div style={{ flex: 'none', color: 'var(--faint)', transform: exp ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}><ChevronRight size={18} /></div>
+          <div style={{ flex: 'none', color: 'var(--faint)', transform: exp ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}><ChevronRight size={16} /></div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '10px 0', flexWrap: 'wrap', padding: '8px 11px', borderRadius: 11, background: 'rgba(0,0,0,.18)' }}>
-          {chip(estado, estadoCor === 'var(--ok)' || estadoCor === 'var(--danger)' ? '#1a1008' : '#fff', estadoCor)}
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9, color: contaCor }}><Clock size={10} />{conta}</span>
-          <div style={{ flex: 1 }} />
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9, color: 'var(--dim)' }}><CreditCard size={10} />{p.pago ? 'pago' : 'aguardando pagamento'}</span>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9, color: p.nf ? 'var(--ok)' : 'var(--danger)' }}><FileText size={10} />{p.nf ? 'NF-e emitida' : 'NF-e pendente'}</span>
+        {/* MANCHETE DE AÇÃO — o que fazer agora, direto do substatus real */}
+        <div className={`acao ${m.cls}`}>
+          <div style={{ flex: 1, minWidth: 170 }}>
+            <div className="tit">{m.tit}</div>
+            <div className="sub">{m.sub}</div>
+          </div>
+          {m.acao && (
+            <div className={`btn ${m.acao === 'bling' ? 'primary' : m.acao === 'etiqueta' ? 'okb' : ''}`} style={{ fontSize: 10 }} onClick={agir}>
+              {m.acao === 'bling' ? <FileText size={12} color="#1a1008" /> : m.acao === 'etiqueta' ? <Tag size={12} /> : m.acao === 'canal' ? <Truck size={12} /> : <Eye size={12} />}
+              {m.label}
+            </div>
+          )}
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8 }}>
-          <KpiMini lab="Vendido" val={brl(p.receita)} sub={p.alvo ? `alvo Bling ${brl(p.alvo)}` : ''} cor="var(--fg)" />
-          <KpiMini lab="Taxas mkt" val={p.taxas != null ? `− ${brl(p.taxas)}` : '—'} cor="var(--warn)" />
-          <KpiMini lab={d.freteRot} val={p.frete != null ? (p.frete ? `− ${brl(p.frete)}` : 'sem custo') : '—'} cor="var(--warn)" />
-          <KpiMiniMargem val={brl(p.liquido)} m={p.margem != null ? Math.round(p.margem) : null} />
+        {/* STRIP operacional: quando enviar · destino · NF-e · sobra */}
+        <div className="strip2">
+          <div className="cell"><div className="l up">Enviar em</div><b style={{ color: env[1] }}>{env[0]}</b></div>
+          <div className="cell"><div className="l up">Destino</div><b className="num">{p.cidade ? `${p.cidade}${p.uf ? `/${p.uf}` : ''}` : (p.uf || 'buscando…')}</b></div>
+          <div className="cell"><div className="l up">NF-e</div><b className="num" style={{ color: nfCor }}>{nfTxt}</b></div>
+          {p.rastreio && <div className="cell"><div className="l up">Rastreio</div><b className="num">{p.rastreio}</b></div>}
+          <div className="cell"><div className="l up">Sobra</div><b className="num" style={{ color: 'var(--ok)' }}>{p.liquido != null ? `${brl(p.liquido)}${p.margem != null ? ` · ${Math.round(p.margem)}%` : ''}` : '—'}</b></div>
+        </div>
+        {/* produtos em uma linha — preço e tarifa por item ficam no painel */}
+        <div style={{ padding: '6px 15px 10px 19px', display: 'flex', alignItems: 'center', gap: 9 }}>
+          {p.itens.slice(0, 3).map((it, i) => (
+            <div key={i} style={{ width: 30, height: 30, borderRadius: 7, overflow: 'hidden', background: 'linear-gradient(135deg,#4a2a3a,#3a2530)', flex: 'none' }}>{it.imagem && <img src={it.imagem} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}</div>
+          ))}
+          <span style={{ fontSize: 9.5, color: 'var(--dim)', flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {p.itens.length > 1 ? `${p.itens.length} produtos · ` : ''}{p.titulo} <span style={{ color: 'var(--faint)' }}>· {p.qtd} un</span>
+          </span>
+          <span style={{ fontSize: 8, color: 'var(--faint)', flex: 'none' }}>{exp ? 'preço e tarifa por item ao lado →' : 'preço e tarifa por item no painel →'}</span>
         </div>
       </div>
     </div>
@@ -1074,13 +1183,22 @@ function UltraExpand({ p, d, canal, baixarEtiqueta, notify, agoraTs }) {
             </div>
           </div>
           <div className="blk">
-            <h4 style={{ color: d.cor }}><Box size={12} style={{ color: d.cor }} />Produtos</h4>
-            {p.itens.map((it, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: i < p.itens.length - 1 ? 7 : 0 }}>
+            <h4 style={{ color: d.cor }}><Box size={12} style={{ color: d.cor }} />Produtos · preço e tarifa por item</h4>
+            {rateiaItens(p).map((it, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0', borderTop: i ? '1px dashed rgba(255,255,255,.07)' : 'none' }}>
                 <div style={{ width: 38, height: 38, borderRadius: 8, overflow: 'hidden', background: 'linear-gradient(135deg,#4a2a3a,#3a2530)', flex: 'none' }}>{it.imagem && <img src={it.imagem} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}</div>
-                <div style={{ flex: 1 }}><div style={{ fontSize: 10, fontWeight: 600 }}>{it.nome}</div><div className="num" style={{ fontSize: 7.5, color: 'var(--faint)' }}>{[it.sku, `${it.qtd} un`, it.bin ? `bin ${it.bin}` : ''].filter(Boolean).join(' · ')}</div></div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.nome}</div>
+                  <div className="num" style={{ fontSize: 7.5, color: 'var(--faint)' }}>{[it.sku, `${it.qtd} un`, it.bin ? `bin ${it.bin}` : ''].filter(Boolean).join(' · ')}</div>
+                  {(it.tx != null || it.liq != null) && <span className="fee-bdg">{it.tx != null ? `tarifa − ${brl(it.tx)}` : ''}{it.tx != null && it.liq != null ? ' · ' : ''}{it.liq != null ? <span style={{ color: 'var(--ok)' }}>líquido {brl(it.liq)}</span> : null}</span>}
+                </div>
+                <div style={{ textAlign: 'right', flex: 'none' }}>
+                  <b className="num" style={{ fontSize: 10.5 }}>{brl(it.val)}</b>
+                  {it.qtd > 1 && it.val != null && <div className="num" style={{ fontSize: 7, color: 'var(--faint)' }}>{brl(it.val / it.qtd)} / un</div>}
+                </div>
               </div>
             ))}
+            {p.itens.length > 1 && p.taxas != null && <div style={{ fontSize: 6.5, color: 'var(--faint)', marginTop: 5 }}>tarifa rateada por item proporcional ao valor (estimativa) · o total do pedido é o billing real</div>}
           </div>
           <div className="blk">
             <h4 style={{ color: p.nf ? d.cor : 'var(--danger)' }}><FileText size={12} style={{ color: p.nf ? d.cor : 'var(--danger)' }} />Nota fiscal</h4>

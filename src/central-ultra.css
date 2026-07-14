@@ -68,3 +68,41 @@
   .pcuv2 .scanbox{display:flex;align-items:center;gap:10px;background:rgba(0,0,0,.3);border:2px solid var(--ch);border-radius:13px;padding:13px 16px}
 
 .pcuv2 .toggle.on .sw{background:rgba(47,217,141,.45)}
+
+/* ═══ v3 · card pedido-cêntrico + painel inline em split (contrato pedidos_central_ultra_v3.html) ═══ */
+.pcuv2 .card.ativo{border-color:rgba(242,194,0,.7);box-shadow:0 0 0 1px rgba(242,194,0,.3),0 10px 28px rgba(0,0,0,.35)}
+.pcuv2 .canal-bdg{font-size:8px;font-weight:900;letter-spacing:.06em;padding:3px 7px;border-radius:6px;flex:none}
+.pcuv2 .acao{display:flex;align-items:center;gap:12px;padding:9px 15px 9px 19px;border-top:1px solid rgba(255,255,255,.05);border-bottom:1px solid rgba(255,255,255,.05);flex-wrap:wrap}
+.pcuv2 .acao .tit{font-size:12.5px;font-weight:800}
+.pcuv2 .acao .sub{font-size:8.5px;color:var(--faint)}
+.pcuv2 .acao.a-nf{background:linear-gradient(90deg,rgba(224,162,60,.10),transparent 70%)}
+.pcuv2 .acao.a-nf .tit{color:#ffcf7d}
+.pcuv2 .acao.a-etq{background:linear-gradient(90deg,rgba(47,217,141,.10),transparent 70%)}
+.pcuv2 .acao.a-etq .tit{color:var(--ok)}
+.pcuv2 .acao.a-buf{background:linear-gradient(90deg,rgba(91,141,239,.10),transparent 70%)}
+.pcuv2 .acao.a-buf .tit{color:#9cc8ff}
+.pcuv2 .acao.a-tra{background:linear-gradient(90deg,rgba(91,141,239,.08),transparent 70%)}
+.pcuv2 .acao.a-tra .tit{color:#9cc8ff}
+.pcuv2 .acao.a-fis{background:linear-gradient(90deg,rgba(255,84,112,.12),transparent 70%)}
+.pcuv2 .acao.a-fis .tit{color:#ffb8c5}
+.pcuv2 .btn.okb{background:rgba(47,217,141,.14);border-color:rgba(47,217,141,.4);color:var(--ok)}
+.pcuv2 .strip2{display:flex;padding:8px 15px 9px 19px;flex-wrap:wrap;align-items:center}
+.pcuv2 .strip2 .cell{padding:2px 13px 2px 0;margin-right:13px;border-right:1px dashed rgba(255,255,255,.09)}
+.pcuv2 .strip2 .cell:last-child{border-right:none;margin-right:0}
+.pcuv2 .strip2 .l{font-size:6.5px;color:var(--faint)}
+.pcuv2 .strip2 b{font-size:10px}
+.pcuv2 .grp-col{display:flex;align-items:center;gap:10px;margin:14px 0 9px;padding:9px 13px;border-radius:12px;background:linear-gradient(90deg,rgba(242,194,0,.10),transparent 65%);border:1px solid rgba(242,194,0,.28)}
+.pcuv2 .grp-col:first-child{margin-top:0}
+.pcuv2 .grp-col.fut{background:linear-gradient(90deg,rgba(91,141,239,.08),transparent 65%);border-color:rgba(91,141,239,.25)}
+.pcuv2 .grp-col.tra{background:linear-gradient(90deg,rgba(160,107,232,.08),transparent 65%);border-color:rgba(160,107,232,.25)}
+.pcuv2 .grp-col .t{font-size:12px;font-weight:800}
+.pcuv2 .grp-col .s{font-size:8px;color:var(--faint)}
+.pcuv2 .split{display:grid;grid-template-columns:minmax(0,1fr);gap:13px;align-items:start}
+.pcuv2 .split.aberto{grid-template-columns:minmax(0,1fr) minmax(420px,460px)}
+@media (max-width:1200px){.pcuv2 .split.aberto{grid-template-columns:minmax(0,1fr) minmax(370px,400px)}}
+@media (max-width:900px){.pcuv2 .split.aberto{grid-template-columns:1fr}.pcuv2 .painel{position:fixed;inset:auto 0 0 0;top:8vh;max-height:92vh;z-index:55;border-radius:16px 16px 0 0}}
+.pcuv2 .painel{position:sticky;top:10px;max-height:calc(100vh - 46px);overflow:auto;border-radius:16px;background:var(--surface,#1d0f16);border:1px solid rgba(242,194,0,.35);box-shadow:0 12px 44px rgba(0,0,0,.45)}
+.pcuv2 .painel::-webkit-scrollbar{width:8px}
+.pcuv2 .painel::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:99px}
+.pcuv2 .p-hd{position:sticky;top:0;z-index:5;background:var(--surface,#1d0f16);padding:12px 14px 10px;border-bottom:1px solid var(--glass-border);display:flex;gap:10px;align-items:flex-start}
+.pcuv2 .fee-bdg{display:inline-flex;align-items:center;gap:4px;font-size:7.5px;font-weight:700;padding:2px 7px;border-radius:99px;background:rgba(224,162,60,.10);border:1px solid rgba(224,162,60,.3);color:#ffcf7d;flex:none;white-space:nowrap;margin-top:3px}
