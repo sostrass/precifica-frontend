@@ -244,7 +244,7 @@ export default function CentralPedidosUltra() {
   const cargaEmCurso = useRef(null)
   const fundoRef = useRef(null)
   const idsRef = useRef(new Set())
-  const PCU_BUILD = 'v3.9 · 14/07'
+  const PCU_BUILD = 'v4.0 · 15/07'
 const POR_PAG = 10
   const d = CH[canal]
 
