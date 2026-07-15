@@ -244,7 +244,7 @@ export default function CentralPedidosUltra() {
   const cargaEmCurso = useRef(null)
   const fundoRef = useRef(null)
   const idsRef = useRef(new Set())
-  const PCU_BUILD = 'v4.0 · 15/07'
+  const PCU_BUILD = 'v4.5 · 15/07'
 const POR_PAG = 10
   const d = CH[canal]
 
@@ -267,9 +267,12 @@ const POR_PAG = 10
         // 1ª leva instantânea para a tela não esperar (com timeout — nunca pendura o loading)
         let d1
         try { d1 = await comTimeout(api.mlPedidosEnriquecido('', 0, 25, desdeIso, ateIso), 30000) }
-        catch (e) { if (g !== geracao.current) return; setErro('Não consegui falar com o servidor agora. Recarregue a página.'); setPedidos([]); return }
+        catch (e) {
+          if (g !== geracao.current) return
+          if (!silencioso) { setErro('Não consegui falar com o servidor agora. Recarregue a página.'); setPedidos((prev) => (prev && prev.length ? prev : [])) }
+          return   // no poll silencioso: falhou, mantém a lista atual intacta
+        }
         if (g !== geracao.current) return
-        if (d1 && (d1.pedidos || []).length) { setPedidos(agrupaPacksML((d1.pedidos || []).map(adaptaML))) }
         try { console.log('[PCU] 1a leva:', (d1?.pedidos || []).length, 'pedidos · sync:', d1?.paging?.sync) } catch (_) {}
         let d1v = d1 || { pedidos: [], paging: {} }
         let acumulado = (d1v.pedidos || []).map(adaptaML)
@@ -301,25 +304,39 @@ const POR_PAG = 10
           } else setPedidos(agrupados)
           arr.forEach((p) => idsRef.current.add(p.id))
         }
+        // publica a 1ª leva: no poll silencioso faz MERGE (nunca reduz a lista); na carga real, mostra já
+        if (acumulado.length) publicar(acumulado)
         // ARQUITETURA DE BANCO: uma leitura ampla do banco (instantânea) + acompanhamento
         // incremental enquanto a varredura de fundo grava. Fim da paginação client-side (Plano A/B),
         // que multiplicava chamadas de 60s e causava cargas de 1h.
         const totalInformado = d1s.paging?.total ?? acumulado.length
-        const teto = Math.min(Math.max(totalInformado, 100), 400)
+        const teto = Math.min(Math.max(totalInformado, 100), 600)
         if (!silencioso) {
-          setFundo({ carregados: acumulado.length, total: teto, fase: "carregando pedidos" })
-          let amplo = null
-          try { amplo = await comTimeout(api.mlPedidosEnriquecido("", 0, teto, desdeIso, ateIso), 90000) } catch (_) { amplo = null }
-          if (g !== geracao.current) return
-          if (amplo && (amplo.pedidos || []).length) {
-            acumulado = agrupaPacksML((amplo.pedidos || []).map(adaptaML))
+          // Leitura em BLOCOS de 150 (o backend lê do banco: cada bloco custa milissegundos).
+          // Evita uma resposta única gigante (que falhava calada) e publica o progresso a cada bloco.
+          const BL = 150
+          const porId = new Map(acumulado.map((p) => [p.id, p]))
+          let falhou = null
+          for (let off = 0; off < teto; off += BL) {
+            setFundo({ carregados: porId.size, total: teto, fase: 'carregando pedidos' })
+            let bloco = null
+            try { bloco = await comTimeout(api.mlPedidosEnriquecido('', off, BL, desdeIso, ateIso), 60000) }
+            catch (e) { falhou = e; try { console.error('[PCU] bloco', off, 'FALHOU:', e?.message || e) } catch (_) {} ; break }
+            if (g !== geracao.current) return
+            const lote = (bloco?.pedidos || []).map(adaptaML)
+            try { console.log('[PCU] bloco', off, '->', lote.length, 'pedidos · total:', bloco?.paging?.total) } catch (_) {}
+            if (!lote.length) break
+            for (const p of lote) porId.set(p.id, p)
+            acumulado = [...porId.values()]
             publicar(acumulado)
-            d1s = amplo
+            if (bloco?.paging?.total) d1s = bloco
+            if (lote.length < BL) break
           }
-          setFundo({ carregados: acumulado.length, total: Math.max(teto, acumulado.length), fase: "consultando NF-e no Bling" })
+          if (falhou && porId.size <= 25) setErro(`Carreguei só ${porId.size} pedidos — o servidor recusou o resto (${falhou.message || falhou}). Tente recarregar.`)
+          setFundo({ carregados: acumulado.length, total: Math.max(teto, acumulado.length), fase: 'consultando NF-e no Bling' })
           await nfeStatusML(acumulado, g)
           if (g !== geracao.current) return
-          setFundo({ carregados: acumulado.length, total: acumulado.length, fase: "sincronizando envios" })
+          setFundo({ carregados: acumulado.length, total: acumulado.length, fase: 'sincronizando envios' })
           await sincronizarEnviosML(acumulado, g, desdeIso, ateIso)
           if (g !== geracao.current) return
           setFundo(null); setUltimaSync(Date.now())
@@ -546,7 +563,9 @@ const POR_PAG = 10
         setPedidos((prev) => {
           if (!prev) return agrupados
           const antigos = new Map(prev.map((p) => [p.id, p]))
-          return agrupados.map((n) => { const a = antigos.get(n.id); return a ? { ...n, nf: n.nf || a.nf, nfDesconhecida: n.nfDesconhecida && a.nfDesconhecida, nfInfo: n.nfInfo || a.nfInfo, uf: n.uf || a.uf, cidade: n.cidade || a.cidade, shipBy: n.shipBy || a.shipBy, rastreio: n.rastreio || a.rastreio } : n })
+          const atualizados = agrupados.map((n) => { const a = antigos.get(n.id); return a ? { ...n, nf: n.nf || a.nf, nfDesconhecida: n.nfDesconhecida && a.nfDesconhecida, nfInfo: n.nfInfo || a.nfInfo, uf: n.uf || a.uf, cidade: n.cidade || a.cidade, shipBy: n.shipBy || a.shipBy, rastreio: n.rastreio || a.rastreio } : n })
+          const ids = new Set(atualizados.map((p) => p.id))
+          return atualizados.concat(prev.filter((p) => !ids.has(p.id)))   // NUNCA encolhe: mantém o que não voltou
         })
         arr2.forEach((p) => idsRef.current.add(p.id))
       }
@@ -559,10 +578,13 @@ const POR_PAG = 10
       const ids = grupos.flatMap((p) => p.orderIds || [p.id])
       const donoDe = new Map()
       for (const gpo of grupos) for (const oid of (gpo.orderIds || [gpo.id])) donoDe.set(oid, gpo.id)
-      for (let i = 0; i < ids.length; i += 150) {
+      for (let i = 0; i < ids.length; i += 60) {
         if (g !== geracao.current) return
-        const slice = ids.slice(i, i + 150)
-        const r = await comTimeout(api.mlNfeStatus(slice), 30000)
+        const slice = ids.slice(i, i + 60)
+        // lote pequeno + timeout folgado + erro ISOLADO: um lote lento não deixa os outros em "consultando"
+        let r = null
+        try { r = await comTimeout(api.mlNfeStatus(slice), 60000) }
+        catch (e) { try { console.warn('[PCU] NF-e lote', i, 'falhou:', e?.message || e) } catch (_) {} ; continue }
         const mapa = r?.mapa || {}
         const consultados = new Set(slice)
         const notaDoCard = new Map()
