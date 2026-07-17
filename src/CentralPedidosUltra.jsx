@@ -339,7 +339,7 @@ export default function CentralPedidosUltra() {
   const cargaEmCurso = useRef(null)
   const fundoRef = useRef(null)
   const idsRef = useRef(new Set())
-  const PCU_BUILD = 'v5.1 · 17/07'
+  const PCU_BUILD = 'v5.2 · 17/07'
 const POR_PAG = 10
   const d = CH[canal]
 
@@ -474,6 +474,7 @@ const POR_PAG = 10
             return novos.concat(prev.filter((p) => !ids.has(p.id)))
           })
         } else { setPedidos(arr); setFundo(null); setUltimaSync(Date.now()) }
+        desmascararShopee(arr, g)   // nome/endereço/CPF reais em segundo plano
       }
     } catch (e) {
       if (!silencioso && g === geracao.current) {
@@ -517,6 +518,31 @@ const POR_PAG = 10
       if (!rodando) { setUltimaSync(Date.now()); backfillML(g); return }
     }
     setFundo(null)
+  }
+
+  // Shopee: dados do comprador SEM máscara. A Shopee libera nome/endereço/telefone/CPF
+  // nos status READY_TO_SHIP, PROCESSED e TO_RETURN — pedimos em segundo plano e
+  // preenchemos os cards conforme chega (nunca trava a lista).
+  const desmascararShopee = async (arr, g) => {
+    const alvos = (arr || []).filter((p) => p.canal === 'shopee' && !p.clienteReal
+      && /READY_TO_SHIP|PROCESSED|TO_RETURN/i.test(String(p.status || ''))).map((p) => p.id)
+    if (!alvos.length) return
+    for (let i = 0; i < alvos.length && g === geracao.current; i += 50) {
+      let r = null
+      try { r = await comTimeout(api.shopeeComprador(alvos.slice(i, i + 50)), 45000) }
+      catch (e) { try { console.warn('[PCU] comprador shopee lote', i, e?.message || e) } catch (_) {} ; continue }
+      if (g !== geracao.current) return
+      const mapa = r?.mapa || {}
+      const n = Object.values(mapa).filter((v) => v && v.desmascarado).length
+      try { console.log('[PCU] shopee comprador:', n, 'de', Object.keys(mapa).length, 'desmascarados') } catch (_) {}
+      setPedidos((prev) => prev ? prev.map((p) => {
+        const v = mapa[p.id]
+        if (!v || !v.desmascarado) return p
+        return { ...p, clienteReal: v.cliente || p.clienteReal, cpf: v.cpf || p.cpf, telefone: v.telefone || p.telefone,
+          cidade: v.endereco?.cidade || p.cidade, uf: v.endereco?.uf || p.uf,
+          endereco: { ...(p.endereco || {}), ...(v.endereco || {}) }, desmascarado: true }
+      }) : prev)
+    }
   }
 
   const backfillML = async (g) => {
@@ -1582,13 +1608,29 @@ function UltraExpand({ p, d, canal, baixarEtiqueta, notify, agoraTs }) {
           <div className="blk">
             <h4 style={{ color: d.cor }}><MapPin size={12} style={{ color: d.cor }} />Entrega</h4>
             {canal === 'shopee'
-              ? <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: 9, borderRadius: 9, background: 'rgba(224,162,60,.06)', border: '1px solid rgba(224,162,60,.25)' }}>
-                <Lock size={13} style={{ color: 'var(--warn)', flex: 'none' }} />
-                <div style={{ fontSize: 9, color: 'var(--dim)', lineHeight: 1.5 }}>
-                  {(p.clienteReal || p.cidade) && <div style={{ fontSize: 10, color: 'var(--fg)', marginBottom: 3 }}><b>{p.clienteReal || p.comprador}</b>{p.cidade ? ` · ${p.cidade}` : ''}{p.uf ? `/${p.uf}` : ''}{p.cep ? ` · ${p.cep}` : ''}</div>}
-                  <b style={{ color: 'var(--warn)' }}>Endereço completo mascarado pela Shopee.</b> A rua e o número saem apenas na <b>waybill oficial da SPX</b>, gerada no envio.{p.rastreio ? <> Rastreio: <span className="num">{p.rastreio}</span></> : null}
+              ? (p.desmascarado || p.endereco?.completo
+                // A Shopee libera os dados sem máscara em READY_TO_SHIP/PROCESSED/TO_RETURN
+                ? <div style={{ fontSize: 10, lineHeight: 1.65 }}>
+                  <b>{p.clienteReal || p.comprador}</b>
+                  {p.endereco?.completo && <><br />{p.endereco.completo}</>}
+                  {(p.endereco?.bairro || p.cidade || p.uf || p.endereco?.cep) && <><br />{[p.endereco?.bairro, p.cidade, p.uf].filter(Boolean).join(' · ')}{p.endereco?.cep ? ` · ${p.endereco.cep}` : ''}</>}
+                  {(p.telefone || p.cpf) && <div style={{ marginTop: 5, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {p.telefone && <span className="chip" style={{ color: 'var(--dim)', background: 'rgba(255,255,255,.06)' }}>TEL <span className="num">{p.telefone}</span></span>}
+                    {p.cpf && <span className="chip" style={{ color: 'var(--dim)', background: 'rgba(255,255,255,.06)' }}>CPF <span className="num">{p.cpf}</span></span>}
+                  </div>}
+                  <div style={{ marginTop: 5 }}><span className="chip" style={{ color: 'var(--ok)', background: 'rgba(47,217,141,.12)' }}><Check size={9} />DADOS LIBERADOS PELA SHOPEE</span></div>
+                  {p.rastreio && <div className="num" style={{ fontSize: 8.5, color: 'var(--faint)', marginTop: 4 }}>rastreio {p.rastreio}</div>}
                 </div>
-              </div>
+                : <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: 9, borderRadius: 9, background: 'rgba(224,162,60,.06)', border: '1px solid rgba(224,162,60,.25)' }}>
+                  <Lock size={13} style={{ color: 'var(--warn)', flex: 'none' }} />
+                  <div style={{ fontSize: 9, color: 'var(--dim)', lineHeight: 1.5 }}>
+                    {(p.clienteReal || p.cidade) && <div style={{ fontSize: 10, color: 'var(--fg)', marginBottom: 3 }}><b>{p.clienteReal || p.comprador}</b>{p.cidade ? ` · ${p.cidade}` : ''}{p.uf ? `/${p.uf}` : ''}</div>}
+                    {/READY_TO_SHIP|PROCESSED|TO_RETURN/i.test(String(p.status || ''))
+                      ? <><Loader2 size={9} className="animate-spin" /> buscando os dados liberados pela Shopee…</>
+                      : <><b style={{ color: 'var(--warn)' }}>Dados mascarados neste status.</b> A Shopee libera nome, endereço, telefone e CPF quando o pedido entra em <b>A Enviar</b> (READY_TO_SHIP).</>}
+                    {p.rastreio ? <> Rastreio: <span className="num">{p.rastreio}</span></> : null}
+                  </div>
+                </div>)
               : <div style={{ fontSize: 10, lineHeight: 1.65 }}>
                 {envio === undefined && <span style={{ color: 'var(--faint)', display: 'inline-flex', gap: 5, alignItems: 'center' }}><Loader2 size={10} className="animate-spin" />buscando o endereço do envio…</span>}
                 {envio !== undefined && <>

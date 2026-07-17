@@ -276,6 +276,8 @@ export const api = {
   shopeePedidosSeparacao: (status = 'A_ENVIAR', dias = 15) => req(`/api/shopee/pedidos/separacao?status=${status}&dias=${dias}`),
   shopeeEnriquecerImpressao: (order_sns, skus) => req('/api/shopee/pedidos/enriquecer-impressao', { method: 'POST', body: { order_sns, skus } }),
   // Etiqueta OFICIAL da Shopee (PDF binário) — não usa req() porque a resposta é um blob, não JSON
+  // dados do comprador Shopee SEM máscara (READY_TO_SHIP/PROCESSED/TO_RETURN)
+  shopeeComprador: (order_sns) => req('/api/shopee/comprador', { method: 'POST', body: JSON.stringify({ order_sns }) }),
   shopeeEtiquetaOficial: async (order_sns, tipo = 'auto') => {
     const headers = { 'Content-Type': 'application/json' }
     const t = getToken(); if (t) headers.Authorization = `Bearer ${t}`
