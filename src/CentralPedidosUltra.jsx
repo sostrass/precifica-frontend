@@ -163,11 +163,18 @@ function etapaDe(p, canal, agoraTs) {
   if (c === 'cancel' || p.devolucao) return 'pos'
   if (c === 'fim') return 'fim'
   if (c === 'transito') return 'transito'
-  // hoje / amanhã / programado pela DATA do prazo de despacho (igual ao painel do ML)
-  if (!p.shipBy) return 'hoje'                     // sem prazo conhecido: entra na fila de hoje
+  // O ML segura a etiqueta dos agendados (substatus buffered/dropped_off): são "Próximos dias",
+  // NUNCA "Sai hoje" — mesmo sem o prazo exato ter chegado do backfill ainda.
+  const sub = String(p.envioSubstatus || '')
+  const agendado = /buffered|dropped_off|delayed|waiting_for_withdrawal/i.test(sub)
+  if (!p.shipBy) {
+    if (agendado) return 'prog'                 // sem prazo + agendado = programado
+    if (p.isFull) return 'prog'                 // Full: o ML expede, não é da sua coleta
+    return 'hoje'                               // pré-despacho sem agendamento = fila de hoje
+  }
   const d0 = new Date(agoraTs || Date.now()); d0.setHours(0, 0, 0, 0)
   const dias = Math.floor((p.shipBy * 1000 - d0.getTime()) / 86400000)
-  if (dias <= 0) return 'hoje'
+  if (dias <= 0) return agendado && dias < 0 ? 'prog' : 'hoje'
   if (dias === 1) return 'amanha'
   return 'prog'
 }
@@ -244,16 +251,27 @@ function enviarEmDe(p, agoraTs) {
   if (p.cancelado) return ['—', 'var(--faint)']
   if (c === 'fim') return ['entregue', 'var(--ok)']
   if (c === 'transito') return ['já enviado', 'var(--dim)']
-  if (!p.nf && !p.nfDesconhecida) return ['bloqueado pela NF-e', 'var(--danger)']
-  if (!p.shipBy) return ['a definir pelo canal', 'var(--faint)']
+  const sub = String(p.envioSubstatus || '')
+  const agendado = /buffered|dropped_off|delayed|waiting_for_withdrawal/i.test(sub)
+  if (!p.nf && !p.nfDesconhecida && !agendado) return ['bloqueado pela NF-e', 'var(--danger)']
+  if (!p.shipBy) {
+    // sem o prazo exato: diz o que se sabe pelo canal, sem fingir que é hoje
+    if (agendado) return ['coleta agendada · aguardando data', '#9cc8ff']
+    if (p.isFull) return ['Full · o ML expede', '#2dd4bf']
+    return ['prazo chegando do canal…', 'var(--faint)']
+  }
   const sb = p.shipBy * 1000
-  const hh = new Date(sb).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-  if (sb < agoraTs) return [`ATRASADO · era ${new Date(sb).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}`, 'var(--danger)']
+  const dt = new Date(sb)
+  const hh = dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+  const dia = dt.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+  if (sb < agoraTs && !agendado) return [`ATRASADO · era ${dia}`, 'var(--danger)']
   const d0 = new Date(agoraTs); d0.setHours(0, 0, 0, 0)
   const dias = Math.floor((sb - d0.getTime()) / 86400000)
   if (dias === 0) return [`HOJE · até ${hh}`, 'var(--warn)']
-  if (dias === 1) return [`AMANHÃ · até ${hh}`, '#9cc8ff']
-  return [`${new Date(sb).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} · até ${hh}`, '#9cc8ff']
+  if (dias === 1) return [`AMANHÃ · ${dia} até ${hh}`, '#9cc8ff']
+  // igual ao ML real: "coleta do dia 20/07"
+  const semana = dt.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', '')
+  return [`COLETA ${semana} ${dia}`, '#e9dbfb']
 }
 function rateiaItens(p) {
   const its = p.itens || []
@@ -321,7 +339,7 @@ export default function CentralPedidosUltra() {
   const cargaEmCurso = useRef(null)
   const fundoRef = useRef(null)
   const idsRef = useRef(new Set())
-  const PCU_BUILD = 'v5.0 · 16/07'
+  const PCU_BUILD = 'v5.1 · 17/07'
 const POR_PAG = 10
   const d = CH[canal]
 
@@ -421,18 +439,41 @@ const POR_PAG = 10
           if (d1s.paging?.sync?.rodando) acompanharSyncServidor(g, desdeIso, ateIso, teto)
         }
       } else {
-        let r
-        try { r = await api.shopeePedidosPainel('TODOS', dias, { page: 1, page_size: 50 }) }
-        catch (_) { r = await api.shopeePedidosPainel('A_ENVIAR', dias, { page: 1, page_size: 50 }) }
+        // PAGINAR: uma página só (50) cortava a lista — por isso "Enviado 0" e "A Enviar" incompleto.
+        // O Seller Center tem centenas; buscamos em páginas até acabar.
+        let arr = []
+        const vistos = new Set()
+        for (let pg = 1; pg <= 12 && g === geracao.current; pg++) {
+          let r = null
+          try { r = await comTimeout(api.shopeePedidosPainel('TODOS', dias, { page: pg, page_size: 50 }), 60000) }
+          catch (_) {
+            if (pg === 1) { try { r = await comTimeout(api.shopeePedidosPainel('A_ENVIAR', dias, { page: 1, page_size: 50 }), 60000) } catch (__) { r = null } }
+            if (!r) break
+          }
+          if (g !== geracao.current) return
+          const lote = (r?.pedidos || []).map(adaptaShopee).filter((p) => !vistos.has(p.id))
+          try { console.log('[PCU] shopee pág', pg, '->', lote.length, 'pedidos') } catch (_) {}
+          if (!lote.length) break
+          lote.forEach((p) => vistos.add(p.id))
+          arr = arr.concat(lote)
+          if (!silencioso) { setPedidos(arr.slice()); setFundo({ carregados: arr.length, total: arr.length, fase: 'carregando pedidos' }) }
+          if ((r?.pedidos || []).length < 50) break
+        }
         if (g !== geracao.current) return
-        const arr = (r.pedidos || []).map(adaptaShopee)
         if (silencioso) {
           const chegaram = arr.filter((p) => !idsRef.current.has(p.id)).length
           if (chegaram > 0) setNovos((n) => n + chegaram)
         }
         arr.forEach((p) => idsRef.current.add(p.id))
-        setPedidos(arr)
-        if (!silencioso) setUltimaSync(Date.now())
+        if (silencioso) {
+          setPedidos((prev) => {   // poll: NUNCA encolhe a lista
+            if (!prev) return arr
+            const antigos = new Map(prev.map((p) => [p.id, p]))
+            const novos = arr.map((n) => { const a = antigos.get(n.id); return a ? { ...n, nf: n.nf || a.nf, nfInfo: n.nfInfo || a.nfInfo } : n })
+            const ids = new Set(novos.map((p) => p.id))
+            return novos.concat(prev.filter((p) => !ids.has(p.id)))
+          })
+        } else { setPedidos(arr); setFundo(null); setUltimaSync(Date.now()) }
       }
     } catch (e) {
       if (!silencioso && g === geracao.current) {
@@ -1221,7 +1262,12 @@ const POR_PAG = 10
               baixarEtiqueta={() => baixarEtiquetas(p.id)} agoraTs={agoraTs} notify={notify} />
             const acaoLote = (k, its) => {
               const ids = its.map((x) => x.id)
-              if (k === 'nfe') { if (canal === 'ml') window.open('https://www.bling.com.br/vendas.php', '_blank'); else notify(`${ids.length} pedido(s) aguardando upload da NF-e na Shopee.`, 'warn'); return }
+              if (k === 'nfe') {
+                setSel(new Set(ids))   // já deixa os que precisam de nota selecionados
+                if (canal === 'ml') { window.open('https://www.bling.com.br/vendas.php', '_blank'); notify(`${ids.length} pedido(s) sem NF-e selecionados — emita no Bling e volte: o painel destrava sozinho.`, 'ok') }
+                else notify(`${ids.length} pedido(s) selecionados para upload da NF-e na Shopee.`, 'warn')
+                return
+              }
               if (k === 'etiqueta' || k === 'organizar' || k === 'urgente') { setSel(new Set(ids)); baixarEtiquetas(ids); return }
               setSel(new Set(ids)); notify(`${ids.length} pedido(s) selecionados.`, 'ok')
             }
