@@ -181,9 +181,13 @@ function etapaDe(p, canal, agoraTs) {
 function filaDe(p, canal, agoraTs) {
   if (p.fraude) return 'risco'
   if (canal === 'shopee') {
-    if (!p.nf && !p.nfDesconhecida) return 'nfe'      // NF-e pendente de upload
-    if (horasPrazo(p, agoraTs) <= 12) return 'urgente' // risco de CANCELAMENTO AUTOMÁTICO
-    return 'organizar'
+    const st = String(p.status || '')
+    if (!p.nf && !p.nfDesconhecida) return 'nfe'          // NF-e pendente de upload
+    if (horasPrazo(p, agoraTs) <= 12) return 'urgente'    // risco de CANCELAMENTO AUTOMÁTICO
+    // Seller Center: "Em aberto" = envio NÃO organizado (READY_TO_SHIP) · precisa Organizar Envio
+    //                "Concluído" = envio organizado (PROCESSED) · só imprimir e despachar
+    if (/READY_TO_SHIP/i.test(st) && !p.rastreio) return 'organizar'
+    return 'etiqueta'
   }
   if (/invoice_pending|waiting_for_invoice/i.test(String(p.envioSubstatus || '')) && !p.nf) return 'nfe'
   if (!p.nf && !p.nfDesconhecida) return 'nfe'
@@ -202,7 +206,10 @@ const FILAS_SP = [
   ['urgente', 'f-fis', AlertTriangle, '#ffb8c5', 'Vence em menos de 12h · cancelamento automático', 'a Shopee cancela sozinha e a venda some — despache estes primeiro', 'Some hoje', 'Organizar envio', ''],
   ['nfe', 'f-nf', FileText, '#ffcf7d', 'Enviar NF-e à Shopee', 'faça o upload da nota — sem ela o envio não é liberado', 'Travado', 'Upload de NF-e', 'primary'],
   ['risco', 'f-fis', ShieldCheck, '#ffb8c5', 'Risco de fraude · não despache', 'revise antes de organizar o envio', 'Em risco', 'Revisar', ''],
-  ['organizar', 'f-ok', Truck, 'var(--ok)', 'Prontos para organizar envio', 'NF-e ok e prazo folgado — imprima a etiqueta SPX e despache', 'Liberado', 'Envio em massa', 'ok'],
+  // "Em aberto" no Seller Center: o envio ainda NÃO foi organizado (sem rastreio)
+  ['organizar', 'f-fut', Truck, '#9cc8ff', 'Organizar envio · ainda sem etiqueta', 'a Shopee espera você escolher a logística — só depois a etiqueta existe', 'Em aberto', 'Envio em massa', ''],
+  // "Concluído" no Seller Center: envio organizado, etiqueta e rastreio prontos
+  ['etiqueta', 'f-ok', Printer, 'var(--ok)', 'Etiqueta pronta · imprimir e despachar', 'envio organizado e rastreio gerado — só imprimir e deixar na coleta', 'Liberado', 'Imprimir etiquetas', 'ok'],
 ]
 const filasDe = (canal) => (canal === 'shopee' ? FILAS_SP : FILAS_ML)
 
@@ -240,7 +247,8 @@ function mancheteDe(p, canal) {
   if (/shipped|enviado|transit/i.test(ref)) return { cls: 'a-tra', tit: 'A caminho do comprador', sub: p.rastreio ? `rastreio ${p.rastreio}` : 'rastreio ativo no canal', acao: 'canal', label: 'Rastrear no canal' }
   if (/buffered|dropped/i.test(sub)) return { cls: 'a-buf', tit: 'Etiqueta libera depois · aguardando a coleta abrir', sub: 'o canal segura a etiqueta (buffered) — libera sozinha e o painel te avisa', acao: 'painel', label: 'Detalhes' }
   if (/printed/i.test(sub)) return { cls: 'a-etq', tit: 'Etiqueta impressa · levar para a coleta', sub: 'volume pronto — confira na Mesa de Despacho', acao: 'etiqueta', label: 'Reimprimir etiqueta' }
-  if (canal === 'shopee' && /PROCESSED/i.test(ref)) return { cls: 'a-etq', tit: 'Etiqueta emitida · levar para a coleta', sub: 'waybill SPX gerada — volume pronto para a coleta ou drop-off', acao: 'etiqueta', label: 'Reimprimir etiqueta' }
+  if (canal === 'shopee' && /READY_TO_SHIP/i.test(ref) && !p.rastreio) return { cls: 'a-buf', tit: 'Organizar envio · a Shopee aguarda', sub: 'escolha a logística no canal — a etiqueta só existe depois disso', acao: 'canal', label: 'Organizar envio' }
+  if (canal === 'shopee' && /PROCESSED/i.test(ref)) return { cls: 'a-etq', tit: 'Etiqueta pronta · levar para a coleta', sub: p.rastreio ? `envio organizado · rastreio ${p.rastreio}` : 'waybill SPX gerada — volume pronto para a coleta ou drop-off', acao: 'etiqueta', label: 'Imprimir etiqueta' }
   if (canal === 'shopee' && /RETRY_SHIP/i.test(ref)) return { cls: 'a-fis', tit: 'Reenviar · o despacho anterior falhou', sub: 'a SPX pediu novo agendamento — gere a etiqueta de novo', acao: 'etiqueta', label: 'Gerar etiqueta de novo' }
   if (canal === 'ml' && p.isFull) return { cls: 'a-buf', tit: 'Full · o ML expede por você', sub: 'estoque no fulfillment — nenhuma ação na sua coleta', acao: null }
   if (p.nfDesconhecida) return { cls: 'a-etq', tit: 'Etiqueta pronta para imprimir', sub: 'consultando a NF-e no Bling — despacho autorizado pelo canal', acao: 'etiqueta', label: 'Baixar etiqueta' }
@@ -339,7 +347,7 @@ export default function CentralPedidosUltra() {
   const cargaEmCurso = useRef(null)
   const fundoRef = useRef(null)
   const idsRef = useRef(new Set())
-  const PCU_BUILD = 'v5.2 · 17/07'
+  const PCU_BUILD = 'v5.3 · 17/07'
 const POR_PAG = 10
   const d = CH[canal]
 
