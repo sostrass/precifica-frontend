@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Package, ShoppingBag, Globe, Truck, Clock, AlertTriangle, Box, Search, ChevronRight, ChevronLeft,
   Zap, Layers, MapPin, FileText, Printer, Tag, Check, CheckCheck, X, ScanLine, Barcode, ShieldCheck,
-  DollarSign, Send, Sparkles, Settings, RefreshCw, Loader2, User, Repeat, Star, CreditCard, Eye, Lock, CalendarDays,
+  DollarSign, Send, Sparkles, Settings, RefreshCw, Loader2, User, Repeat, Star, CreditCard, Eye, Lock, CalendarDays, RotateCcw,
 } from 'lucide-react'
 import { api } from './api.js'
 import { imprimirFolhasPedido, imprimirEtiquetas, PainelImpressao } from './Shopee.jsx'
@@ -124,6 +124,81 @@ const ABAS_DEF = [
   ['todos', 'Todos', Layers], ['hoje', 'A despachar hoje', Zap], ['proximos', 'Próximos dias', CalendarDays],
   ['nf', 'Aguardando NF-e', FileText], ['transito', 'Em trânsito', Truck], ['fim', 'Finalizados', Check], ['cancel', 'Cancelados', X],
 ]
+// ————— MOTOR DUAL (mockup v8 aprovado) — cada canal com as SUAS regras —————
+// ML: janela de coleta + corte. SHOPEE: etapas do Seller Center (espelham shopee.py) +
+// cronômetro de CANCELAMENTO AUTOMÁTICO. A identidade Precifica (dinheiro) vale nos dois.
+const TRILHO_ML = [
+  ['hoje', 'Sai hoje', Zap, 'var(--ch)', 'corte da coleta'],
+  ['amanha', 'Amanhã', CalendarDays, '#9cc8ff', 'etiqueta libera amanhã'],
+  ['prog', 'Programado', Clock, '#e9dbfb', 'coleta futura'],
+  ['transito', 'A caminho', Truck, '#2dd4bf', 'rastreio ativo'],
+  ['fim', 'Entregue', Check, 'var(--ok)', 'dinheiro no bolso'],
+  ['pos', 'Pós-venda', RotateCcw, '#ffb8c5', 'devoluções'],
+]
+const TRILHO_SP = [
+  ['unpaid', 'Não pago', Clock, '#9cc8ff', 'aguardando pagamento'],
+  ['aenviar', 'A Enviar', Zap, 'var(--ch)', 'cronômetro correndo'],
+  ['enviado', 'Enviado', Truck, '#2dd4bf', 'a caminho / confirmar'],
+  ['concluido', 'Concluído', Check, 'var(--ok)', 'dinheiro no bolso'],
+  ['retornos', 'Retornos', RotateCcw, '#ffb8c5', 'cancelados e devoluções'],
+]
+const trilhoDe = (canal) => (canal === 'shopee' ? TRILHO_SP : TRILHO_ML)
+const etapaInicial = (canal) => (canal === 'shopee' ? 'aenviar' : 'hoje')
+
+// horas até o prazo de envio (Shopee: ship_by_date = cancelamento automático; ML: corte)
+function horasPrazo(p, agoraTs) {
+  if (!p.shipBy) return 999
+  return (p.shipBy * 1000 - (agoraTs || Date.now())) / 3600000
+}
+function etapaDe(p, canal, agoraTs) {
+  if (canal === 'shopee') {
+    const st = String(p.status || '')
+    if (/UNPAID|nao_pago|não pago/i.test(st)) return 'unpaid'
+    if (p.cancelado || p.devolucao || /CANCEL|TO_RETURN|RETURN/i.test(st)) return 'retornos'
+    if (/COMPLETED|conclu/i.test(st)) return 'concluido'
+    if (/SHIPPED|TO_CONFIRM_RECEIVE|transit|enviado/i.test(st)) return 'enviado'
+    return 'aenviar' // READY_TO_SHIP · PROCESSED · RETRY_SHIP
+  }
+  const c = classifica(p)
+  if (c === 'cancel' || p.devolucao) return 'pos'
+  if (c === 'fim') return 'fim'
+  if (c === 'transito') return 'transito'
+  // hoje / amanhã / programado pela DATA do prazo de despacho (igual ao painel do ML)
+  if (!p.shipBy) return 'hoje'                     // sem prazo conhecido: entra na fila de hoje
+  const d0 = new Date(agoraTs || Date.now()); d0.setHours(0, 0, 0, 0)
+  const dias = Math.floor((p.shipBy * 1000 - d0.getTime()) / 86400000)
+  if (dias <= 0) return 'hoje'
+  if (dias === 1) return 'amanha'
+  return 'prog'
+}
+function filaDe(p, canal, agoraTs) {
+  if (p.fraude) return 'risco'
+  if (canal === 'shopee') {
+    if (!p.nf && !p.nfDesconhecida) return 'nfe'      // NF-e pendente de upload
+    if (horasPrazo(p, agoraTs) <= 12) return 'urgente' // risco de CANCELAMENTO AUTOMÁTICO
+    return 'organizar'
+  }
+  if (/invoice_pending|waiting_for_invoice/i.test(String(p.envioSubstatus || '')) && !p.nf) return 'nfe'
+  if (!p.nf && !p.nfDesconhecida) return 'nfe'
+  return 'etiqueta'
+}
+const somaGrana = (arr) => arr.reduce((a, o) => a + (o.receita || 0), 0)
+const somaSobra = (arr) => arr.reduce((a, o) => a + (o.liquido || 0), 0)
+
+// filas de ação por canal: [chave, classe, Icone, cor, título, subtítulo, rótulo, botão, classeBotão]
+const FILAS_ML = [
+  ['nfe', 'f-nf', FileText, '#ffcf7d', 'Emita a NF-e e destrave a etiqueta', 'o ML só libera a etiqueta depois da nota — sem isso, perdem a coleta de hoje', 'Travado', 'Emitir no Bling', 'primary'],
+  ['risco', 'f-fis', ShieldCheck, '#ffb8c5', 'Risco de fraude · não despache', 'recomendação oficial do canal — revise antes de agir', 'Em risco', 'Revisar', ''],
+  ['etiqueta', 'f-ok', Printer, 'var(--ok)', 'Etiquetas prontas · imprimir e despachar', 'NF-e emitida e ML autorizou — só imprimir e deixar na coleta', 'Liberado', 'Imprimir etiquetas', 'ok'],
+]
+const FILAS_SP = [
+  ['urgente', 'f-fis', AlertTriangle, '#ffb8c5', 'Vence em menos de 12h · cancelamento automático', 'a Shopee cancela sozinha e a venda some — despache estes primeiro', 'Some hoje', 'Organizar envio', ''],
+  ['nfe', 'f-nf', FileText, '#ffcf7d', 'Enviar NF-e à Shopee', 'faça o upload da nota — sem ela o envio não é liberado', 'Travado', 'Upload de NF-e', 'primary'],
+  ['risco', 'f-fis', ShieldCheck, '#ffb8c5', 'Risco de fraude · não despache', 'revise antes de organizar o envio', 'Em risco', 'Revisar', ''],
+  ['organizar', 'f-ok', Truck, 'var(--ok)', 'Prontos para organizar envio', 'NF-e ok e prazo folgado — imprima a etiqueta SPX e despache', 'Liberado', 'Envio em massa', 'ok'],
+]
+const filasDe = (canal) => (canal === 'shopee' ? FILAS_SP : FILAS_ML)
+
 function classifica(p) {
   if (p.cancelado) return 'cancel'
   const ref = p.canal === 'ml' ? (p.envioStatus || p.status) : p.status
@@ -221,6 +296,8 @@ export default function CentralPedidosUltra() {
   const [fundo, setFundo] = useState(null)
   const [ultimaSync, setUltimaSync] = useState(null)
   const [aba, setAba] = useState('todos')
+  const [etapa, setEtapa] = useState('hoje')          // trilho de decisão (v8)
+  const [janelaFiltro, setJanelaFiltro] = useState(null)  // sub-fila clicada na janela
   const [pgto, setPgto] = useState('todos')
   const [densidade, setDensidade] = useState('conf')
   const [soDevolucao, setSoDevolucao] = useState(false)
@@ -244,7 +321,7 @@ export default function CentralPedidosUltra() {
   const cargaEmCurso = useRef(null)
   const fundoRef = useRef(null)
   const idsRef = useRef(new Set())
-  const PCU_BUILD = 'v4.5 · 15/07'
+  const PCU_BUILD = 'v5.0 · 16/07'
 const POR_PAG = 10
   const d = CH[canal]
 
@@ -368,6 +445,7 @@ const POR_PAG = 10
     }
   }
   useEffect(() => {
+    setEtapa(etapaInicial(canal)); setJanelaFiltro(null)   // cada canal tem o seu trilho
     idsRef.current = new Set()
     carregar()   // o guard por chave dentro de carregar() já neutraliza a dupla montagem do StrictMode
   }, [canal, dias])
@@ -504,7 +582,14 @@ const POR_PAG = 10
   const filtrados = useMemo(() => {
     const q = busca.trim().toLowerCase()
     let arr = lista
-    if (aba !== 'todos') arr = arr.filter((p) => classifica(p) === aba)
+    // trilho de decisão (v8): filtra pela ETAPA do canal, e pela sub-fila se houver
+    arr = arr.filter((p) => etapaDe(p, canal, agoraTs) === etapa)
+    if (janelaFiltro === 'nfe') arr = arr.filter((p) => filaDe(p, canal, agoraTs) === 'nfe')
+    else if (janelaFiltro === 'etiqueta') arr = arr.filter((p) => filaDe(p, canal, agoraTs) === 'etiqueta')
+    else if (janelaFiltro === 'organizar') arr = arr.filter((p) => filaDe(p, canal, agoraTs) === 'organizar')
+    else if (janelaFiltro === 'urgente') arr = arr.filter((p) => horasPrazo(p, agoraTs) <= 12)
+    else if (janelaFiltro === 'h24') arr = arr.filter((p) => { const h = horasPrazo(p, agoraTs); return h > 12 && h <= 24 })
+    else if (janelaFiltro === 'msgs') arr = arr.filter((p) => (p.msgs || 0) > 0)
     if (pgto === 'pagos') arr = arr.filter((p) => p.pago)
     if (pgto === 'aguard') arr = arr.filter((p) => !p.pago)
     if (soDevolucao) arr = arr.filter((p) => p.devolucao)
@@ -515,7 +600,7 @@ const POR_PAG = 10
       if (ordem === 'prioridade') return (b.devolucao - a.devolucao) || (b.cancelado - a.cancelado) || ((a.shipBy || 9e12) - (b.shipBy || 9e12))
       return new Date(b.criado || 0) - new Date(a.criado || 0)
     })
-  }, [pedidos, aba, pgto, busca, ordem, soDevolucao, soSemNf])
+  }, [pedidos, aba, pgto, busca, ordem, soDevolucao, soSemNf, etapa, janelaFiltro, canal, agoraTs])
   const nPag = Math.max(1, Math.ceil(filtrados.length / POR_PAG))
   const pageItems = filtrados.slice((pagina - 1) * POR_PAG, pagina * POR_PAG)
   useEffect(() => { visiveisRef.current = new Set(pageItems.map((p) => p.shipId).filter(Boolean)) }, [pageItems])
@@ -722,12 +807,134 @@ const POR_PAG = 10
         </div>
       </div>
 
-      {/* ABAS */}
-      <div style={{ display: 'flex', gap: 7, overflowX: 'auto', paddingBottom: 4, marginBottom: 11 }}>
-        {ABAS_DEF.map(([id, lab, Icon]) => (
-          <div key={id} className={`tab ${aba === id ? 'on' : ''}`} onClick={() => setAba(id)}><Icon size={13} />{lab}<span className="pill">{contagem[id] || 0}</span></div>
-        ))}
+      {/* TRILHO DE DECISÃO — a jornada do DINHEIRO (mockup v8 aprovado) */}
+      <div className="trilho">
+        {trilhoDe(canal).map(([id, nome, Icon, cor, obs]) => {
+          const its = lista.filter((p) => etapaDe(p, canal, agoraTs) === id)
+          const gr = somaGrana(its), sb = somaSobra(its)
+          const neg = id === 'pos' || id === 'retornos'
+          return (
+            <div key={id} className={`et ${etapa === id ? 'on' : ''}`} onClick={() => { setEtapa(id); setJanelaFiltro(null); setPagina(1); setAberto(null) }}>
+              <div className="top"><Icon size={13} style={{ color: cor }} /><span className="nome">{nome}</span></div>
+              <div className="qtd" style={{ color: cor }}>{its.length}</div>
+              <div className="grana">
+                {neg ? <span style={{ color: 'var(--danger)' }}>− {brl(gr)}</span> : <>{brl(gr)}{sb > 0 && <span style={{ fontSize: 8, color: 'var(--ok)', fontWeight: 600 }}> · sobra {brl(sb)}</span>}</>}
+              </div>
+              <div className="obs">{obs}</div>
+            </div>
+          )
+        })}
       </div>
+
+      {/* JANELAS — ML: coleta · SHOPEE: prazo com cancelamento automático */}
+      {(() => {
+        const inicial = etapaInicial(canal)
+        const naEtapa = lista.filter((p) => etapaDe(p, canal, agoraTs) === inicial)
+        const Linha = ({ k, Icon, cor, rot, gran, qtd }) => (
+          <div className={`lin ${janelaFiltro === k ? 'on' : ''}`} onClick={(e) => { e.stopPropagation(); setJanelaFiltro(janelaFiltro === k ? null : k); setEtapa(inicial); setPagina(1) }}>
+            {Icon && <Icon size={10} style={{ color: cor }} />}<span className="lb">{rot}</span><span className="lg">{gran}</span><span className="lv" style={{ color: cor }}>{qtd}</span>
+          </div>
+        )
+        if (canal === 'shopee') {
+          const urg = naEtapa.filter((p) => horasPrazo(p, agoraTs) <= 12)
+          const h24 = naEtapa.filter((p) => { const h = horasPrazo(p, agoraTs); return h > 12 && h <= 24 })
+          const h48 = naEtapa.filter((p) => { const h = horasPrazo(p, agoraTs); return h > 24 && h <= 48 })
+          const folga = naEtapa.filter((p) => horasPrazo(p, agoraTs) > 48)
+          const nfe = naEtapa.filter((p) => filaDe(p, canal, agoraTs) === 'nfe')
+          const org = naEtapa.filter((p) => filaDe(p, canal, agoraTs) === 'organizar')
+          const unpaid = lista.filter((p) => etapaDe(p, canal, agoraTs) === 'unpaid')
+          const ret = lista.filter((p) => etapaDe(p, canal, agoraTs) === 'retornos')
+          const risco = somaGrana(urg)
+          return (
+            <div className="janelas">
+              <div className="jan jd">
+                <div className="jhd"><AlertTriangle size={16} style={{ color: 'var(--danger)' }} />
+                  <div><div className="tt serif">Cancelamento automático</div><div className="sb">a Shopee cancela sozinha se o prazo vencer</div></div>
+                  <div className="val"><div className="v" style={{ color: 'var(--danger)' }}>{brl(risco)}</div><div className="q">{urg.length} em risco</div></div>
+                </div>
+                <Linha k="urgente" Icon={Clock} cor="var(--danger)" rot="Vence em menos de 12h" gran={`${brl(risco)} em risco`} qtd={urg.length} />
+                <Linha k="h24" Icon={Clock} cor="var(--warn)" rot="Vence nas próximas 24h" gran={brl(somaGrana(h24))} qtd={h24.length} />
+                <div className="bar" style={{ marginTop: 8 }}><i style={{ width: `${naEtapa.length ? Math.round(urg.length / naEtapa.length * 100) : 0}%`, background: 'linear-gradient(90deg,var(--danger),var(--warn))' }} /></div>
+                <div style={{ fontSize: 7, color: 'var(--faint)', marginTop: 4 }}><b style={{ color: 'var(--danger)' }}>{brl(risco)} somem</b> se você não despachar hoje</div>
+              </div>
+              <div className="jan jh">
+                <div className="jhd"><Zap size={16} style={{ color: d.cor }} />
+                  <div><div className="tt serif">A Enviar</div><div className="sb">Shopee Xpress · postagem / coleta</div></div>
+                  <div className="val"><div className="v" style={{ color: d.cor }}>{brl(somaGrana(naEtapa))}</div><div className="q">{naEtapa.length} pedidos</div></div>
+                </div>
+                <Linha k="nfe" Icon={FileText} cor="var(--warn)" rot="NF-e para enviar à Shopee" gran={`${brl(somaGrana(nfe))} travados`} qtd={nfe.length} />
+                <Linha k="organizar" Icon={Truck} cor="var(--ok)" rot="Prontos p/ organizar envio" gran={brl(somaGrana(org))} qtd={org.length} />
+                <div style={{ fontSize: 7, color: 'var(--faint)', marginTop: 7 }}>upload da NF-e libera o envio na Shopee</div>
+              </div>
+              <div className="jan ja">
+                <div className="jhd"><Clock size={16} style={{ color: '#9cc8ff' }} />
+                  <div><div className="tt serif">Prazo folgado</div><div className="sb">mais de 24h para despachar</div></div>
+                  <div className="val"><div className="v" style={{ color: '#9cc8ff' }}>{brl(somaGrana(h48) + somaGrana(folga))}</div><div className="q">{h48.length + folga.length} pedidos</div></div>
+                </div>
+                <div className="lin"><span className="lb">Vence em 24–48h</span><span className="lg">{brl(somaGrana(h48))}</span><span className="lv">{h48.length}</span></div>
+                <div className="lin"><span className="lb">Mais de 48h</span><span className="lg">{brl(somaGrana(folga))}</span><span className="lv">{folga.length}</span></div>
+              </div>
+              <div className="jan jp">
+                <div className="jhd"><CreditCard size={16} style={{ color: '#e9dbfb' }} />
+                  <div><div className="tt serif">Não pago / Retornos</div><div className="sb">não separe: pode não virar venda</div></div>
+                  <div className="val"><div className="v" style={{ color: '#e9dbfb' }}>{brl(somaGrana(unpaid))}</div><div className="q">{unpaid.length} não pagos</div></div>
+                </div>
+                <div className="lin"><span className="lb">Aguardando pagamento</span><span className="lg">{brl(somaGrana(unpaid))}</span><span className="lv">{unpaid.length}</span></div>
+                <div className="lin"><span className="lb">Retornos e cancelados</span><span className="lg">− {brl(somaGrana(ret))}</span><span className="lv" style={{ color: 'var(--danger)' }}>{ret.length}</span></div>
+              </div>
+            </div>
+          )
+        }
+        // ── ML (aprovado) ──
+        const amanha = lista.filter((p) => etapaDe(p, canal, agoraTs) === 'amanha')
+        const prog = lista.filter((p) => etapaDe(p, canal, agoraTs) === 'prog')
+        const pos = lista.filter((p) => etapaDe(p, canal, agoraTs) === 'pos')
+        const nfe = naEtapa.filter((p) => filaDe(p, canal, agoraTs) === 'nfe')
+        const etq = naEtapa.filter((p) => filaDe(p, canal, agoraTs) === 'etiqueta')
+        const msgs = naEtapa.filter((p) => (p.msgs || 0) > 0)
+        const travado = somaGrana(nfe), liberado = somaGrana(etq)
+        const pct = somaGrana(naEtapa) > 0 ? Math.round(liberado / somaGrana(naEtapa) * 100) : 0
+        return (
+          <div className="janelas">
+            <div className="jan jh">
+              <div className="jhd"><Truck size={16} style={{ color: d.cor }} />
+                <div><div className="tt serif">Coleta de hoje</div><div className="sb">14:00 – 17:00 · corte da etiqueta 15:00</div></div>
+                <div className="val"><div className="v" style={{ color: d.cor }}>{brl(somaGrana(naEtapa))}</div><div className="q">{naEtapa.length} pedidos · {(naEtapa.length * 0.42).toFixed(1)} kg</div></div>
+              </div>
+              <Linha k="nfe" Icon={FileText} cor="var(--warn)" rot="NF-e para emitir" gran={`${brl(travado)} travados`} qtd={nfe.length} />
+              <Linha k="etiqueta" Icon={Tag} cor="var(--ok)" rot="Etiquetas prontas" gran={`${brl(liberado)} liberados`} qtd={etq.length} />
+              {msgs.length > 0 && <Linha k="msgs" Icon={Send} cor="var(--accent)" rot="Mensagens não lidas" gran="responder" qtd={msgs.length} />}
+              <div className="bar" style={{ marginTop: 8 }}><i style={{ width: `${pct}%`, background: 'linear-gradient(90deg,var(--ch),var(--accent))' }} /></div>
+              <div style={{ fontSize: 7, color: 'var(--faint)', marginTop: 4 }}>{pct}% do valor liberado · <b style={{ color: 'var(--warn)' }}>{brl(travado)} dependem da NF-e</b></div>
+            </div>
+            <div className="jan ja">
+              <div className="jhd"><CalendarDays size={16} style={{ color: '#9cc8ff' }} />
+                <div><div className="tt serif">Coleta de amanhã</div><div className="sb">o canal já avisou o comprador</div></div>
+                <div className="val"><div className="v" style={{ color: '#9cc8ff' }}>{brl(somaGrana(amanha))}</div><div className="q">{amanha.length} pedidos</div></div>
+              </div>
+              <div className="lin"><span className="lb">Prontas para enviar</span><span className="lg">{brl(somaGrana(amanha.filter((p) => p.nf)))}</span><span className="lv" style={{ color: 'var(--ok)' }}>{amanha.filter((p) => p.nf).length}</span></div>
+              <div className="lin"><span className="lb">Aguardando NF-e</span><span className="lg">{brl(somaGrana(amanha.filter((p) => !p.nf)))}</span><span className="lv" style={{ color: 'var(--warn)' }}>{amanha.filter((p) => !p.nf).length}</span></div>
+              <div style={{ fontSize: 7, color: 'var(--faint)', marginTop: 7 }}>sem urgência hoje · o painel promove sozinho quando a janela abrir</div>
+            </div>
+            <div className="jan jp">
+              <div className="jhd"><Clock size={16} style={{ color: '#e9dbfb' }} />
+                <div><div className="tt serif">Programado</div><div className="sb">coleta futura · nenhuma ação hoje</div></div>
+                <div className="val"><div className="v" style={{ color: '#e9dbfb' }}>{brl(somaGrana(prog))}</div><div className="q">{prog.length} pedidos</div></div>
+              </div>
+              <div className="lin"><span className="lb">Por envio padrão</span><span className="lg">{brl(somaGrana(prog))}</span><span className="lv">{prog.length}</span></div>
+              <div style={{ fontSize: 7, color: 'var(--faint)', marginTop: 7 }}>etiqueta libera na véspera da coleta</div>
+            </div>
+            <div className="jan jd">
+              <div className="jhd"><RotateCcw size={16} style={{ color: '#ffb8c5' }} />
+                <div><div className="tt serif">Pós-venda</div><div className="sb">devoluções · responda em 48h</div></div>
+                <div className="val"><div className="v" style={{ color: '#ffb8c5' }}>− {brl(somaGrana(pos))}</div><div className="q">{pos.length} casos</div></div>
+              </div>
+              <div className="lin"><span className="lb">Devoluções e cancelados</span><span className="lg">{brl(somaGrana(pos))}</span><span className="lv">{pos.length}</span></div>
+              <div style={{ fontSize: 7, color: 'var(--faint)', marginTop: 7 }}>custo já descontado da sobra do período</div>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* TOOLBAR */}
       <div className="glass" style={{ padding: '11px 15px', marginBottom: 11, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -1005,36 +1212,69 @@ const POR_PAG = 10
         : pageItems.length === 0 ? <div className="glass" style={{ padding: 24, textAlign: 'center', fontSize: 11, color: 'var(--faint)' }}>Nenhum pedido {busca ? 'para esta busca' : 'nesta aba'}.</div>
           : (() => {
             const pAberto = aberto && filtrados.find((x) => x.id === aberto)
-            const GRUPOS = [
-              ['hoje', Truck, 'Despachar hoje · coleta 14:00 – 17:00 · corte 15:00', `${d.nome} · a fila de agora — NF-e pendente bloqueia a coleta`, corteTxt, corteCor === 'var(--faint)' ? 'var(--warn)' : corteCor],
-              ['fut', CalendarDays, 'Coleta programada · etiqueta libera depois', 'sem urgência agora — o painel promove para "hoje" quando a janela abrir', 'SEM AÇÃO AGORA', '#9cc8ff'],
-              ['tra', Truck, 'Em trânsito e pós-venda', 'rastreio, entregas, devoluções e cancelados aparecem aqui primeiro', 'ACOMPANHAMENTO', 'var(--purple, #a06be8)'],
-            ]
+            // FILAS DE AÇÃO (v8 aprovado): dentro da etapa inicial mostra as filas na ordem de
+            // trabalho, cada uma com o DINHEIRO em jogo e botão de lote. Nas demais etapas, um
+            // cabeçalho único com o total.
+            const inicial = etapaInicial(canal)
             const renderCard = (p) => <UltraCard key={p.id} p={p} d={d} canal={canal} exp={aberto === p.id} densidade={densidade}
               onToggle={() => setAberto(aberto === p.id ? null : p.id)} sel={sel.has(p.id)} onSel={() => toggleSel(p.id)}
               baixarEtiqueta={() => baixarEtiquetas(p.id)} agoraTs={agoraTs} notify={notify} />
+            const acaoLote = (k, its) => {
+              const ids = its.map((x) => x.id)
+              if (k === 'nfe') { if (canal === 'ml') window.open('https://www.bling.com.br/vendas.php', '_blank'); else notify(`${ids.length} pedido(s) aguardando upload da NF-e na Shopee.`, 'warn'); return }
+              if (k === 'etiqueta' || k === 'organizar' || k === 'urgente') { setSel(new Set(ids)); baixarEtiquetas(ids); return }
+              setSel(new Set(ids)); notify(`${ids.length} pedido(s) selecionados.`, 'ok')
+            }
+            const CAB_ETAPA = {
+              amanha: [CalendarDays, '#9cc8ff', 'Coleta de amanhã', 'a etiqueta libera amanhã · o comprador já foi avisado', 'Em jogo'],
+              prog: [Clock, '#e9dbfb', 'Programado', 'o painel promove para a fila de hoje quando a janela abrir', 'Em jogo'],
+              transito: [Truck, '#2dd4bf', 'A caminho do comprador', 'rastreio ativo · acompanhe entregas e prazos', 'Em trânsito'],
+              enviado: [Truck, '#2dd4bf', 'Enviado · a caminho', 'aguardando confirmação de recebimento do comprador', 'Em trânsito'],
+              fim: [Check, 'var(--ok)', 'Entregues · concluídos', 'dinheiro no bolso · repasse conciliado', 'Recebido'],
+              concluido: [Check, 'var(--ok)', 'Concluídos', 'dinheiro no bolso · repasse conciliado', 'Recebido'],
+              unpaid: [CreditCard, '#9cc8ff', 'Não pago · aguardando pagamento', 'não separe ainda: o pedido pode não virar venda', 'Em aberto'],
+              pos: [RotateCcw, '#ffb8c5', 'Pós-venda · devoluções', 'responda em 48h ou a disputa fecha contra a loja', 'Em risco'],
+              retornos: [RotateCcw, '#ffb8c5', 'Retornos e cancelados', 'acompanhe o retorno e conteste o que for indevido', 'Em risco'],
+            }
             return (
               <div className={`split ${pAberto ? 'aberto' : ''}`}>
                 <div style={{ minWidth: 0 }}>
-                  {GRUPOS.map(([g, Icone, tit, sub, ctx, cor]) => {
-                    const its = pageItems.filter((p) => grupoDe(p) === g)
+                  {etapa === inicial ? filasDe(canal).map(([k, cls, Icone, cor, tit, sub, rot, btn, bcls]) => {
+                    const its = pageItems.filter((p) => filaDe(p, canal, agoraTs) === k)
                     if (!its.length) return null
                     return (
-                      <div key={g}>
-                        <div className={`grp-col ${g === 'fut' ? 'fut' : g === 'tra' ? 'tra' : ''}`}>
-                          <Icone size={15} style={{ color: 'var(--ch, ' + d.cor + ')', flex: 'none' }} />
-                          <div style={{ minWidth: 0 }}>
+                      <div key={k}>
+                        <div className={`fila ${cls}`}>
+                          <div className="fic" style={{ background: 'rgba(255,255,255,.06)', color: cor }}><Icone size={14} /></div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
                             <div className="t">{tit}</div>
                             <div className="s">{sub}</div>
                           </div>
-                          <div style={{ flex: 1 }} />
-                          <span className="chip" style={{ color: 'var(--dim)', background: 'rgba(255,255,255,.06)' }}>{its.length} PEDIDO{its.length > 1 ? 'S' : ''}</span>
-                          <span className="chip" style={{ color: g === 'hoje' ? '#1a1008' : cor, background: g === 'hoje' ? cor : 'rgba(255,255,255,.07)' }}>{ctx}</span>
+                          <div className="tv"><div className="l">{rot}</div><div className="v" style={{ color: cor }}>{brl(somaGrana(its))}</div></div>
+                          <span className="chip" style={{ color: cor, background: 'rgba(255,255,255,.06)' }}>{its.length} PEDIDO{its.length > 1 ? 'S' : ''}</span>
+                          <div className={`btn ${bcls}`} style={{ fontSize: 10 }} onClick={(e) => { e.stopPropagation(); acaoLote(k, its) }}>
+                            <Icone size={11} color={bcls === 'primary' ? d.txt : undefined} />{btn} ({its.length})
+                          </div>
                         </div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 9, marginBottom: 6 }}>{its.map(renderCard)}</div>
                       </div>
                     )
-                  })}
+                  }) : (() => {
+                    const T = CAB_ETAPA[etapa]
+                    if (!T) return <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>{pageItems.map(renderCard)}</div>
+                    const [Icone, cor, tit, sub, rot] = T
+                    return (
+                      <div>
+                        <div className={`fila ${etapa === 'pos' || etapa === 'retornos' ? 'f-fis' : etapa === 'fim' || etapa === 'concluido' ? 'f-ok' : etapa === 'unpaid' ? 'f-prog' : 'f-tra'}`}>
+                          <div className="fic" style={{ background: 'rgba(255,255,255,.06)', color: cor }}><Icone size={14} /></div>
+                          <div style={{ flex: 1, minWidth: 0 }}><div className="t">{tit}</div><div className="s">{sub}</div></div>
+                          <div className="tv"><div className="l">{rot}</div><div className="v" style={{ color: cor }}>{brl(somaGrana(pageItems))}</div></div>
+                          <span className="chip" style={{ color: cor, background: 'rgba(255,255,255,.06)' }}>{pageItems.length} PEDIDO{pageItems.length > 1 ? 'S' : ''}</span>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>{pageItems.map(renderCard)}</div>
+                      </div>
+                    )
+                  })()}
                 </div>
                 {pAberto && (() => {
                   const m = mancheteDe(pAberto, canal)
