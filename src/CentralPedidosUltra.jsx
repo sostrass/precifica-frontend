@@ -347,7 +347,7 @@ export default function CentralPedidosUltra() {
   const cargaEmCurso = useRef(null)
   const fundoRef = useRef(null)
   const idsRef = useRef(new Set())
-  const PCU_BUILD = 'v5.3 · 17/07'
+  const PCU_BUILD = 'v5.4 · 17/07'
 const POR_PAG = 10
   const d = CH[canal]
 
@@ -857,7 +857,7 @@ const POR_PAG = 10
             <div className="btn" onClick={() => setModal('sep')}><Layers size={13} />Separação</div>
             <div className="btn" onClick={() => { setMesaIdx(0); setModal('mesa') }}><ScanLine size={13} />Mesa de Despacho</div>
             <div className="btn" onClick={() => setModal('imp')}><Printer size={13} />Impressão</div>
-            <div className="btn" onClick={() => setAba('nf')}><FileText size={13} />NF-e</div>
+            <div className="btn" onClick={() => { setEtapa(etapaInicial(canal)); setJanelaFiltro('nfe'); setPagina(1); setAberto(null) }}><FileText size={13} />NF-e</div>
             <div className="btn primary" onClick={() => baixarEtiquetas()}><Tag size={13} color="#1a1008" />Etiquetas em lote ({sel.size || contagem.hoje || 0})</div>
           </div>
         </div>
@@ -1296,14 +1296,15 @@ const POR_PAG = 10
               baixarEtiqueta={() => baixarEtiquetas(p.id)} agoraTs={agoraTs} notify={notify} />
             const acaoLote = (k, its) => {
               const ids = its.map((x) => x.id)
+              const uniao = (base) => { const n = new Set(base); ids.forEach((i) => n.add(i)); return n }
               if (k === 'nfe') {
-                setSel(new Set(ids))   // já deixa os que precisam de nota selecionados
-                if (canal === 'ml') { window.open('https://www.bling.com.br/vendas.php', '_blank'); notify(`${ids.length} pedido(s) sem NF-e selecionados — emita no Bling e volte: o painel destrava sozinho.`, 'ok') }
+                setSel(uniao)   // mantém o que já estava + acrescenta a fila inteira (todas as páginas)
+                if (canal === 'ml') { const w = window.open('https://www.bling.com.br/vendas.php', '_blank'); notify(w ? `${ids.length} pedido(s) sem NF-e selecionados — emita no Bling e volte: o painel destrava sozinho.` : 'Permita pop-ups para abrir o Bling, ou acesse bling.com.br e emita as notas dos pedidos selecionados.', w ? 'ok' : 'warn') }
                 else notify(`${ids.length} pedido(s) selecionados para upload da NF-e na Shopee.`, 'warn')
                 return
               }
-              if (k === 'etiqueta' || k === 'organizar' || k === 'urgente') { setSel(new Set(ids)); baixarEtiquetas(ids); return }
-              setSel(new Set(ids)); notify(`${ids.length} pedido(s) selecionados.`, 'ok')
+              if (k === 'etiqueta' || k === 'organizar' || k === 'urgente') { setSel(uniao); baixarEtiquetas(ids); return }
+              setSel(uniao); notify(`${ids.length} pedido(s) selecionados.`, 'ok')
             }
             const CAB_ETAPA = {
               amanha: [CalendarDays, '#9cc8ff', 'Coleta de amanhã', 'a etiqueta libera amanhã · o comprador já foi avisado', 'Em jogo'],
@@ -1320,20 +1321,27 @@ const POR_PAG = 10
               <div className={`split ${pAberto ? 'aberto' : ''}`}>
                 <div style={{ minWidth: 0 }}>
                   {etapa === inicial ? filasDe(canal).map(([k, cls, Icone, cor, tit, sub, rot, btn, bcls]) => {
-                    const its = pageItems.filter((p) => filaDe(p, canal, agoraTs) === k)
+                    const itsAll = filtrados.filter((p) => filaDe(p, canal, agoraTs) === k)  // TODAS as páginas
+                    const its = pageItems.filter((p) => filaDe(p, canal, agoraTs) === k)      // só os cards desta página
                     if (!its.length) return null
+                    const selN = itsAll.filter((p) => sel.has(p.id)).length
+                    const todosSel = selN === itsAll.length && itsAll.length > 0
                     return (
                       <div key={k}>
                         <div className={`fila ${cls}`}>
+                          <div className="cb" onClick={(e) => { e.stopPropagation(); setSel((prev) => { const n = new Set(prev); if (todosSel) itsAll.forEach((p) => n.delete(p.id)); else itsAll.forEach((p) => n.add(p.id)); return n }) }}
+                            style={{ cursor: 'pointer', background: todosSel ? cor : selN ? 'rgba(255,255,255,.12)' : 'transparent', borderColor: todosSel ? cor : 'var(--gb)' }} title="selecionar todos desta fila (todas as páginas)">
+                            {todosSel ? <Check size={9} color="#1a1008" /> : selN ? <span style={{ fontSize: 7, color: 'var(--fg)' }}>{selN}</span> : null}
+                          </div>
                           <div className="fic" style={{ background: 'rgba(255,255,255,.06)', color: cor }}><Icone size={14} /></div>
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div className="t">{tit}</div>
                             <div className="s">{sub}</div>
                           </div>
-                          <div className="tv"><div className="l">{rot}</div><div className="v" style={{ color: cor }}>{brl(somaGrana(its))}</div></div>
-                          <span className="chip" style={{ color: cor, background: 'rgba(255,255,255,.06)' }}>{its.length} PEDIDO{its.length > 1 ? 'S' : ''}</span>
-                          <div className={`btn ${bcls}`} style={{ fontSize: 10 }} onClick={(e) => { e.stopPropagation(); acaoLote(k, its) }}>
-                            <Icone size={11} color={bcls === 'primary' ? d.txt : undefined} />{btn} ({its.length})
+                          <div className="tv"><div className="l">{rot}</div><div className="v" style={{ color: cor }}>{brl(somaGrana(itsAll))}</div></div>
+                          <span className="chip" style={{ color: cor, background: 'rgba(255,255,255,.06)' }}>{itsAll.length} PEDIDO{itsAll.length > 1 ? 'S' : ''}{itsAll.length > its.length ? ` · ${its.length} nesta pág.` : ''}</span>
+                          <div className={`btn ${bcls}`} style={{ fontSize: 10 }} onClick={(e) => { e.stopPropagation(); acaoLote(k, itsAll) }}>
+                            <Icone size={11} color={bcls === 'primary' ? d.txt : undefined} />{btn} ({itsAll.length})
                           </div>
                         </div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 9, marginBottom: 6 }}>{its.map(renderCard)}</div>
@@ -1387,12 +1395,13 @@ const POR_PAG = 10
       {sel.size > 0 && (
         <div className="massbar">
           <span className="chip" style={{ color: '#fff', background: 'var(--accent)' }}>{sel.size} SELECIONADO{sel.size > 1 ? 'S' : ''}</span>
-          <div className="btn primary" style={{ fontSize: 10 }} onClick={() => baixarEtiquetas()}><Tag size={12} color="#1a1008" />Etiquetas</div>
-          <div className="btn" style={{ fontSize: 10 }} onClick={() => setAba('nf')}><FileText size={12} />NF-e</div>
+          {sel.size < filtrados.length && <div className="btn" style={{ fontSize: 10 }} onClick={() => setSel(new Set(filtrados.map((p) => p.id)))}><CheckCheck size={12} />Selecionar todos ({filtrados.length})</div>}
+          <div className="btn primary" style={{ fontSize: 10 }} onClick={() => baixarEtiquetas([...sel])}><Tag size={12} color="#1a1008" />Etiquetas</div>
+          <div className="btn" style={{ fontSize: 10 }} onClick={() => { const w = window.open('https://www.bling.com.br/vendas.php', '_blank'); notify(w ? `${sel.size} pedido(s) — emita as notas no Bling.` : 'Permita pop-ups para abrir o Bling.', w ? 'ok' : 'warn') }}><FileText size={12} />Emitir NF-e ({sel.size})</div>
           <div className="btn" style={{ fontSize: 10 }} onClick={() => setModal('sep')}><Layers size={12} />Separação</div>
           <div className="btn" style={{ fontSize: 10 }} onClick={() => imprimirFolhasCanal(canal, filtrados.filter((x) => sel.has(x.id)).map(paraImpressao))}><Printer size={12} />Imprimir pedidos</div>
           <div className="btn" style={{ fontSize: 10 }} onClick={() => { setMesaIdx(0); setModal('mesa') }}><ScanLine size={12} />Mesa</div>
-          <span style={{ fontSize: 8, color: 'var(--faint)' }}>esc limpa</span>
+          <div className="btn" style={{ fontSize: 10 }} onClick={() => setSel(new Set())}><X size={12} />Limpar</div>
         </div>
       )}
 
