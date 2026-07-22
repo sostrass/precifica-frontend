@@ -278,6 +278,8 @@ export const api = {
   // Etiqueta OFICIAL da Shopee (PDF binário) — não usa req() porque a resposta é um blob, não JSON
   // dados do comprador Shopee SEM máscara (READY_TO_SHIP/PROCESSED/TO_RETURN)
   // geração de NF-e via API (Bling POST /nfe) — dry_run monta sem gerar
+  // dados fiscais do comprador ML (CPF/CNPJ + endereço) — /orders/{id}/billing_info
+  mlDadosFiscais: (order_ids) => req('/api/mercadolivre/dados-fiscais', { method: 'POST', body: JSON.stringify({ order_ids }) }),
   nfeMolde: () => req('/api/nfe/_molde'),
   nfeGerar: (pedido, dry_run = true) => req('/api/nfe/gerar', { method: 'POST', body: JSON.stringify({ pedido, dry_run }) }),
   shopeeComprador: (order_sns) => req('/api/shopee/comprador', { method: 'POST', body: JSON.stringify({ order_sns }) }),

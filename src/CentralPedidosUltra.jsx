@@ -45,7 +45,7 @@ function adaptaML(p) {
     envioStatus: (Array.isArray(p.tags) && p.tags.includes('delivered') ? 'delivered' : '') || p.envio_status || '',
     envioSubstatus: p.envio_substatus || null,
     isFull: !!p.is_full, logistic: p.logistic_type || null,
-    shipBy: p.ship_by || null, clienteReal: p.cliente || null, cidade: p.cidade || null, cep: p.cep || null, enderecoLinha: p.endereco || null,
+    shipBy: p.ship_by || null, clienteReal: p.cliente || null, cpf: p.cpf_comprador || p.doc_numero || null, cidade: p.cidade || null, cep: p.cep || null, enderecoLinha: p.endereco || null,
     criado: p.date_created, pago: p.pago_em || p.aprovado_em || p.date_created,
     receita: r.receita ?? p.valor, taxas: r.taxas ?? r.taxas_mkt, liquido: r.liquido, margem: r.margem, alvo: p.preco_bling,
     rastreio: p.rastreio || p.tracking || null, shipId: p.shipping_id || p.shipment_id || p.envio_id || p.envio?.id,
@@ -348,7 +348,7 @@ export default function CentralPedidosUltra() {
   const cargaEmCurso = useRef(null)
   const fundoRef = useRef(null)
   const idsRef = useRef(new Set())
-  const PCU_BUILD = 'v5.5 · 17/07'
+  const PCU_BUILD = 'v5.6 · 22/07'
 const POR_PAG = 10
   const d = CH[canal]
 
@@ -794,8 +794,26 @@ const POR_PAG = 10
     const fila = filtrados.filter((p) => filaDe(p, canal, agoraTs) === 'nfe')
     setNfeGer({ fila, molde: undefined, resultados: {}, fase: 'molde' })
     setModal('nfe')
+    // molde + dados fiscais (CPF/CNPJ do comprador) em paralelo
     try { const m = await api.nfeMolde(); setNfeGer((s) => s ? { ...s, molde: m, fase: (m && m.tem_molde) ? 'pronto' : 'sem_molde' } : s) }
     catch (e) { setNfeGer((s) => s ? { ...s, molde: null, fase: 'sem_molde' } : s) }
+    // o CPF do ML não vem no pedido — buscar via billing_info para quem ainda não tem
+    if (canal === 'ml') {
+      const faltam = fila.filter((p) => !p.cpf).map((p) => p.id)
+      for (let i = 0; i < faltam.length; i += 60) {
+        try {
+          const r = await api.mlDadosFiscais(faltam.slice(i, i + 60))
+          const mapa = r?.mapa || {}
+          setPedidos((prev) => prev ? prev.map((p) => {
+            const d = mapa[p.id]
+            if (!d || !d.ok || !d.doc_numero) return p
+            return { ...p, cpf: d.doc_numero, clienteReal: d.nome || p.clienteReal, cidade: d.cidade || p.cidade, uf: d.estado || p.uf, cep: d.cep || p.cep, enderecoLinha: d.endereco || p.enderecoLinha, endereco: { ...(p.endereco || {}), completo: d.endereco, bairro: d.bairro, cidade: d.cidade, uf: d.estado, cep: d.cep } }
+          }) : prev)
+          // atualiza a fila do modal também
+          setNfeGer((s) => s ? { ...s, fila: s.fila.map((p) => { const d = mapa[p.id]; return (d && d.ok && d.doc_numero) ? { ...p, cpf: d.doc_numero, clienteReal: d.nome || p.clienteReal } : p }) } : s)
+        } catch (e) { /* segue */ }
+      }
+    }
   }
   const conferirNfe = async (p) => {
     setNfeGer((s) => ({ ...s, resultados: { ...s.resultados, [p.id]: { fase: 'conferindo' } } }))
