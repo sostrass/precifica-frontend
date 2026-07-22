@@ -337,7 +337,8 @@ export default function CentralPedidosUltra() {
   const [pagina, setPagina] = useState(1)
   const [aberto, setAberto] = useState(null)
   const [sel, setSel] = useState(() => new Set())
-  const [modal, setModal] = useState(null) // 'sep' | 'imp' | 'etq' | 'mesa'
+  const [modal, setModal] = useState(null) // 'sep' | 'imp' | 'etq' | 'mesa' | 'nfe'
+  const [nfeGer, setNfeGer] = useState(null) // geração de NF-e: { fila, molde, resultados, fase }
   const [mesaIdx, setMesaIdx] = useState(0)
   const [mesaConf, setMesaConf] = useState({})
   const [novos, setNovos] = useState(0)
@@ -347,7 +348,7 @@ export default function CentralPedidosUltra() {
   const cargaEmCurso = useRef(null)
   const fundoRef = useRef(null)
   const idsRef = useRef(new Set())
-  const PCU_BUILD = 'v5.4 · 17/07'
+  const PCU_BUILD = 'v5.5 · 17/07'
 const POR_PAG = 10
   const d = CH[canal]
 
@@ -779,6 +780,40 @@ const POR_PAG = 10
     setCriandoIntel(null)
   }
 
+  // ————— GERAÇÃO DE NF-e (via API Bling POST /nfe) — conferência antes de gerar —————
+  const pedidoParaNfe = (p) => ({
+    numero_loja: String(p.id),
+    cliente: {
+      nome: p.clienteReal || p.comprador || 'Consumidor final',
+      cpf_cnpj: p.cpf || '', email: p.email || '', telefone: p.telefone || '',
+      endereco: { completo: p.enderecoLinha || (p.endereco && p.endereco.completo) || '', numero: (p.endereco && p.endereco.numero) || '', bairro: (p.endereco && p.endereco.bairro) || '', cidade: p.cidade || '', uf: p.uf || '', cep: p.cep || '' },
+    },
+    itens: (p.itens || []).map((i) => ({ sku: i.sku, descricao: i.nome, quantidade: i.qtd || 1, valor: i.preco || 0, ncm: i.ncm, cfop: i.cfop })),
+  })
+  const abrirGeracaoNfe = async () => {
+    const fila = filtrados.filter((p) => filaDe(p, canal, agoraTs) === 'nfe')
+    setNfeGer({ fila, molde: undefined, resultados: {}, fase: 'molde' })
+    setModal('nfe')
+    try { const m = await api.nfeMolde(); setNfeGer((s) => s ? { ...s, molde: m, fase: (m && m.tem_molde) ? 'pronto' : 'sem_molde' } : s) }
+    catch (e) { setNfeGer((s) => s ? { ...s, molde: null, fase: 'sem_molde' } : s) }
+  }
+  const conferirNfe = async (p) => {
+    setNfeGer((s) => ({ ...s, resultados: { ...s.resultados, [p.id]: { fase: 'conferindo' } } }))
+    try { const r = await api.nfeGerar(pedidoParaNfe(p), true); setNfeGer((s) => ({ ...s, resultados: { ...s.resultados, [p.id]: { fase: 'conferido', dry: r } } })) }
+    catch (e) { setNfeGer((s) => ({ ...s, resultados: { ...s.resultados, [p.id]: { fase: 'erro', erro: String(e.message || e) } } })) }
+  }
+  const gerarNfe = async (p) => {
+    setNfeGer((s) => ({ ...s, resultados: { ...s.resultados, [p.id]: { ...(s.resultados[p.id] || {}), fase: 'gerando' } } }))
+    try {
+      const r = await api.nfeGerar(pedidoParaNfe(p), false)
+      if (r.ok && (r.gerada || r.nfe_id)) {
+        setNfeGer((s) => ({ ...s, resultados: { ...s.resultados, [p.id]: { fase: 'gerada', nfe: r } } }))
+        setPedidos((prev) => prev ? prev.map((x) => x.id === p.id ? { ...x, nf: { numero: r.numero, id: r.nfe_id, situacao: r.situacao || 'pendente' }, nfDesconhecida: false } : x) : prev)
+        notify(`Nota gerada (Pendente) do pedido ${p.id}. Confira no Bling e transmita.`, 'ok')
+      } else { setNfeGer((s) => ({ ...s, resultados: { ...s.resultados, [p.id]: { fase: 'falhou', erro: r.erro || JSON.stringify(r.erro_bling || r) } } })) }
+    } catch (e) { setNfeGer((s) => ({ ...s, resultados: { ...s.resultados, [p.id]: { fase: 'falhou', erro: String(e.message || e) } } })) }
+  }
+
   const baixarEtiquetas = async (soUm) => {
     try {
       const alvo = Array.isArray(soUm) ? soUm : (soUm ? [soUm] : [...sel])
@@ -857,7 +892,7 @@ const POR_PAG = 10
             <div className="btn" onClick={() => setModal('sep')}><Layers size={13} />Separação</div>
             <div className="btn" onClick={() => { setMesaIdx(0); setModal('mesa') }}><ScanLine size={13} />Mesa de Despacho</div>
             <div className="btn" onClick={() => setModal('imp')}><Printer size={13} />Impressão</div>
-            <div className="btn" onClick={() => { setEtapa(etapaInicial(canal)); setJanelaFiltro('nfe'); setPagina(1); setAberto(null) }}><FileText size={13} />NF-e</div>
+            <div className="btn" onClick={() => { setEtapa(etapaInicial(canal)); setJanelaFiltro('nfe'); setPagina(1); setAberto(null); abrirGeracaoNfe() }}><FileText size={13} />NF-e</div>
             <div className="btn primary" onClick={() => baixarEtiquetas()}><Tag size={13} color="#1a1008" />Etiquetas em lote ({sel.size || contagem.hoje || 0})</div>
           </div>
         </div>
@@ -1434,6 +1469,7 @@ const POR_PAG = 10
         <span><span className="kbd">M</span> mesa</span><span><span className="kbd">B</span> busca</span><span><span className="kbd">esc</span> limpa</span>
       </div>
 
+      {modal === 'nfe' && nfeGer && <ModalGerarNfe estado={nfeGer} d={d} canal={canal} onFechar={() => { setModal(null); setNfeGer(null) }} conferir={conferirNfe} gerar={gerarNfe} pedidoParaNfe={pedidoParaNfe} />}
       {modal === 'mesa' && <UltraMesa fila={filtrados.filter((p) => !p.cancelado).slice(0, 60)} idx={mesaIdx} setIdx={setMesaIdx} conf={mesaConf} setConf={setMesaConf} onFechar={() => setModal(null)} d={d} canal={canal} baixarOficial={(id) => baixarEtiquetas(id)} agoraTs={agoraTs} />}
       {modal === 'sep' && <ModalSep filtrados={filtrados} d={d} canal={canal} onFechar={() => setModal(null)} abrirMesa={() => { setMesaIdx(0); setModal('mesa') }} />}
       {modal === 'imp' && <ModalImp filtrados={filtrados} d={d} canal={canal} semNf={semNf} onFechar={() => setModal(null)} selIniciais={sel} baixarOficiais={(ids) => baixarEtiquetas(ids)} />}
@@ -1809,6 +1845,85 @@ function ModalSimples({ titulo, onFechar, d, children }) {
 }
 
 // ————— MODAL SEPARAÇÃO — paper com tabela real (BIN/SKU/PRODUTO/QTD/PEDIDOS/✓) —————
+function ModalGerarNfe({ estado, d, canal, onFechar, conferir, gerar, pedidoParaNfe }) {
+  const { fila, molde, resultados, fase } = estado
+  const okGerados = fila.filter((p) => (resultados[p.id] || {}).fase === 'gerada').length
+  const podeUsar = molde && molde.tem_molde
+  return (
+    <div className="modal-bg" style={{ display: 'flex' }} onClick={onFechar}>
+      <div className="modal" style={{ maxWidth: 920 }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+          <FileText size={18} style={{ color: d.cor }} />
+          <div style={{ flex: 1 }}>
+            <h3 className="serif" style={{ fontSize: 16 }}>Gerar NF-e do painel</h3>
+            <div style={{ fontSize: 9, color: 'var(--faint)' }}>cria a nota como <b>Pendente</b> no Bling · não transmite ao Sefaz · a que falhar é pulada</div>
+          </div>
+          <div className="btn" onClick={onFechar}><X size={14} />Fechar</div>
+        </div>
+
+        {fase === 'molde' && <div className="glass" style={{ padding: 16, fontSize: 11, color: 'var(--dim)', display: 'flex', gap: 8, alignItems: 'center' }}><Loader2 size={14} className="animate-spin" /> verificando a nota-molde no Bling…</div>}
+
+        {fase === 'sem_molde' && (
+          <div className="glass" style={{ padding: 16, fontSize: 11, color: 'var(--dim)', lineHeight: 1.6, border: '1px solid rgba(224,162,60,.35)' }}>
+            <b style={{ color: 'var(--warn)' }}>Nenhuma nota encontrada para usar de molde.</b> A geração usa uma nota que você já emitiu como base fiel dos campos fiscais (natureza de operação, loja, série). Gere <b>1 nota manualmente no Bling</b> — ela vira o molde — e volte aqui.
+          </div>
+        )}
+
+        {podeUsar && (
+          <>
+            <div className="glass" style={{ padding: '10px 14px', marginBottom: 10, fontSize: 10, color: 'var(--dim)', display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+              <span>Molde: <b style={{ color: 'var(--fg)' }}>NF-e {molde.numero}</b></span>
+              {molde.natureza && <span>Natureza: <b style={{ color: 'var(--fg)' }}>{molde.natureza.descricao || molde.natureza.id}</b></span>}
+              {molde.loja && <span>Loja: <b style={{ color: 'var(--fg)' }}>{molde.loja.nome || molde.loja.id}</b></span>}
+              <span style={{ marginLeft: 'auto', color: 'var(--ok)' }}>{okGerados}/{fila.length} geradas</span>
+            </div>
+
+            {!fila.length && <div className="glass" style={{ padding: 16, fontSize: 11, color: 'var(--faint)', textAlign: 'center' }}>Nenhum pedido aguardando NF-e nesta etapa.</div>}
+
+            <div style={{ maxHeight: '52vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 7 }}>
+              {fila.map((p) => {
+                const R = resultados[p.id] || {}
+                const corpo = pedidoParaNfe(p)
+                const semCpf = !corpo.cliente.cpf_cnpj
+                const semItens = !corpo.itens.length
+                return (
+                  <div key={p.id} className="glass" style={{ padding: '9px 12px', border: R.fase === 'gerada' ? '1px solid rgba(47,217,141,.4)' : R.fase === 'falhou' || R.fase === 'erro' ? '1px solid rgba(255,84,112,.4)' : '1px solid var(--glass-border)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div className="num" style={{ fontSize: 11, fontWeight: 700 }}>#{p.id}</div>
+                        <div style={{ fontSize: 9, color: 'var(--faint)' }}>{corpo.cliente.nome} · {corpo.itens.length} item(ns) · {brl(p.receita)}</div>
+                      </div>
+                      {(semCpf || semItens) && <span className="chip" style={{ color: '#ffb8c5', background: 'rgba(255,84,112,.12)' }}>{semCpf ? 'sem CPF/CNPJ' : 'sem itens'}</span>}
+                      {R.fase === 'gerada'
+                        ? <span className="chip" style={{ color: 'var(--ok)', background: 'rgba(47,217,141,.14)' }}><Check size={10} />Pendente nº {R.nfe && R.nfe.numero}</span>
+                        : R.fase === 'gerando'
+                          ? <span className="chip" style={{ color: 'var(--dim)' }}><Loader2 size={10} className="animate-spin" />gerando…</span>
+                          : <>
+                            <div className="btn" style={{ fontSize: 9 }} onClick={() => conferir(p)}>{R.fase === 'conferindo' ? <Loader2 size={10} className="animate-spin" /> : <Eye size={10} />}Conferir</div>
+                            <div className="btn primary" style={{ fontSize: 9, opacity: semCpf || semItens ? 0.5 : 1 }} onClick={() => !(semCpf || semItens) && gerar(p)}><FileText size={10} color="#1a1008" />Gerar nota</div>
+                          </>}
+                    </div>
+                    {R.fase === 'conferido' && R.dry && (
+                      <pre style={{ marginTop: 7, padding: 9, background: 'rgba(0,0,0,.25)', borderRadius: 7, fontSize: 8.5, color: 'var(--dim)', whiteSpace: 'pre-wrap', maxHeight: 160, overflowY: 'auto' }}>{JSON.stringify(R.dry.corpo || R.dry, null, 2)}</pre>
+                    )}
+                    {(R.fase === 'falhou' || R.fase === 'erro') && (
+                      <div style={{ marginTop: 6, fontSize: 9, color: '#ffb8c5', lineHeight: 1.5 }}><b>Falhou (pulada):</b> {R.erro}</div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+
+            <div style={{ marginTop: 10, fontSize: 8.5, color: 'var(--faint)', lineHeight: 1.6 }}>
+              <b>Conferir</b> mostra o corpo da nota sem gerar nada. <b>Gerar nota</b> cria a Pendente no Bling. Depois, transmita ao Sefaz no Bling (ou pela função "Transmitir", quando ativarmos). Comece por 1 pedido para validar antes de fazer em série.
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function ModalSep({ filtrados, d, canal, onFechar, abrirMesa }) {
   const [porPedido, setPorPedido] = useState(false)
   const linhas = useMemo(() => {
