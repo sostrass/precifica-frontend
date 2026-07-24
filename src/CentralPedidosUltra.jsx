@@ -348,7 +348,7 @@ export default function CentralPedidosUltra() {
   const cargaEmCurso = useRef(null)
   const fundoRef = useRef(null)
   const idsRef = useRef(new Set())
-  const PCU_BUILD = 'v5.6 · 22/07'
+  const PCU_BUILD = 'v5.7 · 22/07'
 const POR_PAG = 10
   const d = CH[canal]
 
@@ -781,6 +781,16 @@ const POR_PAG = 10
   }
 
   // ————— GERAÇÃO DE NF-e (via API Bling POST /nfe) — conferência antes de gerar —————
+  const textoErro = (e) => {
+    if (!e) return 'erro desconhecido'
+    if (typeof e === 'string') return e
+    if (e.erro) return textoErro(e.erro)
+    if (e.erro_bling) return textoErro(e.erro_bling)
+    if (e.message) return e.message
+    if (Array.isArray(e)) return e.map(textoErro).join(' · ')
+    if (e.msg || e.description) return e.msg || e.description
+    try { return JSON.stringify(e) } catch (_) { return String(e) }
+  }
   const pedidoParaNfe = (p) => ({
     numero_loja: String(p.id),
     cliente: {
@@ -791,7 +801,9 @@ const POR_PAG = 10
     itens: (p.itens || []).map((i) => ({ sku: i.sku, descricao: i.nome, quantidade: i.qtd || 1, valor: i.preco || 0, ncm: i.ncm, cfop: i.cfop })),
   })
   const abrirGeracaoNfe = async () => {
-    const fila = filtrados.filter((p) => filaDe(p, canal, agoraTs) === 'nfe')
+    // respeita a seleção: se o usuário marcou pedidos, gera só os marcados; senão, a fila de NF-e inteira
+    const base = sel.size > 0 ? filtrados.filter((p) => sel.has(p.id)) : filtrados.filter((p) => filaDe(p, canal, agoraTs) === 'nfe')
+    const fila = base.length ? base : filtrados.filter((p) => filaDe(p, canal, agoraTs) === 'nfe')
     setNfeGer({ fila, molde: undefined, resultados: {}, fase: 'molde' })
     setModal('nfe')
     // molde + dados fiscais (CPF/CNPJ do comprador) em paralelo
@@ -815,10 +827,27 @@ const POR_PAG = 10
       }
     }
   }
-  const conferirNfe = async (p) => {
+  const conferirNfe = async (pIn) => {
+    let p = pIn
     setNfeGer((s) => ({ ...s, resultados: { ...s.resultados, [p.id]: { fase: 'conferindo' } } }))
-    try { const r = await api.nfeGerar(pedidoParaNfe(p), true); setNfeGer((s) => ({ ...s, resultados: { ...s.resultados, [p.id]: { fase: 'conferido', dry: r } } })) }
-    catch (e) { setNfeGer((s) => ({ ...s, resultados: { ...s.resultados, [p.id]: { fase: 'erro', erro: String(e.message || e) } } })) }
+    // busca o CPF/endereço fiscal na hora, se ainda não tiver (ML: vem do billing_info)
+    if (canal === 'ml' && !p.cpf) {
+      try {
+        const r = await api.mlDadosFiscais([p.id])
+        const d = (r?.mapa || {})[p.id]
+        if (d && d.ok && d.doc_numero) {
+          p = { ...p, cpf: d.doc_numero, clienteReal: d.nome || p.clienteReal, cidade: d.cidade || p.cidade, uf: d.estado || p.uf, cep: d.cep || p.cep, enderecoLinha: d.endereco || p.enderecoLinha, endereco: { ...(p.endereco || {}), completo: d.endereco, bairro: d.bairro } }
+          const pp = p
+          setNfeGer((s) => s ? { ...s, fila: s.fila.map((x) => x.id === pp.id ? pp : x) } : s)
+          setPedidos((prev) => prev ? prev.map((x) => x.id === pp.id ? pp : x) : prev)
+        } else if (d && !d.doc_numero) {
+          setNfeGer((s) => ({ ...s, resultados: { ...s.resultados, [pIn.id]: { fase: 'erro', erro: d.motivo_sem_doc || d.erro || 'comprador sem CPF/CNPJ no Mercado Livre' } } }))
+          return
+        }
+      } catch (e) { /* segue para o dry-run mostrar o que falta */ }
+    }
+    try { const r = await api.nfeGerar(pedidoParaNfe(p), true); setNfeGer((s) => ({ ...s, resultados: { ...s.resultados, [pIn.id]: { fase: 'conferido', dry: r } } })) }
+    catch (e) { setNfeGer((s) => ({ ...s, resultados: { ...s.resultados, [pIn.id]: { fase: 'erro', erro: textoErro(e) } } })) }
   }
   const gerarNfe = async (p) => {
     setNfeGer((s) => ({ ...s, resultados: { ...s.resultados, [p.id]: { ...(s.resultados[p.id] || {}), fase: 'gerando' } } }))
@@ -828,8 +857,8 @@ const POR_PAG = 10
         setNfeGer((s) => ({ ...s, resultados: { ...s.resultados, [p.id]: { fase: 'gerada', nfe: r } } }))
         setPedidos((prev) => prev ? prev.map((x) => x.id === p.id ? { ...x, nf: { numero: r.numero, id: r.nfe_id, situacao: r.situacao || 'pendente' }, nfDesconhecida: false } : x) : prev)
         notify(`Nota gerada (Pendente) do pedido ${p.id}. Confira no Bling e transmita.`, 'ok')
-      } else { setNfeGer((s) => ({ ...s, resultados: { ...s.resultados, [p.id]: { fase: 'falhou', erro: r.erro || JSON.stringify(r.erro_bling || r) } } })) }
-    } catch (e) { setNfeGer((s) => ({ ...s, resultados: { ...s.resultados, [p.id]: { fase: 'falhou', erro: String(e.message || e) } } })) }
+      } else { setNfeGer((s) => ({ ...s, resultados: { ...s.resultados, [p.id]: { fase: 'falhou', erro: textoErro(r.erro || r.erro_bling || r) } } })) }
+    } catch (e) { setNfeGer((s) => ({ ...s, resultados: { ...s.resultados, [p.id]: { fase: 'falhou', erro: textoErro(e) } } })) }
   }
 
   const baixarEtiquetas = async (soUm) => {
@@ -1904,28 +1933,46 @@ function ModalGerarNfe({ estado, d, canal, onFechar, conferir, gerar, pedidoPara
                 const corpo = pedidoParaNfe(p)
                 const semCpf = !corpo.cliente.cpf_cnpj
                 const semItens = !corpo.itens.length
+                const cli = corpo.cliente
+                const bloqueado = semCpf || semItens
                 return (
-                  <div key={p.id} className="glass" style={{ padding: '9px 12px', border: R.fase === 'gerada' ? '1px solid rgba(47,217,141,.4)' : R.fase === 'falhou' || R.fase === 'erro' ? '1px solid rgba(255,84,112,.4)' : '1px solid var(--glass-border)' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div className="num" style={{ fontSize: 11, fontWeight: 700 }}>#{p.id}</div>
-                        <div style={{ fontSize: 9, color: 'var(--faint)' }}>{corpo.cliente.nome} · {corpo.itens.length} item(ns) · {brl(p.receita)}</div>
+                  <div key={p.id} className="glass" style={{ padding: '11px 13px', border: R.fase === 'gerada' ? '1px solid rgba(47,217,141,.45)' : (R.fase === 'falhou' || R.fase === 'erro') ? '1px solid rgba(255,84,112,.45)' : '1px solid var(--glass-border)' }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 11, flexWrap: 'wrap' }}>
+                      {/* identidade do destinatário em destaque */}
+                      <div style={{ flex: 1, minWidth: 200 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 3 }}>
+                          <User size={13} style={{ color: cli.nome && cli.nome !== 'Consumidor final' ? d.cor : 'var(--faint)' }} />
+                          <b style={{ fontSize: 12.5 }}>{cli.nome || 'Consumidor final'}</b>
+                          {!semCpf && <span className="num" style={{ fontSize: 9, color: 'var(--dim)' }}>{cli.cpf_cnpj.length > 11 ? 'CNPJ' : 'CPF'} {cli.cpf_cnpj}</span>}
+                        </div>
+                        <div style={{ fontSize: 8.5, color: 'var(--faint)', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                          <span className="num">#{p.id}</span>
+                          <span>{corpo.itens.length} item(ns)</span>
+                          <span className="num">{brl(p.receita)}</span>
+                          {(cli.endereco.cidade || cli.endereco.uf) && <span>{[cli.endereco.cidade, cli.endereco.uf].filter(Boolean).join('/')}</span>}
+                        </div>
                       </div>
-                      {(semCpf || semItens) && <span className="chip" style={{ color: '#ffb8c5', background: 'rgba(255,84,112,.12)' }}>{semCpf ? 'sem CPF/CNPJ' : 'sem itens'}</span>}
-                      {R.fase === 'gerada'
-                        ? <span className="chip" style={{ color: 'var(--ok)', background: 'rgba(47,217,141,.14)' }}><Check size={10} />Pendente nº {R.nfe && R.nfe.numero}</span>
-                        : R.fase === 'gerando'
-                          ? <span className="chip" style={{ color: 'var(--dim)' }}><Loader2 size={10} className="animate-spin" />gerando…</span>
-                          : <>
-                            <div className="btn" style={{ fontSize: 9 }} onClick={() => conferir(p)}>{R.fase === 'conferindo' ? <Loader2 size={10} className="animate-spin" /> : <Eye size={10} />}Conferir</div>
-                            <div className="btn primary" style={{ fontSize: 9, opacity: semCpf || semItens ? 0.5 : 1 }} onClick={() => !(semCpf || semItens) && gerar(p)}><FileText size={10} color="#1a1008" />Gerar nota</div>
-                          </>}
+                      {/* estado / ações */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
+                        {bloqueado && <span className="chip" style={{ color: '#ffb8c5', background: 'rgba(255,84,112,.12)' }}><AlertTriangle size={9} />{semCpf ? 'sem CPF/CNPJ' : 'sem itens'}</span>}
+                        {R.fase === 'gerada'
+                          ? <span className="chip" style={{ color: 'var(--ok)', background: 'rgba(47,217,141,.14)' }}><Check size={10} />Pendente nº {R.nfe && R.nfe.numero}</span>
+                          : R.fase === 'gerando'
+                            ? <span className="chip" style={{ color: 'var(--dim)' }}><Loader2 size={10} className="animate-spin" />gerando…</span>
+                            : <>
+                              <div className="btn" style={{ fontSize: 9 }} onClick={() => conferir(p)}>{R.fase === 'conferindo' ? <Loader2 size={10} className="animate-spin" /> : <Eye size={10} />}Conferir</div>
+                              <div className="btn primary" style={{ fontSize: 9, opacity: bloqueado ? 0.45 : 1, cursor: bloqueado ? 'not-allowed' : 'pointer' }} onClick={() => !bloqueado && gerar(p)}><FileText size={10} color="#1a1008" />Gerar nota</div>
+                            </>}
+                      </div>
                     </div>
                     {R.fase === 'conferido' && R.dry && (
-                      <pre style={{ marginTop: 7, padding: 9, background: 'rgba(0,0,0,.25)', borderRadius: 7, fontSize: 8.5, color: 'var(--dim)', whiteSpace: 'pre-wrap', maxHeight: 160, overflowY: 'auto' }}>{JSON.stringify(R.dry.corpo || R.dry, null, 2)}</pre>
+                      <details style={{ marginTop: 8 }}>
+                        <summary style={{ fontSize: 9, color: 'var(--dim)', cursor: 'pointer' }}>ver corpo da nota que será gerada</summary>
+                        <pre style={{ marginTop: 6, padding: 9, background: 'rgba(0,0,0,.25)', borderRadius: 7, fontSize: 8.5, color: 'var(--dim)', whiteSpace: 'pre-wrap', maxHeight: 180, overflowY: 'auto' }}>{JSON.stringify(R.dry.corpo || R.dry, null, 2)}</pre>
+                      </details>
                     )}
                     {(R.fase === 'falhou' || R.fase === 'erro') && (
-                      <div style={{ marginTop: 6, fontSize: 9, color: '#ffb8c5', lineHeight: 1.5 }}><b>Falhou (pulada):</b> {R.erro}</div>
+                      <div style={{ marginTop: 7, padding: '7px 9px', borderRadius: 7, background: 'rgba(255,84,112,.08)', fontSize: 9, color: '#ffb8c5', lineHeight: 1.5 }}><b>{R.fase === 'erro' ? 'Não deu para conferir:' : 'Falhou (pulada):'}</b> {R.erro}</div>
                     )}
                   </div>
                 )
